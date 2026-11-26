@@ -105,6 +105,20 @@ def _sha1_chunks(chunks):
 
 
 # ===================================================================== the two cards
+def _fstab(reader):
+    """The system partition's /etc/fstab, b'' when there is no such file.  PAD-1619: a card Stern's updater
+    brought up to date has it as a link into /spk/packages, which is followed (its own bytes are the link text)."""
+    from . import ssh_card
+    from .card_extras import ExtrasError
+    try:
+        node = ssh_card.resolve(reader, "/etc/fstab")[1]
+    except ExtrasError:
+        return b""
+    if node is None or stat.S_IFMT(node["mode"]) != stat.S_IFREG or node["size"] > (1 << 20):
+        return b""
+    return bytes(reader.read_file_bytes(node))
+
+
 class _Tree:
     """One partition of one image, walked: ``{machine path: (kind, inode, signature)}``."""
 
@@ -405,8 +419,7 @@ def _open_spike2(build, rec, log):
         for n, mount in ((2, ROOT), (3, GAMES)):
             o, s = out_parts[n], src_parts[n]
             trees[mount] = (_Tree(Ext4Reader(fo, o[2], o[3]), mount), _Tree(Ext4Reader(fs, s[2], s[3]), mount))
-        fstab = trees[ROOT][0].get("/etc/fstab")
-        text = trees[ROOT][0].reader.read_file_bytes(fstab[1]) if fstab else b""
+        text = _fstab(trees[ROOT][0].reader)
         if not any(line.split()[:2] == [b"/dev/mmcblk0p3", b"/games"] for line in text.splitlines()
                    if line.strip() and not line.startswith(b"#")):
             raise SendError("This card doesn't mount its game partition the usual Spike 2 way; write the card "
@@ -2840,8 +2853,7 @@ def open_target(image, log=None):
                     trees[mount] = _Tree(reader, mount)
             if ROOT not in trees or GAMES not in trees:
                 raise SendError("This card's partitions aren't the usual Spike 2 layout.")
-            fstab = trees[ROOT].get("/etc/fstab")
-            text = trees[ROOT].reader.read_file_bytes(fstab[1]) if fstab else b""
+            text = _fstab(trees[ROOT].reader)
             if not any(line.split()[:2] == [b"/dev/mmcblk0p3", b"/games"] for line in text.splitlines()
                        if line.strip() and not line.startswith(b"#")):
                 raise SendError("This card doesn't mount its game partition the usual Spike 2 way.")

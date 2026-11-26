@@ -41,7 +41,7 @@ GROUP_IID = "::grp::"
 CHANGE_SCAN_NOTE = "  ·  still checking…"
 NOT_ON_CARD_MARK = "⚠ not on this card"
 SOURCES = ("All sources", "File", "Scene texture", "Radium", "Glyph",
-           "Boot screen")
+           "Boot screen", "Godot")
 CHANGE_FILTER_VALUES = ("All", "Changed", "Unchanged")
 #: (column, heading, default descending) - Tk's _image_sort_cfg.
 # Simon (2026-11-21): one Resolution column became four, short names with his words in their tooltips (the page's
@@ -88,6 +88,8 @@ def source_label(rel_path):
     parts = rel_path.replace("\\", "/").lower().split("/")
     if parts[:2] == ["images", "boot_screen"] and len(parts) > 2:
         return "Boot screen"
+    if parts[:2] == ["images", "godot"] and len(parts) > 2:
+        return "Godot"              # PAD-1621: the Godot game's pack
     if "scene_textures" in parts:
         if "glyphs" in parts:
             return "Glyph"
@@ -95,6 +97,16 @@ def source_label(rel_path):
             return "Radium"
         return "Scene texture"
     return "File"
+
+
+def _godot_label(folder):
+    """A Godot picture group's name: its folder in the Godot project without
+    the words every one has (``godot/scenes/capture_battle/gfx`` ->
+    ``Godot: capture_battle``)."""
+    parts = [p for p in folder.split("/")[1:] if p.lower() not in ("gfx",)]
+    if parts and parts[0].lower() == "scenes" and len(parts) > 1:
+        parts = parts[1:]
+    return "Godot: " + "/".join(parts) if parts else "Godot"
 
 
 def scan_image_groups(assets_path):
@@ -181,6 +193,14 @@ def scan_image_groups(assets_path):
         folder = card_dir or "(root)"
         label = folder.lstrip("/") or "(root)"
         groups.setdefault("images/" + cols[0], ("dir::" + folder, label, idx))
+    # PAD-1621: the Godot game's pictures (Pokemon's pokedex, battles), by the
+    # folder of the Godot project they come from
+    for idx, cols in enumerate(_rows("images", "godot", "manifest.txt")):
+        if len(cols) < 2:
+            continue
+        folder = cols[0].rsplit("/", 1)[0] if "/" in cols[0] else "godot"
+        groups.setdefault("images/" + cols[0], (
+            "godot::" + folder, _godot_label(folder), idx))
     return groups, occ, where
 
 
@@ -498,6 +518,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, PixelEditMixi
                  # no scenes to group by
                  shades_only=bool(getattr(mfr.capabilities, "dmd_shades",
                                           False)),
+                 # PAD-1612: Fonts… and Group by scene need scene trees
+                 # (Stern); JJP's loose pictures have none
+                 scenes=bool(getattr(mfr.capabilities, "scenes", False)),
                  empty={"text": EMPTY_NO_FOLDER, "busy": False})
         self._refresh_pillow()
         self._refresh_image_list()

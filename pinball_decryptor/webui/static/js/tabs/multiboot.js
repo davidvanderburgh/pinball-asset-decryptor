@@ -397,6 +397,7 @@ function CardCard({ s, w, busy }) {
       disabled=${mode === "cancelling"} title=${mode === "build" ? w.build_tip : w.cancel_tip}
       onClick=${() => call("multiboot.build_flash")}>${mode === "build" ? (w.build_text || "Build / flash card…") : mode === "cancel" ? w.cancel_text : w.cancelling_text}<//>
     ${w.emulate === false ? null : html`<${Button} disabled=${busy} onClick=${() => call("multiboot.run_emulator")}>Run in emulator<//>`}
+    ${w.menu_network ? html`<${MbGrow} busy=${busy} />` : null}
     ${w.extract ? html`<${Button} kind="ghost" disabled=${!s.recover_live} title=${w.recover_tip} onClick=${() => call("multiboot.recover")}>Recover images…<//>` : null}`;
   const bad = s.card_state === "bad";
   const noun = String(w.out_noun || "card");
@@ -584,6 +585,13 @@ function CardPreview({ card }) {
     <span class="small muted">${card.note}</span>`;
 }
 
+// Simon (2026-11-23/26): a TEST CARD entry on a game card - the test card screens as one of the menu's choices
+// (mkmulticard --test-entry), its files the Test card tab's list
+const TEST_ENTRY_TIP = { head: "TEST CARD entry", lines: [
+  "Adds TEST CARD as one of the menu's choices: it opens the test card screens (pictures, videos, scenes and sounds) without a separate test card. ACTION on the test card's top screen goes back to the games.",
+  "Its files are the Test card tab's list when the card is built, plus the default PAD test card. Remembered as the last choice like a game.",
+  "Not with editions (No menu: boot the edition ...)." ] };
+
 // Simon (2026-11-26): the boot menu on the network with no game running, as a test card is
 // (core/menu_network.py): the wired port and the Wi-Fi saved for both tabs, put on the card after it is written.
 // Saved at once (not with OK): it is the same Wi-Fi the Test card tab keeps.
@@ -604,6 +612,23 @@ function MbNetwork() {
     <${MenuWifi} saved=${st} address=${st.address} off=${st.multiboot ? "" : "Tick the box above first."}
       onSaved=${load} />
   <//>`;
+}
+
+// Simon (2026-11-26): "Add a Grow button to the Multi-boot tab" - the Test card tab's Grow on the machine
+// (core/testcard_grow.py), which grows whichever PAD card the machine runs; the machine's address as the Network
+// tab has it, read again when the pointer comes to the button
+const MB_GROW_TIP = { head: "Grow the card on the machine", lines: [
+  "Makes the games partition of the multi-boot card the machine is running as big as its SD card allows, over the network: nothing is written to an SD card here.",
+  "The machine restarts once and enlarges it while it starts up (a few minutes). Its games, test files, remote access and settings are kept.",
+  "Only a PAD multi-boot card or test card is grown; a one-game card is refused." ] };
+
+function MbGrow({ busy }) {
+  const [addr, setAddr] = useState("");
+  const load = async () => { try { setAddr((await call("testcard.menu_wifi")).address || ""); } catch (e) { /* keep */ } };
+  useEffect(() => { load(); }, []);
+  const why = busy ? "" : addr ? "" : "Find the machine on the Network tab first";
+  return html`<span onMouseEnter=${load}><${Button} disabled=${busy || !addr} title=${why || MB_GROW_TIP}
+    onClick=${() => call("testcard.grow")}>Grow on the machine…<//></span>`;
 }
 
 // --------------------------------------------------------- Menu settings…
@@ -698,6 +723,12 @@ function MenuDialog({ s, w }) {
       </div>
     <//>
     ${w.menu_network ? html`<${MbNetwork} />` : null}
+    ${w.test_entry ? html`<${Box} legend="Test card">
+      <${Check} ns=${NS} k="test_entry" checked=${s.test_entry} wrap
+        label="Add a TEST CARD entry to the menu (the Test card tab's list, and the default PAD test card)"
+        title=${TEST_ENTRY_TIP} />
+      <span class="small muted">The list is the one on the Test card tab, as it is when the card is built; it goes on the card with the games, so the card needs room for it.</span>
+    <//>` : null}
     </div>
   <//>`;
 }

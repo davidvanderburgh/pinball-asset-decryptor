@@ -980,6 +980,10 @@ class MultibootForm:
     # and flip_guard=, the seconds the flippers must have been off (no game on) before that hold counts
     boot_menu: str = "menu"
     flip_guard: int = 60
+    # Simon (2026-11-26): "Start the TEST CARD entry" - a TEST CARD entry in the menu (mkmulticard --test-entry): the
+    # Test card tab's list, staged by the panel before the run (test_specs: selectmedia's --test arguments)
+    test_entry: bool = False
+    test_specs: tuple = ()
     #: The line across the top of the menu (C FB, PAD-135: "Can there be an
     #: option to change this text?").  '' is a real answer and means no line at
     #: all, so the field always names what the card will say - the selector's
@@ -2892,6 +2896,9 @@ def prepare_args(form, media_dir, visual_only=False):
                      % (i, confirm_spec(form.images[ri]) if mi is None else "none")]
         # the menu's own picture never shows them: the preview leaves them out
         args += test_args(form)
+        # the TEST CARD entry's files (the Test card tab's list, staged by the panel)
+        if getattr(form, "test_entry", False):
+            args += list(getattr(form, "test_specs", ()) or ())
     args += ["--volume", str(int(form.volume))]
     return args
 
@@ -2994,7 +3001,10 @@ def flip_args(form):
     to reinvoke the flippers ... No menu appears, available only through flippers")."""
     if backend_for(form).key != "stern":
         return []                       # the right flipper reads a Spike 2 node bus; other makers' cards are as they were
-    return ["--boot-menu", str(form.boot_menu or "menu"), "--flip-guard", str(int(form.flip_guard))]
+    return (["--boot-menu", str(form.boot_menu or "menu"), "--flip-guard", str(int(form.flip_guard))]
+            # the TEST CARD entry (Stern cards only, as the tab offers it): on, or taken off a card that has one
+            # (build, update and inject all take both)
+            + (["--test-entry"] if getattr(form, "test_entry", False) else ["--no-test-entry"]))
 
 
 def build_args(form):
@@ -4153,6 +4163,8 @@ def form_wants_media(form):
         for v in (art, anim, r.music):
             if (v or "").strip().strip('"').lower() not in ("", "none"):
                 return True
+    if getattr(form, "test_entry", False) and getattr(form, "test_specs", ()):
+        return True                                     # the TEST CARD entry's files travel in the media set
     return any((v or "").strip().strip('"').lower() not in ("", "none")
                for v in (form.sound_move, form.sound_confirm))
 
@@ -5068,6 +5080,7 @@ def form_from_inspect(info, card, media_dir="", selector_dir=None, platform="ste
         volume=_int_of("volume", 50), timeout=_int_of("timeout", 15),
         back_hold=_int_of("back_hold", 3),
         boot_menu=(info.get("boot_menu") if info.get("boot_menu") in BOOT_MENUS else "menu"),
+        test_entry=bool(info.get("test_entry")),
         flip_guard=(_int_of("flip_guard", 60) if _int_of("flip_guard", 60) in FLIP_GUARDS else 60),
         machine_volume=(info.get("volume") == "machine"),
         compact=(info.get("layout") == "store"),
@@ -5123,7 +5136,9 @@ MENU_FIELD_ORDER = ("title", "subtitle", "art", "animation", "music",
                     "high scores",
                     # the right flipper back to the menu (Simon, 2026-11-22): a change of either on a loaded card
                     # is one an Update in place carries - unlisted here it read "No change pending"
-                    "boot menu", "after a game")
+                    "boot menu", "after a game",
+                    # ...and the TEST CARD entry (Simon, 2026-11-26)
+                    "TEST CARD entry")
 
 #: Of those, the ones the media has to be rendered again for.
 MEDIA_FIELDS = ("art", "animation", "music", "move sound", "confirm sound")
@@ -5180,6 +5195,8 @@ def _menu_fields(before, after):
             changed.add(name)
     if (before.heading or "").strip() != (after.heading or "").strip():
         changed.add("heading")
+    if bool(getattr(before, "test_entry", False)) != bool(getattr(after, "test_entry", False)):
+        changed.add("TEST CARD entry")
     if (before.boot_menu or "menu") != (after.boot_menu or "menu"):
         changed.add("boot menu")
     if bool(before.same_text_size) != bool(after.same_text_size):
@@ -5240,6 +5257,11 @@ def media_specs_changed(before, after):
     art, animation, music and the two sounds.  The volume is not here: it
     reaches the card through images.conf, which the inject writes."""
     if len(before.images) != len(after.images):
+        return True
+    # the TEST CARD entry's files ride in the media set, and the Test card tab's list may have changed since the
+    # card was written: with the entry on, the media is always made again (first real update, 2026-11-26: the entry
+    # went on with no files)
+    if getattr(after, "test_entry", False):
         return True
     return any(f in MEDIA_FIELDS for f in _menu_fields(before, after))
 
@@ -5823,6 +5845,7 @@ def menu_from_state(menu):
             "timeout": max(0, _as_int("timeout", 15)),
             "back_hold": max(0, _as_int("back_hold", 3)),
             "boot_menu": menu.get("boot_menu") if menu.get("boot_menu") in BOOT_MENUS else "menu",
+            "test_entry": bool(menu.get("test_entry", False)),
             "flip_guard": _as_int("flip_guard", 60) if _as_int("flip_guard", 60) in FLIP_GUARDS else 60,
             # A STATE WRITTEN BEFORE THE FIELD EXISTED has no key, and the
             # menu it describes said SELECT GAME CODE - so the absent key is
@@ -7625,6 +7648,9 @@ class MultibootPanel:
         self._timeout_var = tk.StringVar(value="15")
         self._back_hold_var = tk.StringVar(value="3")
         self._boot_menu_var = tk.StringVar(value="menu")
+        #: the TEST CARD entry (Simon, 2026-11-26), off as a card has it until asked
+        self._test_entry_var = tk.BooleanVar(value=False)
+        self._test_specs = ()
         self._flip_guard_var = tk.StringVar(value="60")
         #: The line across the top of the menu (PAD-135).  It STARTS as the
         #: selector's own wording rather than empty, because the box has to
@@ -7722,7 +7748,7 @@ class MultibootPanel:
         # follows every keystroke while a card is loaded.
         for var in (self._move_var, self._confirm_var, self._volume_var,
                     self._machine_vol_var, self._timeout_var, self._back_hold_var,
-                    self._boot_menu_var, self._flip_guard_var,
+                    self._boot_menu_var, self._flip_guard_var, self._test_entry_var,
                     self._heading_var, self._same_text_var, self._counter_var,
                     self._settings_var, self._editions_var,
                     self._countdown_word_var, self._footer_var,
@@ -7922,6 +7948,7 @@ class MultibootPanel:
                     self._ed_roll_norepeat) + self._ed_media_vars + (
                     self._move_var, self._confirm_var, self._volume_var,
                     self._timeout_var, self._back_hold_var, self._boot_menu_var, self._flip_guard_var,
+                    self._test_entry_var,
                     self._heading_var, self._same_text_var,
                     self._counter_var, self._settings_var, self._editions_var,
                     self._tests_var, self._countdown_word_var,
@@ -7966,7 +7993,8 @@ class MultibootPanel:
         # its answer back through the same queue, and a drain that stopped
         # rescheduling while one was out left the row silently never
         # updating.
-        if (self._busy or self._pv_busy or self._probe_busy or getattr(self, "_net_busy", False)
+        if (self._busy or self._pv_busy or self._probe_busy or getattr(self, "_stage_busy", False)
+                or getattr(self, "_net_busy", False)
                 or self._colour_reading or not self._queue.empty()):
             try:
                 self._drain_job = self._timer().after(self.DRAIN_MS,
@@ -9916,6 +9944,7 @@ class MultibootPanel:
             self._timeout_var.set("15")
             self._back_hold_var.set("3")
             self._boot_menu_var.set("menu")
+            self._test_entry_var.set(False)
             self._flip_guard_var.set("60")
             self._heading_var.set(DEF_HEADING)
             self._same_text_var.set(True)
@@ -10497,7 +10526,8 @@ class MultibootPanel:
                               for role, var in self._color_vars.items()},
                              self._tests_var.get(),
                              self._back_hold_var.get(),
-                             self._boot_menu_var.get(), self._flip_guard_var.get())
+                             self._boot_menu_var.get(), self._flip_guard_var.get(),
+                             self._test_entry_var.get())
         self._menu_dialog = MenuSettingsDialog(self, len(self._rows))
         self._music_aside()
         return self._menu_dialog.show()
@@ -10512,7 +10542,7 @@ class MultibootPanel:
         if self._menu_backup is not None:
             (move, confirm, vol, machine, timeout, heading, same_text,
              counter, settings, editions, word, foot_on, foot_text, default, selector,
-             theme, colors, tests, back_hold, boot_menu, flip_guard) = self._menu_backup
+             theme, colors, tests, back_hold, boot_menu, flip_guard, test_entry) = self._menu_backup
             self._menu_backup = None
             self._move_var.set(move)
             self._confirm_var.set(confirm)
@@ -10522,6 +10552,7 @@ class MultibootPanel:
             self._back_hold_var.set(back_hold)
             self._boot_menu_var.set(boot_menu)
             self._flip_guard_var.set(flip_guard)
+            self._test_entry_var.set(test_entry)
             self._heading_var.set(heading)
             self._same_text_var.set(same_text)
             self._counter_var.set(counter)
@@ -10723,6 +10754,8 @@ class MultibootPanel:
             timeout=_int(self._timeout_var, 15),
             back_hold=_int(self._back_hold_var, 3),
             boot_menu=(self._boot_menu_var.get() if self._boot_menu_var.get() in BOOT_MENUS else "menu"),
+            test_entry=bool(self._test_entry_var.get()),
+            test_specs=tuple(self._test_specs) if self._test_entry_var.get() else (),
             flip_guard=_int(self._flip_guard_var, 60),
             # NOT `or DEF_HEADING`: an empty box is a menu with no heading,
             # which is a thing somebody can ask for (PAD-135)
@@ -10918,6 +10951,7 @@ class MultibootPanel:
                      "timeout": _int(self._timeout_var, 15),
                      "back_hold": _int(self._back_hold_var, 3),
                      "boot_menu": self._boot_menu_var.get(),
+                     "test_entry": bool(self._test_entry_var.get()),
                      "flip_guard": _int(self._flip_guard_var, 60),
                      "heading": self._heading_var.get().strip(),
                      "same_text_size": bool(self._same_text_var.get()),
@@ -11047,6 +11081,7 @@ class MultibootPanel:
             self._timeout_var.set(str(menu["timeout"]))
             self._back_hold_var.set(str(menu.get("back_hold", 3)))
             self._boot_menu_var.set(str(menu.get("boot_menu", "menu")))
+            self._test_entry_var.set(bool(menu.get("test_entry", False)))
             self._flip_guard_var.set(str(menu.get("flip_guard", 60)))
             self._heading_var.set(menu["heading"])
             # a document written before the tick existed is a menu the
@@ -11755,6 +11790,7 @@ class MultibootPanel:
             self._timeout_var.set(str(int(form.timeout)))
             self._back_hold_var.set(str(int(form.back_hold)))
             self._boot_menu_var.set(str(form.boot_menu or "menu"))
+            self._test_entry_var.set(bool(getattr(form, "test_entry", False)))
             self._flip_guard_var.set(str(int(form.flip_guard)))
             self._heading_var.set(form.heading)
             self._same_text_var.set(bool(form.same_text_size))
@@ -11914,6 +11950,7 @@ class MultibootPanel:
             self._timeout_var.set(str(menu["timeout"]))
             self._back_hold_var.set(str(menu.get("back_hold", 3)))
             self._boot_menu_var.set(str(menu.get("boot_menu", "menu")))
+            self._test_entry_var.set(bool(menu.get("test_entry", False)))
             self._flip_guard_var.set(str(menu.get("flip_guard", 60)))
             self._heading_var.set(menu["heading"])
             self._same_text_var.set(bool(menu.get("same_text_size", True)))
@@ -12514,6 +12551,11 @@ class MultibootPanel:
             if do_flash:
                 self._flash()
             return
+        if self._test_entry_var.get() and not getattr(self, "_test_staged", False):
+            # Simon (2026-11-26): the TEST CARD entry carries the Test card tab's list - staged first (pictures and
+            # videos converted as that tab converts them), then this same Start runs on
+            return self._stage_test_entry(lambda: self._do_build_flash(do_write, do_flash))
+        self._test_staged = False
         action = self._write_plan()["action"]
         # A card just BUILT, or UPDATED (game files rewritten inside it), is
         # on no SD card yet, so it reaches the flash dialog as fresh and is
@@ -12528,6 +12570,44 @@ class MultibootPanel:
             self.update_card(after=after)
         else:
             self._build_card(after=after)
+
+    def _stage_test_entry(self, go):
+        """The Test card tab's list (webui/testcard_core.py) staged for the TEST CARD entry, on a thread; then
+        *go* on the main loop with :attr:`_test_specs` set (selectmedia's --test arguments).  An empty list goes
+        on as the default PAD test card alone."""
+        import shutil
+        from . import testcard_core as tc
+        items = list(tc.shared().items)
+        folder = os.path.join(tempfile.gettempdir(), "pad_multiboot_testcard")
+        self._ok("Getting the TEST CARD entry's %d file%s ready\u2026" % (len(items), "" if len(items) == 1 else "s"))
+        self._stage_busy = True
+
+        def log(text):
+            self._ui(lambda: self._log_sink("[test card] " + text))
+
+        def run():
+            try:
+                shutil.rmtree(folder, ignore_errors=True)
+                staged = tc.stage(items, folder, None, log=log, clips=True) if items else []
+                specs = tuple(tc.test_specs(staged, wsl))
+            except Exception as exc:                        # noqa: BLE001 - reported, never lost
+                err = str(exc)
+
+                def failed():
+                    self._stage_busy = False
+                    self._error("The TEST CARD entry's files could not be got ready: %s" % err)
+                self._ui(failed)
+                return
+
+            def fin():
+                self._stage_busy = False
+                self._test_specs = specs
+                self._test_staged = True
+                go()
+            self._ui(fin)
+
+        threading.Thread(target=run, daemon=True).start()
+        self._kick_drain()
 
     def _with_menu_network(self, after):
         """Simon (2026-11-26): a multi-boot card on the network while its menu shows, as a test card is

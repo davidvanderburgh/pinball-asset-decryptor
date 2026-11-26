@@ -248,6 +248,16 @@ if [ -n "${PAD_CARD:-}" ]; then
             echo "[select] menu: $SEL_N = $tok ${t%%|*} ($d)"
             SEL_N=$((SEL_N + 1))
         done <<< "$SEL_LIST"
+        # THE TEST CARD ENTRY (Simon, 2026-11-23: "a 1.16 vanilla plus the test card"): the
+        # card's image=testcard line is a menu entry with no games tree, always the last
+        # line, so it goes over as it is and counts toward a menu - one game and the entry
+        # is a menu.  SEL_TESTENTRY carries its test_dir= / test_*= lines below.
+        SEL_TESTENTRY=$(printf '%s\n' "$SEL_CARDCONF" | grep -m1 -E '^[[:space:]]*image[[:space:]]*=[[:space:]]*testcard[[:space:]]*\|')
+        if [ -z "$SEL_GIVEUP" ] && [ -n "$SEL_TESTENTRY" ]; then
+            SEL_IMAGES="${SEL_IMAGES}$(printf '%s' "$SEL_TESTENTRY" | sed 's/^[[:space:]]*//')"$'\n'
+            echo "[select] menu: $SEL_N = the TEST CARD entry (files in /games/padtest)"
+            SEL_N=$((SEL_N + 1))
+        fi
         fi
         # ★ THE DECISION AND THE MENU ARE COUNTED FROM DIFFERENT THINGS, so
         # reconcile them HERE (2026-09-02). "Does this card boot into a menu"
@@ -369,6 +379,10 @@ if [ -n "${PAD_CARD:-}" ]; then
             # which this menu (the start-up screen, the right flipper's line) and padmenu.so both read.
             printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|back_hold|boot_menu|flip_hold|flip_guard|color_[a-z_]+)[[:space:]]*=' \
                 | grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true
+            # ...and the TEST CARD entry's lists, which it is nothing without
+            if [ -n "${SEL_TESTENTRY:-}" ]; then
+                printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(test_dir|test|test_image|test_video|test_scene|test_sound)[[:space:]]*=' || true
+            fi
             # ★ PAD-307: EACH IMAGE'S BUILT COLOR PROFILE, the lines that put the SETTINGS tile
             # in the menu. They name IMAGE INDEXES, so they ride on the group lines' gate: only
             # when the card's image lines and what resolved here are the same count, or a line
@@ -817,6 +831,13 @@ for m in games data dump; do mount --bind "$R/$m" "$R/$m"; done
 if [ -n "$CARD_SRC" ]; then
     mount --bind "$CARD_SRC" "$R/games/$GAME" \
         || { echo "[run] could not bind the card at $CARD_SRC" >&2; exit 1; }
+    # THE TEST CARD ENTRY's files (Simon, 2026-11-23): /games/padtest on the card's games
+    # partition, beside the title directory, which is all the bind above shows
+    if [ -n "$SEL_DIRS" ] && [ -d "$(dirname "$CARD_SRC")/padtest" ]; then
+        mkdir -p "$R/games/padtest" \
+            && mount --bind "$(dirname "$CARD_SRC")/padtest" "$R/games/padtest" \
+            || echo "[run] could not show the TEST CARD entry's files at /games/padtest" >&2
+    fi
 fi
 
 # real host char devices
@@ -908,7 +929,18 @@ if [ -n "$SEL_DIRS" ]; then
     # this keyboard, and its own on-screen footer names both - a log that
     # named only "1" sent the person at the PC looking for the wrong key.
     echo "[select] menu up: LEFT/RIGHT flipper (arrows) move, START (1) or ACTION (Space) confirms; auto-boot in ${PAD_SELECT_TIMEOUT:-30} s"
-    chroot "$R" $SEL_BIN --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_FONT $SEL_INV $SEL_PICK </dev/null
+    # A TEST CARD's clips play through the game's own video chain (Simon, 2026-11-22;
+    # codeselect/gstclip.c), which here is the PC's decoder behind padgst.so - the
+    # video bridge alone, never hwshim (see "NO LD_PRELOAD" above).  The same for a
+    # card with the TEST CARD entry (2026-11-23).
+    SEL_ENV=""
+    if { [ "${PAD_TESTCARD:-0}" = 1 ] || grep -qE '^image=testcard\|' "$R/dump/codeselect.conf" 2>/dev/null; } \
+        && [ "${PAD_VID:-0}" = 1 ] && [ -f "$R/lib/padgst.so" ]; then
+        SEL_ENV="LD_PRELOAD=/lib/padgst.so"
+        echo "[select] test card: clips play through the video host (padgst.so)"
+    fi
+    # env only when there is something to preload: every other menu run starts as before
+    chroot "$R" ${SEL_ENV:+/usr/bin/env $SEL_ENV} $SEL_BIN --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_FONT $SEL_INV $SEL_PICK </dev/null
     SEL_RC=$?
     # ★ A KILLED SELECTOR IS A STOP, NOT A CHOICE (item 90, 2026-09-02).
     #

@@ -143,6 +143,17 @@
  *                            correction for its image= lines' color_profile=,
  *                            Test pictures) from power-up to power-off, with
  *                            no way back to a menu and no idle exit
+ *   image=testcard|<title>|<subtitle>  THE TEST CARD ENTRY on a game card
+ *                            (Simon, 2026-11-23: "a 1.16 vanilla plus the test
+ *                            card").  An image line whose device is the word
+ *                            `testcard` boots nothing: choosing it (by hand,
+ *                            the countdown, or a card with no menu at power-up)
+ *                            opens the test card screens, and ACTION on their
+ *                            top screen comes back to the menu.  It is an image
+ *                            like any other otherwise - default= can name it and
+ *                            the last-choice file remembers it - so "start on the
+ *                            test card" is default=<its index>.  Its files are
+ *                            in test_dir= (mkmulticard --test-entry: /games/padtest)
  *   test=<file>|<label>      one of the card's own test items (PAD-1279), up
  *                            to CONF_MAX_TESTS: a PNG, an animated GIF or a
  *                            WAV in the media directory, shown or played by
@@ -333,6 +344,8 @@ struct conf {
     int ncolour;                     /* images with a usable color_profile= line */
     struct conf_test test[CONF_MAX_TESTS];   /* test= lines, in order (PAD-1279) */
     int ntest;
+    int ntest_flat;                  /* ...of them plain test= lines (Settings > Test pictures);
+                                        the rest, test_<kind>=, are the test card's own lists */
     int testcard;                    /* testcard=on: a TEST CARD, no menu, nothing boots (PAD-1279) */
     int boot_menu;                   /* boot_menu= BOOT_MENU_* (Simon, 2026-11-22) */
     int flip_hold;                   /* flip_hold= seconds (5) */
@@ -412,6 +425,9 @@ int conf_card_of_image(const struct conf *c, int i);
 int conf_card_boots(const struct conf *c, int k);
 /* is card `k` the SETTINGS tile (PAD-307)? */
 int conf_card_is_settings(const struct conf *c, int k);
+/* the device word of the TEST CARD ENTRY, and is image `i` it? */
+#define CONF_TESTCARD_DEVICE "testcard"
+int conf_image_is_testcard(const struct conf *c, int i);
 
 /* how many images card `k` can boot (1 for a plain card), and the m'th of
  * them (-1 when out of range) */

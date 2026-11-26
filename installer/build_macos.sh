@@ -233,6 +233,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_games" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_keys" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_requests" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_godot" \
+    --hidden-import "pinball_decryptor.plugins.stern.godot_pck" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_sound" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_spk" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_sound" \
@@ -270,6 +272,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.ret_use" \
     --hidden-import "pinball_decryptor.plugins.stern.picture_sizes" \
     --hidden-import "pinball_decryptor.plugins.stern.video_sizes" \
+    --hidden-import "pinball_decryptor.plugins.stern.layered_test" \
     --hidden-import "pinball_decryptor.plugins.stern.fontrender" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_layout" \
     --hidden-import "pinball_decryptor.plugins.stern.scene_render" \
@@ -397,6 +400,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_games" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_keys" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_requests" \
+    --hidden-import "pinball_decryptor.plugins.stern.spike3_godot" \
+    --hidden-import "pinball_decryptor.plugins.stern.godot_pck" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_selfextract" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_sound" \
     --hidden-import "pinball_decryptor.plugins.stern.spike3_spk" \

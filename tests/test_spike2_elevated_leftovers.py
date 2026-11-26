@@ -517,7 +517,7 @@ def test_the_card_mountpoint_is_asked_before_mkdir_runs():
 
 
 @pytest.mark.parametrize("script,path", [
-    ("build.sh", '"$R/lib/hwshim.so" "$PAD_SHIM_STAMP"'),
+    ("build.sh", '"$R/lib/hwshim.so" "$R/lib/padgst.so" "$PAD_SHIM_STAMP"'),
     ("buildbridge.sh", '"$PAD_GLHOST_BIN" "$PAD_GLHOST_STAMP"'),
     ("cardmount.sh", '-R "$PREFIX"'),
 ])

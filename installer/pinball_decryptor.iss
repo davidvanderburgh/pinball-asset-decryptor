@@ -89,22 +89,7 @@ Source: "{#PythonDir}\*"; DestDir: "{app}\python"; Flags: recursesubdirs ignorev
 ; clonezilla helpers and ARE included via recursesubdirs.
 Source: "{#ProjectDir}\pinball_decryptor\*"; DestDir: "{app}\pinball_decryptor"; \
     Flags: recursesubdirs ignoreversion; \
-    Excludes: "__pycache__\*,*.pyc,*.pyo,williams\vendor\DCSExplorer.exe,williams\vendor\DCSEncoder.exe"
-
-; --- DCS sound tools, written once and then left alone (PAD-1606) ---------
-; Antivirus programs flag DCSExplorer.exe / DCSEncoder.exe by mistake
-; (PAD-1391), and a freshly written copy is what they catch: every update
-; wrote them again, so users turned the scanner off to update.  They are
-; the unchanged upstream v1.1 tools and do not differ between versions, so
-; an install over the top keeps the copy already there (onlyifdoesntexist),
-; and the in-app update's staged install skips them when the running
-; install has them (KeptAsInstalled): core/update_slots.py carry_over
-; hard-links that same file into the new folder instead.  If a newer
-; upstream release is ever bundled, drop these rules for that version.
-Source: "{#ProjectDir}\pinball_decryptor\plugins\williams\vendor\DCSExplorer.exe"; DestDir: "{app}\pinball_decryptor\plugins\williams\vendor"; \
-    Flags: ignoreversion onlyifdoesntexist; Check: KeptAsInstalled('pinball_decryptor\plugins\williams\vendor\DCSExplorer.exe')
-Source: "{#ProjectDir}\pinball_decryptor\plugins\williams\vendor\DCSEncoder.exe"; DestDir: "{app}\pinball_decryptor\plugins\williams\vendor"; \
-    Flags: ignoreversion onlyifdoesntexist; Check: KeptAsInstalled('pinball_decryptor\plugins\williams\vendor\DCSEncoder.exe')
+    Excludes: "__pycache__\*,*.pyc,*.pyo"
 
 ; --- Spike 3 LUKS2 verifier/decryptor -----------------------------------
 ; stern/spike3.py loads this repo tool by path at run time (_luks_otp(): four
@@ -343,12 +328,14 @@ Filename: "{app}\python\python.exe"; Parameters: """{app}\tools\spike2_emu\vpx\p
 ; takes the two shortcuts away rather than leave them starting nothing.
 Type: files; Name: "{group}\Visual Pinball setup.lnk"; Check: not IsStaged
 Type: files; Name: "{group}\Visual Pinball kit (padvpx).lnk"; Check: not IsStaged
-
-[UninstallDelete]
-; PAD-1606: DCS tools a staged update hard-linked in are in no uninstall
-; log of their own.
+; PAD no longer ships mjrgh's DCSExplorer.exe / DCSEncoder.exe: antivirus
+; programs flag them by mistake, which made users switch the scanner off to
+; update PAD.  The first DCS sound job downloads them, pinned by hash, into
+; the payload cache (PAD-1606); an install over an older one drops its copies.
 Type: files; Name: "{app}\pinball_decryptor\plugins\williams\vendor\DCSExplorer.exe"
 Type: files; Name: "{app}\pinball_decryptor\plugins\williams\vendor\DCSEncoder.exe"
+
+[UninstallDelete]
 ; Wipe Python bytecode caches so the install dir is clean before removal.
 Type: filesandordirs; Name: "{app}\pinball_decryptor\__pycache__"
 Type: filesandordirs; Name: "{app}\pinball_decryptor\core\__pycache__"
@@ -403,25 +390,6 @@ end;
 function IsStaged(): Boolean;
 begin
   Result := ExpandConstant('{param:STAGED|0}') = '2';
-end;
-
-{ PAD-1606: False (do not write the file) in a staged install when the
-  running install - the folder this one is beside, <app> for <app>.next -
-  already has Rel: core/update_slots.py carry_over hard-links that copy in,
-  so an antivirus that flags the file sees nothing new written.  True
-  otherwise; an install over the top then keeps an existing copy by its
-  onlyifdoesntexist flag. }
-function KeptAsInstalled(Rel: String): Boolean;
-var
-  Live: String;
-begin
-  Result := True;
-  if IsStaged() then
-  begin
-    Live := ExpandConstant('{app}');
-    if Lowercase(Copy(Live, Length(Live) - 4, 5)) = '.next' then
-      Result := not FileExists(Copy(Live, 1, Length(Live) - 5) + '\' + Rel);
-  end;
 end;
 
 { ----------------------------------------------------------------- WSL2

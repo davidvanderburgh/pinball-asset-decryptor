@@ -76,6 +76,8 @@ NAMES = (
     _n("pad-modes-", STERN, "Modes tab scratch"),
     _n("pad-card-modes-", STERN, "modes read from a card"),
     _n("pad_testcard_", STERN, "Test card staging"),
+    # Simon (2026-11-26): the Multi-boot tab's TEST CARD entry - the Test card tab's list staged for the build
+    _n("pad_multiboot_testcard", STERN, "Multi-boot TEST CARD entry staging", exact=True),
     _n("pad_cabstock_", STERN, "cabinet lights staging"),
     _n("pad_cabrec_", STERN, "cabinet lights recording"),
     _n("pad_sidx_", STERN, "sound index hand-over"),
@@ -105,6 +107,7 @@ NAMES = (
     _n("jjp_", "Jersey Jack Pinball", "staging"),
     _n("pad-ra-", "Jersey Jack Pinball", "remote access staging"),
     _n("pad_jjp_usb_", "Jersey Jack Pinball", "USB stick hand-over"),
+    _n("pad_jjp_pic_", "Jersey Jack Pinball", "replacement image recompress"),
     _n("pad_sam_", "Williams / Stern SAM", "ROM capture staging"),
     _n("pad_ap_playfield.log", "American Pinball", "playfield log",
        exact=True),

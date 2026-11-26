@@ -11,6 +11,8 @@
 #include "testpics.h"
 #include "art.h"
 #include "video.h"
+#include "gstclip.h"
+#include "overlay.h"
 #include "log.h"
 
 /* PAD-1586: the buttons the footers name. A Spike 3 machine's menu reads only the coin door
@@ -115,6 +117,23 @@ struct state {
     struct audio_clip *t_vsound;             /* ...and its sound */
     int t_vloops;                            /* its loops so far: a new one restarts the sound */
     long long t_vstart;                      /* when it last started */
+    struct ovl *t_ovl;                       /* the scene over it (overlay.h), or NULL */
+    int t_gpu;                               /* the graphics chip draws the clip (test_gpu) */
+    int t_vw, t_vh;                          /* ...at this size, centred (0: no frame yet) */
+    long long t_vk;                          /* ...and the clip's frame number on screen (-1: none) */
+    /* THE CAPTION'S FPS over the last two seconds (the table, 2026-11-25: since the start,
+     * the slow first second read 5-10 and a freeze read 22-24 on a clip at 30) */
+#define FPS_WIN 8
+    long long t_fw_t[FPS_WIN];
+    int t_fw_s[FPS_WIN], t_fw_i, t_fw_n;
+    long long t_fw_due, t_cap_due;
+    const struct art_image *t_ovl_shown;     /* the scene's picture on the canvas now */
+    long long t_perf_due, t_draw_ms;         /* the video's 5 s account in the log */
+    int t_draws;
+    /* Simon (2026-11-22): on a moving test item "quick press to freeze, long press to back
+     * out" with the button that backs out of a test (ACTION on a test card) */
+    int t_frozen;                            /* the frame shown is held */
+    long long t_act_down;                    /* when ACTION went down on a moving item, 0: not */
     /* the TEST CARD menu and its lists (PAD-1279) */
     int menu_sel;
     int pick_sel, pick_top;
@@ -410,11 +429,30 @@ static const char *test_name(const struct state *st, int k)
     return st->t_from == S_COLOR ? "Back to color correction" : "Back to settings";
 }
 
+static int test_moves(const struct state *st);
+
+static void fps_reset(struct state *st);
+static void draw_caption(struct state *st, int visual);
+
 static void test_unload(struct state *st)
 {
     if (st->t_img) { art_image_free(st->t_img); st->t_img = NULL; }
     if (st->t_anim) { art_anim_free(st->t_anim); st->t_anim = NULL; }
-    if (st->t_vid) { vid_close(st->t_vid); st->t_vid = NULL; }
+    if (st->t_vid) {
+        int shown = 0, dropped = 0;
+        vid_stats(st->t_vid, &shown, &dropped);
+        sel_log("test: the video ran %lld ms: %d frames shown, %d late, a JPEG frame %d ms to decode on %d thread%s",
+                sel_now_ms() - st->t_vstart, shown, dropped, vid_decode_ms(st->t_vid), vid_threads(st->t_vid),
+                vid_threads(st->t_vid) == 1 ? "" : "s");
+        vid_close(st->t_vid);
+        st->t_vid = NULL;
+    }
+    if (st->t_gpu && st->e->video) st->e->video(st->e->ctx, NULL, 0, 0, 0, 0);
+    st->t_gpu = 0;
+    st->t_vw = st->t_vh = 0;
+    st->t_vk = -1;
+    st->t_ovl_shown = NULL;
+    if (st->t_ovl) { ovl_close(st->t_ovl); st->t_ovl = NULL; }
     if (st->t_vsound) {
         /* its voice fades out first: the clip is freed when that is over */
         long long until = sel_now_ms() + 200;
@@ -451,6 +489,10 @@ static void test_load(struct state *st, long long now)
     const struct conf_test *t = test_own(st, st->t_item);
     char path[2 * CONF_STR + 2];
     test_unload(st);
+    st->t_frozen = 0;
+    st->t_act_down = 0;
+    fps_reset(st);
+    st->t_cap_due = 0;
     if (t) {
         snprintf(path, sizeof path, "%s/%s", e->media_dir && *e->media_dir ? e->media_dir : ".",
                  t->file);
@@ -469,6 +511,13 @@ static void test_load(struct state *st, long long now)
             char snd[sizeof path + 8], *dot;
             st->t_vid = vid_open(path, e->g->w, e->g->h, now, st->t_err, sizeof st->t_err);
             if (!st->t_vid) break;
+            /* the table (2026-11-25): the CPU converting a 1360x768 frame is 64 ms - 10 fps;
+             * the game gives vpudec's frames to the graphics chip, and so does this */
+            st->t_gpu = e->video && e->video_gpu && vid_is_clip(st->t_vid);
+            if (st->t_gpu) {
+                vid_want_rgba(st->t_vid, 0);
+                sel_say("test: the graphics chip converts the clip's frames");
+            }
             st->t_vloops = 0;
             st->t_vstart = now;
             snprintf(snd, sizeof snd, "%s", path);
@@ -478,6 +527,22 @@ static void test_load(struct state *st, long long now)
                 char why[200] = "";
                 st->t_vsound = audio_load_wav(snd, why, sizeof why);
                 if (!st->t_vsound) sel_say("test: the video's sound: %s", why);
+            }
+            /* THE LAYERED TEST (overlay.h): a scene beside it with the same name */
+            if (dot) {
+                char why[200] = "";
+                strcpy(dot, ".pado");
+                if (access(snd, R_OK) == 0) {
+                    int cw, ch;
+                    st->t_ovl = ovl_open(snd, e->g->w, e->g->h, why, sizeof why);
+                    if (!st->t_ovl) sel_say("test: the scene over the video: %s", why);
+                    else {
+                        ovl_canvas(st->t_ovl, &cw, &ch);
+                        sel_say("test: a scene over it: %d frames at %.3f fps, %d picture%s, %dx%d",
+                                ovl_frames(st->t_ovl), ovl_fps(st->t_ovl), ovl_pictures(st->t_ovl),
+                                ovl_pictures(st->t_ovl) == 1 ? "" : "s", cw, ch);
+                    }
+                }
             }
             sel_say("test: video %d frames at %.3f fps, %d decoder%s%s", vid_frames(st->t_vid),
                     vid_fps(st->t_vid), vid_threads(st->t_vid), vid_threads(st->t_vid) == 1 ? "" : "s",
@@ -492,7 +557,7 @@ static void test_load(struct state *st, long long now)
             break;
         }
         default:
-            snprintf(st->t_err, sizeof st->t_err, "%s is not a PNG, GIF, PADV or WAV", t->file);
+            snprintf(st->t_err, sizeof st->t_err, "%s is not a PNG, GIF, PADV, MP4/MOV or WAV", t->file);
         }
     }
     sel_say("test: %d/%d %s%s%s%s", st->t_pos + 1, test_count(st), test_name(st, st->t_item),
@@ -541,16 +606,83 @@ static void test_close(struct state *st)
     sel_say("test: closed");
 }
 
+/* the caption's fps: frames shown over the last samples (250 ms apart, two seconds) */
+static void fps_reset(struct state *st)
+{
+    st->t_fw_n = st->t_fw_i = 0;
+    st->t_fw_due = 0;
+}
+
+static void fps_sample(struct state *st, long long now)
+{
+    int shown = 0, dropped = 0;
+    if (!st->t_vid || st->t_frozen || now < st->t_fw_due) return;
+    vid_stats(st->t_vid, &shown, &dropped);
+    if (st->t_fw_n && shown < st->t_fw_s[(st->t_fw_i + FPS_WIN - 1) % FPS_WIN]) fps_reset(st);  /* looped */
+    st->t_fw_t[st->t_fw_i] = now;
+    st->t_fw_s[st->t_fw_i] = shown;
+    st->t_fw_i = (st->t_fw_i + 1) % FPS_WIN;
+    if (st->t_fw_n < FPS_WIN) st->t_fw_n++;
+    st->t_fw_due = now + 250;
+}
+
+/* -1 until half a second has been measured */
+static double fps_now(const struct state *st)
+{
+    int newest = (st->t_fw_i + FPS_WIN - 1) % FPS_WIN;
+    int oldest = st->t_fw_n < FPS_WIN ? 0 : st->t_fw_i;
+    long long dt;
+    if (st->t_fw_n < 2) return -1;
+    dt = st->t_fw_t[newest] - st->t_fw_t[oldest];
+    if (dt < 500) return -1;
+    return (st->t_fw_s[newest] - st->t_fw_s[oldest]) * 1000.0 / (double)dt;
+}
+
+/* the graphics chip draws the clip: not through a colour correction (the CPU's LUT) */
+static int test_gpu(const struct state *st)
+{
+    return st->t_gpu && st->t_vid && st->t_col < 0 && !st->t_err[0];
+}
+
+static void test_gpu_off(struct state *st, const char *why)
+{
+    struct settings_env *e = st->e;
+    if (e->video) e->video(e->ctx, NULL, 0, 0, 0, 0);
+    st->t_gpu = 0;
+    if (st->t_vid) vid_want_rgba(st->t_vid, 1);
+    sel_say("test: %s: the CPU converts the clip", why);
+}
+
 /* one animation tick: 0 nothing, 1 the frame changed (only the frame's own
  * rectangle needs drawing), 2 the caption went (the whole screen does) */
 static int test_tick(struct state *st, long long now)
 {
     int changed = 0;
+    if (st->t_frozen) return 0;              /* held: nothing moves on the screen */
     if (st->t_vid) {
         int k;
-        if (vid_frame(st->t_vid, now, &k)) changed = 1;
+        if (st->t_gpu) vid_want_rgba(st->t_vid, !test_gpu(st));    /* START: corrected / not */
+        if (test_gpu(st)) {
+            struct gclip_yuv f;
+            if (vid_yuv_take(st->t_vid, &f)) {
+                struct settings_env *e = st->e;
+                int first = !st->t_vw;
+                int r = e->video(e->ctx, &f, (e->g->w - f.ow) / 2, (e->g->h - f.oh) / 2, f.ow, f.oh);
+                vid_yuv_done(st->t_vid);
+                if (r < 0) {
+                    test_gpu_off(st, "the graphics chip cannot show this clip");
+                    changed = 2;
+                } else {
+                    st->t_vw = f.ow;
+                    st->t_vh = f.oh;
+                    st->t_vk = f.k;
+                    changed = first ? 2 : 1;            /* the first one cuts the hole */
+                }
+            }
+        } else if (vid_frame(st->t_vid, now, &k)) changed = 1;
         if (vid_loops(st->t_vid) != st->t_vloops) {
             st->t_vloops = vid_loops(st->t_vid);
+            st->t_vstart = now;                      /* the scene over it starts again too */
             if (st->t_vsound) test_play(st);         /* the clip started again: so does its sound */
         }
     }
@@ -563,6 +695,11 @@ static int test_tick(struct state *st, long long now)
     if (st->t_caption && st->t_caption_until && now >= st->t_caption_until) {
         st->t_caption = 0;
         changed = 2;
+    }
+    fps_sample(st, now);
+    if (st->t_vid && st->t_caption && changed != 2 && now >= st->t_cap_due) {
+        if (st->t_cap_due) draw_caption(st, !st->t_err[0]);
+        st->t_cap_due = now + 500;
     }
     return changed;
 }
@@ -753,15 +890,40 @@ static void draw_colour(struct state *st)
 
 /* THE TEST PICTURE UP, full screen, through the correction picked; then the
  * caption, which is never corrected */
+/* the scene's time: the clip's own frame on screen when the graphics chip draws it (the
+ * table, 2026-11-25: on the clock, the scene ran ahead of a clip a little behind its pace
+ * and the 0s did not line up), else the clock since the clip started */
+static long long scene_ms(const struct state *st, long long now)
+{
+    if (test_gpu(st) && st->t_vk >= 0 && vid_fps(st->t_vid) > 0)
+        return (long long)((double)st->t_vk * 1000.0 / vid_fps(st->t_vid));
+    return now - st->t_vstart;
+}
+
+/* THE LAYERED TEST (overlay.h): the scene's frame for the clip's time, over the clip,
+ * after the colour correction - the scene is the game's own drawing, not the picture
+ * under test; the canvas is centred on the screen, as the clip is */
+static void draw_overlay(struct state *st, long long now)
+{
+    struct settings_env *e = st->e;
+    const struct art_image *im;
+    int x, y, cw, ch;
+    if (!st->t_ovl) return;
+    im = ovl_at(st->t_ovl, scene_ms(st, now), &x, &y);
+    st->t_ovl_shown = im;
+    if (!im) return;
+    ovl_canvas(st->t_ovl, &cw, &ch);
+    gfx_blit(e->g, (e->g->w - cw) / 2 + x, (e->g->h - ch) / 2 + y, im->rgba, im->w, im->h);
+}
+
 static void draw_test(struct state *st)
 {
     struct settings_env *e = st->e;
-    const struct conf *c = e->c;
     float s = S(e);
     int W = e->g->w, H = e->g->h, k = st->t_item, kind = test_kind(st, k), visual = 1;
-    char buf[400], col[260];
 
     gfx_fill(e->g, 0x000000);
+    if (st->t_gpu && !test_gpu(st) && e->video) e->video(e->ctx, NULL, 0, 0, 0, 0);
     if (k < TP_NBUILTIN) {
         testpics_draw(k, e->g->px, W * 4, W, H);
     } else if (test_is_back(st, k)) {
@@ -787,6 +949,9 @@ static void draw_test(struct state *st)
         text_fit(e, !e->au ? "the menu has no sound on this machine"
                  : audio_playing(e->au, st->t_voice) ? "playing" : "press START to play it again",
                  28 * s, 18 * s, W - (int)(80 * s), W / 2, H / 2 + (int)(60 * s), 0, TH(e, TITLE));
+    } else if (test_gpu(st)) {
+        /* the clip is the graphics chip's, under the canvas: a see-through hole for it */
+        if (st->t_vw) gfx_clear(e->g, (W - st->t_vw) / 2, (H - st->t_vh) / 2, st->t_vw, st->t_vh);
     } else {
         const struct art_image *im = st->t_img ? st->t_img
                                    : st->t_vid ? vid_current(st->t_vid)
@@ -798,7 +963,20 @@ static void draw_test(struct state *st)
         colour_lut_build(&lut, &st->work[st->imgs[st->t_col]]);
         colour_lut_apply(&lut, e->g->px, W, H, W * 4);
     }
+    if (visual) draw_overlay(st, sel_now_ms());
     if (!st->t_caption) return;
+    draw_caption(st, visual);
+}
+
+/* the caption's band alone (opaque): drawn by draw_test, and again every half second
+ * while a video plays so its fps is the current one */
+static void draw_caption(struct state *st, int visual)
+{
+    struct settings_env *e = st->e;
+    const struct conf *c = e->c;
+    float s = S(e);
+    int W = e->g->w, H = e->g->h, k = st->t_item, kind = test_kind(st, k);
+    char buf[400], col[260];
 
     if (!visual) {
         col[0] = 0;                            /* nothing on this one is colored */
@@ -818,13 +996,17 @@ static void draw_test(struct state *st)
         gfx_rect(e->g, 0, y, W, bh, 0x101114);
         gfx_rect(e->g, 0, y, W, line, TH(e, FRAME_HL));
         if (st->t_vid) {
-            /* what the machine really manages, against what the video asks for */
-            int shown = 0, dropped = 0;
-            long long el = sel_now_ms() - st->t_vstart;
-            vid_stats(st->t_vid, &shown, &dropped);
-            snprintf(buf, sizeof buf, "%d / %d   %s   %.1f of %.0f fps", st->t_pos + 1, test_count(st),
-                     test_name(st, k), el > 500 ? shown * 1000.0 / (double)el : (double)vid_fps(st->t_vid),
-                     (double)vid_fps(st->t_vid));
+            /* what the machine really manages, against what the video asks for: over the
+             * last two seconds, so a slow start or a freeze does not stay in the figure */
+            double f = fps_now(st);
+            if (st->t_frozen)
+                snprintf(buf, sizeof buf, "%d / %d   %s   FROZEN", st->t_pos + 1, test_count(st), test_name(st, k));
+            else if (f < 0)
+                snprintf(buf, sizeof buf, "%d / %d   %s   -- of %.0f fps", st->t_pos + 1, test_count(st),
+                         test_name(st, k), (double)vid_fps(st->t_vid));
+            else
+                snprintf(buf, sizeof buf, "%d / %d   %s   %.1f of %.0f fps", st->t_pos + 1, test_count(st),
+                         test_name(st, k), f, (double)vid_fps(st->t_vid));
         } else {
             snprintf(buf, sizeof buf, "%d / %d   %s", st->t_pos + 1, test_count(st), test_name(st, k));
         }
@@ -834,7 +1016,9 @@ static void draw_test(struct state *st)
                  0xF0C040);
         if (e->testcard) {
             static char tk[200];
-            snprintf(tk, sizeof tk, K_MOVE ": previous / next      %s      " K_BACK ": back",
+            snprintf(tk, sizeof tk, test_moves(st)
+                     ? K_MOVE ": previous / next      %s      " K_BACK ": freeze / play, hold: back"
+                     : K_MOVE ": previous / next      %s      " K_BACK ": back",
                      kind == TF_SOUND || st->t_err[0] ? (kind == TF_SOUND ? K_GO ": play again" : "")
                      : c->ncolour > 0 ? K_GO ": corrected / not" : "");
             keys = tk;
@@ -858,6 +1042,21 @@ static void draw_test_frame(struct state *st)
     int W = e->g->w, H = e->g->h, x, y, bottom;
     const struct art_image *im;
     if ((!st->t_anim && !st->t_vid) || st->t_err[0]) return;
+    if (test_gpu(st)) {
+        /* the frame went to the graphics chip already (test_tick): the canvas changes
+         * only when the scene over it moves to another picture */
+        int ox, oy, cw, ch;
+        if (!st->t_ovl || !st->t_vw) return;
+        if (ovl_at(st->t_ovl, scene_ms(st, sel_now_ms()), &ox, &oy) == st->t_ovl_shown) return;
+        ovl_canvas(st->t_ovl, &cw, &ch);
+        x = (W - st->t_vw) / 2;
+        y = (H - st->t_vh) / 2;
+        gfx_rect(e->g, (W - cw) / 2, (H - ch) / 2, cw, ch, 0x000000);
+        gfx_clear(e->g, x, y, st->t_vw, st->t_vh);
+        draw_overlay(st, sel_now_ms());
+        if (st->t_caption && y + st->t_vh > H - (int)(96 * S(e))) draw_test(st);
+        return;
+    }
     im = st->t_vid ? vid_current(st->t_vid) : art_anim_frame(st->t_anim, st->t_frame);
     if (!im) return;
     x = (W - im->w) / 2;
@@ -868,6 +1067,7 @@ static void draw_test_frame(struct state *st)
         colour_lut_build(&lut, &st->work[st->imgs[st->t_col]]);
         colour_lut_apply(&lut, e->g->px + ((size_t)y * (size_t)W + (size_t)x) * 4, im->w, im->h, W * 4);
     }
+    draw_overlay(st, sel_now_ms());
     bottom = y + im->h;
     if (st->t_caption && bottom > H - (int)(96 * S(e))) draw_test(st);   /* under the caption: all of it */
 }
@@ -906,7 +1106,8 @@ static void draw_menu(struct state *st)
         text_fit(e, sub, 22 * s, 14 * s, rw - (int)(60 * s), W / 2, y + (int)(66 * s), 0,
                  on ? TH(e, SUBTITLE_HL) : TH(e, SUBTITLE));
     }
-    draw_footer(e, K_MOVE ": choose      " K_GO ": open");
+    draw_footer(e, e->leave ? K_MOVE ": choose      " K_GO ": open      " K_BACK ": back to the games"
+                            : K_MOVE ": choose      " K_GO ": open");
 }
 
 /* ONE LIST: its items by name, PICK_ROWS at a time */
@@ -1053,6 +1254,12 @@ static void activate(struct state *st)
     }
 }
 
+/* a test item that moves (a video, a moving GIF): ACTION freezes it on a quick press */
+static int test_moves(const struct state *st)
+{
+    return st->t_vid || (st->t_anim && st->t_anim->n > 1);
+}
+
 static void key(struct state *st, int ev, long long now)
 {
     int dir = (ev == EV_LEFT || ev == EV_MINUS) ? -1 : (ev == EV_RIGHT || ev == EV_PLUS) ? 1 : 0;
@@ -1064,6 +1271,7 @@ static void key(struct state *st, int ev, long long now)
         int n = menu_count(st);
         if (dir) { st->menu_sel = (st->menu_sel + n + dir) % n; click(st); }
         else if (go) activate(st);
+        else if (back && st->e->leave) { st->screen = S_DONE; sel_say("test card: back to the games"); }
         return;
     }
     if (st->screen == S_PICK) {
@@ -1091,6 +1299,9 @@ static void key(struct state *st, int ev, long long now)
             test_load(st, now);
         } else if (go) {
             activate(st);
+        } else if (back && test_moves(st)) {
+            /* how long it is held decides: settings_run watches it */
+            st->t_act_down = now;
         } else if (back) {
             test_close(st);
             pick_scroll(st);
@@ -1182,11 +1393,52 @@ void settings_run(struct settings_env *e)
                 last = now;
             }
         }
-        if (st.screen == S_TEST && !dirty) {
-            int tick = test_tick(&st, now);
-            if (tick == 1) draw_test_frame(&st);
-            else if (tick) dirty = 1;
+        /* ACTION on a moving item: let go soon = freeze / play on, held = back */
+        if (st.screen == S_TEST && st.t_act_down) {
+            if (input_held(e->in, EV_ACTION)) {
+                if (now - st.t_act_down >= TEST_HOLD_BACK_MS) {
+                    st.t_act_down = 0;
+                    sel_say("test: ACTION held: back");
+                    test_close(&st);
+                    pick_scroll(&st);
+                    dirty = 1;
+                }
+            } else {
+                st.t_act_down = 0;
+                st.t_frozen = !st.t_frozen;
+                if (st.t_vid) vid_pause(st.t_vid, st.t_frozen);    /* the clip waits too */
+                fps_reset(&st);
+                if (st.t_frozen && st.t_voice >= 0) { audio_stop(e->au, st.t_voice); st.t_voice = -1; }
+                sel_say("test: %s", st.t_frozen ? "frozen" : "playing on");
+                st.t_caption = 1;
+                st.t_caption_until = now + TEST_CAPTION_MS;
+                dirty = 1;
+            }
         }
+        if (st.screen == S_TEST && !dirty) {
+            long long t_draw = now;
+            int tick = test_tick(&st, now);
+            if (tick == 1) {
+                draw_test_frame(&st);
+                st.t_draw_ms += sel_now_ms() - t_draw;
+                st.t_draws++;
+            } else if (tick) dirty = 1;
+        }
+        /* A VIDEO'S OWN ACCOUNT every 5 s, for the log (the table, 2026-11-25: 0.1 fps) */
+        if (st.screen == S_TEST && st.t_vid && now >= st.t_perf_due) {
+            int shown = 0, dropped = 0;
+            if (st.t_perf_due) {
+                vid_stats(st.t_vid, &shown, &dropped);
+                sel_log("test: video at %lld ms: %d shown, %d late, decode %d ms, draw %lld ms a frame (%d draws)%s",
+                        now - st.t_vstart, shown, dropped, vid_decode_ms(st.t_vid),
+                        st.t_draws ? st.t_draw_ms / st.t_draws : -1, st.t_draws,
+                        st.t_frozen ? ", frozen" : "");
+            }
+            st.t_perf_due = now + 5000;
+            st.t_draw_ms = 0;
+            st.t_draws = 0;
+        }
+        if (st.screen != S_TEST || !st.t_vid) st.t_perf_due = 0;
         /* the test pictures are looked at, not pressed: a longer wait there
          * (unless the tests shortened every wait) */
         long long wait = st.screen == S_TEST && idle == SETTINGS_IDLE_MS ? TEST_IDLE_MS : idle;

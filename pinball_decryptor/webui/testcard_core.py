@@ -114,12 +114,17 @@ class Item(object):
     """One thing on the card.  A project item has `project` (its assets folder) and `rel`
     (its row's key in that tab: a file's path under the folder, or a scene's dir); a file
     from the PC has `path` only.  `path` is also where a project file was found when it
-    was ticked."""
-    __slots__ = ("kind", "label", "path", "project", "rel", "game")
+    was ticked.
 
-    def __init__(self, kind, label="", path="", project="", rel="", game=""):
+    THE LAYERED TEST (Simon, 2026-11-22/26): a video item with `layers` - the project's scenes drawn over the clip
+    (plugins/stern/layered_test.py specs, ``HASH`` or ``HASH@FRAME``, the lowest first), made on the Scenes tab's
+    Layered test… button."""
+    __slots__ = ("kind", "label", "path", "project", "rel", "game", "layers")
+
+    def __init__(self, kind, label="", path="", project="", rel="", game="", layers=()):
         self.kind, self.label, self.path = kind, label, path
         self.project, self.rel, self.game = project, rel, game
+        self.layers = tuple(str(x) for x in (layers or ()) if str(x).strip())
 
     @property
     def from_project(self):
@@ -127,17 +132,21 @@ class Item(object):
 
     def key(self):
         if self.project:
-            return (self.kind, norm_dir(self.project), self.rel.replace("\\", "/"))
-        return (self.kind, "", norm_dir(self.path))
+            return (self.kind, norm_dir(self.project), self.rel.replace("\\", "/")) + self.layers
+        return (self.kind, "", norm_dir(self.path)) + self.layers
 
     def to_json(self):
-        return {k: getattr(self, k) for k in self.__slots__ if getattr(self, k)} | {"kind": self.kind}
+        d = {k: getattr(self, k) for k in self.__slots__ if getattr(self, k)} | {"kind": self.kind}
+        if self.layers:
+            d["layers"] = list(self.layers)
+        return d
 
     @classmethod
     def from_json(cls, d):
         if not isinstance(d, dict) or d.get("kind") not in KINDS:
             return None
-        it = cls(d["kind"], *(str(d.get(k) or "") for k in ("label", "path", "project", "rel", "game")))
+        it = cls(d["kind"], *(str(d.get(k) or "") for k in ("label", "path", "project", "rel", "game")),
+                 layers=d.get("layers") if isinstance(d.get("layers"), list) and d["kind"] == "video" else ())
         if not it.project and not it.path:
             return None
         return it
@@ -232,6 +241,16 @@ class TestCardList(object):
         if added:
             self.save()
         return added, refused
+
+    def add_layered(self, item):
+        """A layered test (Simon, 2026-11-26: the Scenes tab's Layered test… button) -> '' or why not."""
+        if len(self.items) >= MAX_ITEMS:
+            return "the test card takes at most %d items" % MAX_ITEMS
+        if any(it.key() == item.key() for it in self.items):
+            return "that layered test is already on the list"
+        self.items.append(item)
+        self.save()
+        return ""
 
     def remove(self, i):
         if 0 <= i < len(self.items):
@@ -361,7 +380,46 @@ def item_problem(it):
     return ""
 
 
-def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None):
+#: Simon (2026-11-26): a Spike 2 test card's videos play through the machine's own decoder (codeselect gstclip.c:
+#: GStreamer 0.10, vpudec, the graphics chip converts - 30 fps on the table) instead of JPEG frames (.padv: 0.1-0.5 fps
+#: on the table). The decoder takes H.264 up to 1920x1088 (the VPU's), in these containers; anything else is made into
+#: one first. A GIF stays frames: it is a short animation, not a clip.
+CLIP_EXTS = (".mp4", ".mov", ".m4v")
+CLIP_MAX = (1920, 1088)
+
+
+def as_clip(path, work, n, log=print, cancel=None):
+    """The file the machine's decoder plays for the test video *path*: *path* itself when it already is one (H.264
+    in .mp4/.mov/.m4v, 8-bit 4:2:0 at an even size, no bigger than :data:`CLIP_MAX`), else an H.264 .mp4 made from it in *work*, fitted inside
+    CLIP_MAX. ``None`` for a GIF or a file no video tool can read: it stays frames."""
+    from pinball_decryptor.core import video
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".gif":
+        return None
+    info = video.detect_video_info(path)
+    if info is None or not (info.width > 0 and info.height > 0):
+        return None
+    w, h = info.width, info.height
+    # the VPU decodes 8-bit 4:2:0 only, and the menu's conversion reads chroma at half the even size: a 10-bit or
+    # 4:4:4 H.264, or an odd width or height, is made into one like any other file (an unknown format goes as it is)
+    fmt_ok = (info.pix_fmt or "yuv420p").lower() in ("yuv420p", "yuvj420p")
+    if (ext in CLIP_EXTS and (info.vcodec or "").lower() == "h264" and fmt_ok
+            and w % 2 == 0 and h % 2 == 0 and w <= CLIP_MAX[0] and h <= CLIP_MAX[1]):
+        return path
+    s = min(1.0, CLIP_MAX[0] / float(w), CLIP_MAX[1] / float(h))
+    target = video.VideoInfo(path, vcodec="h264", width=max(2, int(w * s) // 2 * 2),
+                             height=max(2, int(h * s) // 2 * 2), fps=info.fps, duration=info.duration,
+                             has_audio=info.has_audio, pix_fmt="yuv420p", container="mp4")
+    dst = os.path.join(work, "clip%02d.mp4" % n)
+    ok, err = video.transcode_video_to(path, dst, target, best_quality=True, cancel_cb=cancel)
+    if not ok:
+        raise RuntimeError(err or "the clip did not convert")
+    log("test card: %s made into an H.264 clip at %dx%d for the machine's decoder"
+        % (os.path.basename(path), target.width, target.height))
+    return dst
+
+
+def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None, clips=False):
     """Each item as a file selectmedia can take -> [(kind, path, label)].
 
     A project's picture or video is written with that project's colour profile baked in
@@ -369,7 +427,10 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None)
     the project would put it on the machine; a file from the PC goes as it is; a scene is
     the picture of its resting frame drawn when it was ticked (or again before the build;
     `render_scene(item, png_path)` draws it here when given).
-    An item that cannot be made is skipped and said."""
+    An item that cannot be made is skipped and said.
+
+    *clips* (a Spike 2 card): each video goes as a clip the machine's own decoder plays (:func:`as_clip`, kind
+    ``clip``), not as frames; one that cannot be made a clip stays a video (frames)."""
     from pinball_decryptor.core import colour_export as ce
     from pinball_decryptor.core import colour_profile as cp
     os.makedirs(work, exist_ok=True)
@@ -387,9 +448,9 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None)
                 if render_scene is not None:
                     dst = os.path.join(work, "scene%02d.png" % n)
                     render_scene(it, dst)
-                    out.append((it.kind, dst, it.label))
+                    out.append((it, it.kind, dst, it.label))
                 else:
-                    out.append((it.kind, it.path, it.label))
+                    out.append((it, it.kind, it.path, it.label))
                 continue
             prof = None
             if it.from_project and it.kind in PROFILE_KIND:
@@ -400,7 +461,7 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None)
                         resolvers[it.project] = cp.asset_resolver(it.project)
                     prof = resolvers[it.project](PROFILE_KIND[it.kind], it.rel)
             if prof is None:
-                out.append((it.kind, it.path, it.label))
+                out.append((it, it.kind, it.path, it.label))
                 continue
             if it.kind == "image":
                 dst = os.path.join(work, "image%02d.png" % n)
@@ -411,17 +472,57 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None)
                 if not ok:
                     raise RuntimeError(err or "the clip did not convert")
             log("test card: %s %r with its color profile" % (it.kind, it.label))
-            out.append((it.kind, dst, it.label))
+            out.append((it, it.kind, dst, it.label))
         except Exception as exc:                                # noqa: BLE001
             log("test card: %s %r left out: %s" % (it.kind, it.label, exc))
+    layered = {id(it): it for it in items if it.kind == "video" and it.layers}
+    if clips:
+        made = []
+        for n, (src, kind, path, label) in enumerate(out):
+            if kind == "video":
+                try:
+                    clip = as_clip(path, work, n, log=log, cancel=cancel)
+                except Exception as exc:                        # noqa: BLE001
+                    log("test card: video %r stays frames: %s" % (label, exc))
+                    clip = None
+                if clip:
+                    kind, path = "clip", clip
+            if src is not None and id(src) in layered:
+                if kind != "clip":
+                    log("test card: layered test %r left out: its video cannot play as a clip" % label)
+                    continue
+                try:
+                    made.append((kind, path, label, layer_overlay(src, path, work, n, log=log)))
+                except Exception as exc:                        # noqa: BLE001
+                    log("test card: layered test %r left out: %s" % (label, exc))
+                continue
+            made.append((kind, path, label))
+        out = made
+    else:
+        for it in layered.values():
+            log("test card: layered test %r left out: a Spike 3 test card plays no clips" % it.label)
+        out = [o[1:] for o in out if id(o[0]) not in layered]
+    return out
+
+
+def layer_overlay(item, clip, work, n, log=print):
+    """The ``.pado`` for layered test *item* over *clip* (plugins/stern/layered_test.py): its scenes drawn one
+    picture per clip frame, timed by the clip's own frames."""
+    from pinball_decryptor.plugins.stern import layered_test as LT
+    frames, fps = LT.clip_frames(clip)
+    out = os.path.join(work, "clip%02d.pado" % n)
+    LT.make_overlay(item.project, list(item.layers), out, frames, fps, log=lambda m: log("test card: " + m.strip()))
     return out
 
 
 def test_specs(staged, to_wsl=lambda p: p):
     """selectmedia's --test arguments for the staged items."""
     args = []
-    for kind, path, label in staged:
+    for k, entry in enumerate(staged):
+        kind, path, label = entry[:3]
         args += ["--test", "%s:%s|%s" % (kind, to_wsl(path), clean_label(label, "item"))]
+        if len(entry) > 3 and entry[3]:                 # a layered test's overlay, by the test's number
+            args += ["--test-overlay", "%d=%s" % (k, to_wsl(entry[3]))]
     return args
 
 

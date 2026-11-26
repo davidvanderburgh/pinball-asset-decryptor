@@ -185,6 +185,7 @@ _SPIKE3_CAPS = Capabilities(
     replace_audio=True,
     replace_video=True,
     replace_image=True,
+    scenes=True,
     replace_text=True,
     # PAD-1090: the Emulate tab runs a Spike 3 card on the Spike 3 rig
     # (tools/spike3_emu/s3launch.sh), with the virtual playfield beside it
@@ -470,6 +471,8 @@ class SternManufacturer(Manufacturer):
         # tab stages a replacement scaled to the original's dimensions, and
         # Write patches it back in place the same size-neutral way as video.
         replace_image=True,
+        # ...laid out in the card's scene trees: the Scenes tab
+        scenes=True,
         # Flash a pre-built SD-card image (.img/.raw) straight onto a card from
         # the GUI — a dd-style whole-image write, so users no longer need a
         # separate imaging tool (and the built-in size guard refuses an image

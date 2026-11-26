@@ -278,6 +278,7 @@ static void chg_end_ball_now(const char *from) {}
 @DISPATCH@
 static void coop_bonus_end(void) {}                  /* PAD-1028's, not under test here */
 static void on_team_dispatch(unsigned *r) {}         /* PAD-1052's, not under test here */
+static void on_acc_ball_end(unsigned *r) {}          /* PAD-1607's, not under test here */
 int main(void)
 {
     unsigned r[6] = { 73, 0, 0, 0, 0, 0 };

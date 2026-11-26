@@ -203,12 +203,73 @@ function Divider({ k, horizontal, measure, split, setSplit, save, dir = 1, label
 // are made; Write puts them on the card).  PAD-365: a scene that moves exports as a video, and
 // "Export all videos…" writes one MP4 per listed scene; the message beside the buttons follows
 // an export along and says what it wrote.
+// THE LAYERED TEST (Simon, 2026-11-22/26): "a layered test on the TEST CARD - a clip with scenes over it (e.g. Match
+// clip + 0335207f MATCH/digits + 9d578751 score panel)". The shown scene (and any others over it) above one of the
+// project's videos, as one video on the Test card tab's list; the machine plays the clip through its own decoder and
+// the scenes are drawn over it, frame by frame (ACTION freezes, a long press goes back).
+const LAYERED_TIP = { head: "Layered test", lines: [
+  "Puts a video on the Test card tab's list with this scene drawn over it, as the game shows the scene over a clip - to check on the machine how they line up.",
+  "Add more scenes to draw over it (the lowest first), and pin a scene to a frame or a label of its own if it should hold there (e.g. the score panel at its Match frame).",
+  "On the machine: ACTION freezes the video, a long press goes back." ] };
+
+function LayeredDialog({ onClose }) {
+  const [o, setO] = useState(null);
+  const [layers, setLayers] = useState([]);
+  const [clip, setClip] = useState("");
+  const [label, setLabel] = useState("");
+  const [why, setWhy] = useState("");
+  const [more, setMore] = useState("");
+  useEffect(() => { (async () => {
+    const got = await call("text_scenes.layered_options");
+    setO(got || { why: "No answer." });
+    if (got && got.scene) setLayers([{ d: got.scene.d, label: got.scene.label, pin: "" }]);
+    if (got && got.clip) setClip(got.clip);
+  })(); }, []);
+  const add = async () => {
+    const w = await call("text_scenes.add_layered", layers.map((l) => ({ d: l.d, pin: l.pin })), clip, label);
+    if (w) setWhy(w); else onClose();
+  };
+  const move = (i, d) => { const n = layers.slice(); const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setLayers(n); };
+  const ready = o && !o.why;
+  const footer = html`<${Button} onClick=${onClose}>Cancel<//>
+    <${Button} kind="primary" disabled=${!ready || !layers.length || !clip} onClick=${add}>Add to test card<//>`;
+  return html`<${Modal} title="Layered test" onClose=${onClose} wide footer=${footer}>
+    ${!o ? html`<span class="small muted">Reading the project…</span>`
+      : o.why ? html`<span class="small bad">${o.why}</span>` : html`<div class="stack">
+      <span class="small muted">The video plays under the scenes, as the game shows them over a clip. The lowest scene is first; a scene pinned to a frame or label holds there, else it plays from its first frame.</span>
+      <div class="k">Scenes drawn over the video</div>
+      ${layers.map((l, i) => html`<div class="row" key=${l.d + i}>
+        <span class="grow" title=${l.d}>${(i + 1) + ". " + l.label}</span>
+        <${Field} sm width="170px" value=${l.pin} placeholder="frame or label (optional)"
+          onChange=${(v) => setLayers(layers.map((x, j) => (j === i ? { ...x, pin: v } : x)))} />
+        <${Button} size="xs" disabled=${i === 0} onClick=${() => move(i, -1)} title="Lower (drawn earlier)">↑<//>
+        <${Button} size="xs" disabled=${i === layers.length - 1} onClick=${() => move(i, 1)} title="Higher (drawn later)">↓<//>
+        <${Button} size="xs" disabled=${layers.length === 1} onClick=${() => setLayers(layers.filter((_, j) => j !== i))} title="Take it out">✕<//>
+      </div>`)}
+      <div class="row">
+        <${Select} width=${320} value=${more} options=${[{ value: "", label: "Add another scene…" }, ...o.scenes.map((c) => ({ value: c.d, label: c.label + "  (" + c.hash + ")" }))]}
+          onChange=${(v) => { if (v) { const c = o.scenes.find((x) => x.d === v); setLayers([...layers, { d: v, label: c ? c.label : v, pin: "" }]); } setMore(""); }} />
+      </div>
+      <div class="k">Video under them</div>
+      <${Select} width=${420} value=${clip} options=${[{ value: "", label: "Pick a video…" }, ...o.clips.map((c) => ({ value: c.rel, label: c.label + (c.own ? "  (in this scene)" : "") }))]}
+        onChange=${setClip} />
+      <div class="k">Name on the test card</div>
+      <${Field} sm width="420px" value=${label} placeholder="this scene over the video (left empty)" onChange=${setLabel} />
+      ${why ? html`<span class="small bad">${why}</span>` : null}
+    </div>`}
+  <//>`;
+}
+
 export function ScenesActions() {
   const s = useNs("text_scenes");
+  const [layered, setLayered] = useState(false);
   if (!s.alive) return null;
   const tips = s.tips || {};
   const any = !!(s.scenes || []).length;
   return html`
+    ${layered ? html`<${LayeredDialog} onClose=${() => setLayered(false)} />` : null}
+    ${s.test_on ? html`<${Button} kind="ghost" icon="video" disabled=${!any} title=${LAYERED_TIP}
+      onClick=${() => setLayered(true)}>Layered test…<//>` : null}
     ${s.rebuild_msg ? html`<span class="small muted scenes-msg-head">${s.rebuild_msg}</span>` : null}
     ${!s.rebuild_msg && s.export_msg ? html`<span class="small muted scenes-msg-head" title=${s.export_msg}>${s.export_msg}</span>` : null}
     <${Button} kind="ghost" icon=${s.can_video ? "video" : "download"} disabled=${!s.can_save && !s.exporting}

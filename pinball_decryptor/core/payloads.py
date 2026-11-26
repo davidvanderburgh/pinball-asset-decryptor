@@ -122,6 +122,9 @@ class Payload:
     mode: int = 0o755
     source_of: Tuple[str, ...] = field(default_factory=tuple)
     source_sha256: str = ""
+    #: A full download URL, for a payload someone ELSE publishes (PAD-1606:
+    #: mjrgh's DCSExplorer release).  Empty = this repo's release_tag asset.
+    url: str = ""
 
 
 #: THE PINNED SET.  A new entry is added by the payload workflow
@@ -173,6 +176,52 @@ register(Payload(
 ))
 
 
+# ---------------------------------------------------------------------------
+# PAD-1606: Windows tools fetched on first use instead of shipped.
+#
+# Antivirus programs flag mjrgh's DCSExplorer.exe / DCSEncoder.exe by mistake
+# (Norton: "Trojan.Gen.MBT", PAD-1391), and with them inside the installer and
+# every update, a user who never touches a DCS-era Williams game still had to
+# switch his scanner off to update PAD.  So PAD no longer carries them: the
+# first DCS sound job downloads the exact upstream v1.1 release file, checked
+# against the hash below, into the payload cache.  These live in a list of
+# their own because PAYLOADS is what the emulator tabs install INTO WSL;
+# nothing here is ever installed anywhere, it runs from the cache.
+HOST_PAYLOADS: Dict[str, Payload] = {}
+
+
+def register_host(payload: Payload) -> Payload:
+    HOST_PAYLOADS[payload.key] = payload
+    return payload
+
+
+_DCS_RELEASE = "https://github.com/mjrgh/DCSExplorer/releases/download/v1.1/"
+
+register_host(Payload(
+    key="DCSExplorer",
+    filename="DCSExplorer.exe",
+    release_tag="mjrgh/DCSExplorer v1.1",
+    sha256="2a62a42fb180ce73912852f52c7de173c8644650e3858132ad0ab3f00cfc22ee",
+    size=500224,
+    version="DCSExplorer v1.1 (mjrgh, BSD-3-Clause)",
+    what="decodes the sound ROMs of DCS-era Williams/Bally games",
+    dest="",
+    url=_DCS_RELEASE + "DCSExplorer.exe",
+))
+
+register_host(Payload(
+    key="DCSEncoder",
+    filename="DCSEncoder.exe",
+    release_tag="mjrgh/DCSExplorer v1.1",
+    sha256="79028d8708550fe7f8c3d33a0529b6bf2b728eb3656f33f2c61cbb3f09651af1",
+    size=3399168,
+    version="DCSEncoder v1.1 (mjrgh, BSD-3-Clause)",
+    what="writes edited sounds back into Cactus Canyon's DCS sound ROMs",
+    dest="",
+    url=_DCS_RELEASE + "DCSEncoder.exe",
+))
+
+
 def is_published(payload: Payload) -> bool:
     """False while a payload has no pinned hash yet - the app then builds from
     source as it always did.  This is what lets the mechanism ship before the
@@ -182,6 +231,8 @@ def is_published(payload: Payload) -> bool:
 
 def asset_url(payload: Payload, repo: str = GITHUB_REPO) -> str:
     """The direct release-asset URL.  No API call - see the module docstring."""
+    if payload.url:
+        return payload.url
     return "https://github.com/%s/releases/download/%s/%s" % (
         repo, payload.release_tag, payload.filename)
 
@@ -588,7 +639,7 @@ def _is_held(path: str) -> bool:
 def current_payloads() -> List[Payload]:
     """Every payload this app version pins: the registry and the runtime
     image (pinned in core/runtime.py, which imports this module)."""
-    keep = list(PAYLOADS.values())
+    keep = list(PAYLOADS.values()) + list(HOST_PAYLOADS.values())
     try:
         from . import runtime
         keep.append(runtime.IMAGE)

@@ -2214,6 +2214,44 @@ def test_shadow_saucer_kicks_from_another_kicker():
     assert out.count("End Sub") == len(re.findall(r"(?im)^\s*(?:public |private )?sub\s", out))
 
 
+FLEEP_RAMP_ROLL = (
+    "\ndim RampBalls(5,2)\n"
+    "Sub WireRampOn(input)  : Waddball ActiveBall, input : RampRollUpdate: End Sub\n"
+    "Sub WireRampOff() : WRemoveBall ActiveBall.ID\t: End Sub\n")
+
+
+def test_shadow_kickers_take_the_ball_off_the_ramp_roll_list():
+    # PAD-1622: masonm's Deadpool Color Rush (nFozzy/Fleep) puts a ball on its
+    # 5-slot RampBalls list on the lock lane's wire; its own Lock_Hit took it
+    # off (WireRampOff) before the kick. The bridge's lock sub did not, and
+    # each locked ball stayed on the list for good (headless VPX: after four
+    # locks and the post's release, four dead balls and the timer still on)
+    vs = pytest.importorskip("vpxshadow")
+    tribute = MINI_TRIBUTE + FLEEP_RAMP_ROLL
+    variants = {}
+    variants["saucer"] = json.loads(json.dumps(MINI_SHADOW))
+    variants["stack"] = _lock_stack_shadow()
+    variants["stack_kick_from"] = _lock_stack_shadow()
+    variants["stack_kick_from"]["saucers"]["Kicker1"]["kick_from"] = "Kicker2"
+    variants["lift"] = json.loads(json.dumps(MINI_SHADOW))
+    variants["lift"]["saucers"]["Kicker1"]["lift"] = 35
+    variants["feeder"] = _lock_stack_shadow()
+    variants["feeder"]["saucers"]["Kicker1"]["feeders"] = {"Kicker3": {}}
+    for name, m in variants.items():
+        out, rep = vs.patch(tribute, m)
+        adds = [ln for ln in out.split("\n") if "AddBall Me" in ln and "bsTrough" not in ln]
+        assert adds and all("WireRampOff : bsKicker1.AddBall Me" in ln for ln in adds), (name, adds)
+        assert "WireRampOff" in " ".join(rep), name
+        if "kick_from" in name:
+            assert "WireRampOff : Me.DestroyBall : vpmCreateBall Kicker2" in out
+        # without the table's ramp roll, no call to a sub it lacks
+        plain, rep = vs.patch(MINI_TRIBUTE, m)
+        assert "WireRampOff" not in plain and "WireRampOff" not in " ".join(rep), name
+    # a WireRampOff that wants arguments is another table's own sub: left alone
+    out, _ = vs.patch(MINI_TRIBUTE + "\nSub WireRampOff(a, b) : End Sub\n", variants["stack"])
+    assert "WireRampOff : bsKicker1" not in out
+
+
 @pytest.mark.skipif(not (sys.platform == "win32" and shutil.which("cscript")),
                     reason="runs the generated VBScript under cscript")
 def test_shadow_held_lock_post_lets_every_ball_out(tmp_path):

@@ -31,7 +31,7 @@ pad_can_write "$PAD_SHIM_STAMP" build || exit 1
 CC_SRCS=()
 for f in $PAD_SHIM_SRCS; do
     cp "$RIG/$f" "$PAD_STAGE/$f"
-    case $f in *.c) CC_SRCS+=("$PAD_STAGE/$f") ;; esac
+    case $f in padgst.c) ;; *.c) CC_SRCS+=("$PAD_STAGE/$f") ;; esac
 done
 # THE SAME VERDICT ON EVERY COMPILER, and that flag is the whole of it.
 #
@@ -58,10 +58,15 @@ arm-linux-gnueabihf-gcc -std=gnu17 -fno-stack-protector -shared -fPIC -O2 -nostd
 # input to watch.sh's decision to rebuild; see pad_shim_hash() for why it is a
 # digest of the bytes and not a comparison of file times. Written only after a
 # successful compile (set -e), so a failed build never claims to be current.
+# padgst.so: the same video bridge (gststub.c + gstvid.c) for a program that is
+# not the game - a test card's menu playing a clip through the game's own chain
+# (Simon, 2026-11-22; codeselect/gstclip.c). padgst.c gives the two things the
+# bridge borrows from hwshim. run_game.sh preloads it into the menu.
+arm-linux-gnueabihf-gcc -std=gnu17 -fno-stack-protector -shared -fPIC -O2 -nostdlib   -Werror=implicit-function-declaration   -Wl,-soname,padgst.so -o "$R/lib/padgst.so"   "$PAD_STAGE/gststub.c" "$PAD_STAGE/gstvid.c" "$PAD_STAGE/padgst.c"   -L"$R/lib" -l:libdl.so.2 -l:libc.so.6 -lgcc
 pad_shim_hash "$RIG" > "$PAD_SHIM_STAMP"
 # HAND BOTH BACK when this ran as root, or the next ORDINARY run cannot replace
 # either and rebuilds for ever without succeeding - `>` needs write permission
 # on the file, and a root-owned 644 stamp in a human's rootfs refuses it. This
 # is how PAD-182's machine got its unwritable stamp in the first place.
-pad_give_back "$R/lib/hwshim.so" "$PAD_SHIM_STAMP"
+pad_give_back "$R/lib/hwshim.so" "$R/lib/padgst.so" "$PAD_SHIM_STAMP"
 echo "built ok: $(ls -l "$R/lib/hwshim.so" | awk '{print $5}') bytes"

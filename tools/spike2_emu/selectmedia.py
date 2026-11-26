@@ -138,6 +138,10 @@ GIF_DEFAULT_DELAY_MS = 100                  # what the selector uses when a fram
 TEST_MAX = 64                               # codeselect conf.h CONF_MAX_TESTS
 #: THE TEST CARD's lists (PAD-1279, DragonRR): what --test KIND:PATH puts an item under
 TEST_KINDS = ("image", "video", "scene", "sound")
+#: Simon (2026-11-22): --test clip:PATH puts a video on the card AS IT IS (.mp4/.mov/.m4v),
+#: for the menu to play through the machine's own decoder (codeselect/gstclip.c) - in the
+#: Videos list, beside the .padv ones
+TEST_CLIP_EXTS = (".mp4", ".mov", ".m4v")
 #: a test video plays WHOLE on the machine (codeselect video.h, a .padv: JPEG frames, 4:4:4)
 #: - up to this long, at its own rate up to this fast; its sound is a WAV beside it
 TEST_VIDEO_MAX_SECONDS = 300
@@ -749,7 +753,15 @@ def validate_manifest(m):
                 if not isinstance(t["sound"], str) or not t["sound"].lower().endswith(".wav"):
                     raise Refused("media.json: tests[%d].sound must be a .wav name" % k)
                 check_media_name(t["sound"])
-            extra = set(t) - {"file", "label", "source", "kind", "sound"}
+            # THE LAYERED TEST (Simon, 2026-11-23): a test video's scene overlay, beside it with
+            # its name (codeselect/overlay.h) - only a TEST CARD video's, which plays whole
+            if t.get("overlay") is not None:
+                ov = t["overlay"]
+                if not isinstance(ov, str) or not ov.lower().endswith(".pado") or t.get("kind") != "video" \
+                        or os.path.splitext(ov)[0] != os.path.splitext(t["file"])[0]:
+                    raise Refused("media.json: tests[%d].overlay must be the video's own name as a .pado" % k)
+                check_media_name(ov)
+            extra = set(t) - {"file", "label", "source", "kind", "sound", "overlay"}
             if extra:
                 raise Refused("media.json: tests[%d] has unknown keys %s" % (k, sorted(extra)))
     return m
@@ -761,7 +773,7 @@ def test_card_files(m):
     out = []
     for t in (m.get("tests") or []):
         if t.get("kind"):
-            out += [n for n in (t.get("file"), t.get("sound")) if n]
+            out += [n for n in (t.get("file"), t.get("sound"), t.get("overlay")) if n]
     return out
 
 
@@ -769,7 +781,7 @@ def manifest_files(m):
     """Every media name the manifest references, in order, without duplicates."""
     names = []
     for t in (m.get("tests") or []):
-        for key in ("file", "sound"):
+        for key in ("file", "sound", "overlay"):
             if t.get(key) and t[key] not in names:
                 names.append(t[key])
     for im in m["images"]:
@@ -1858,6 +1870,20 @@ def check_media_dir(d, log=say):
         if ext == "padv":
             padv_info(p)                          # refuses a broken one; never read whole
             continue
+        if ext == "pado":
+            # a layered test's scene overlay (codeselect/overlay.h): its magic is all this checks
+            with open(p, "rb") as f:
+                if f.read(8) != b"PADOVL01":
+                    raise Refused("%s is not a scene overlay (.pado)" % name)
+            continue
+        if "." + ext in TEST_CLIP_EXTS:
+            # a clip as it is (Simon, 2026-11-22): an MP4 / QuickTime box at its head is
+            # all this checks; the machine's decoder says the rest on the test screen
+            with open(p, "rb") as f:
+                head = f.read(12)
+            if len(head) < 8 or head[4:8] not in (b"ftyp", b"moov", b"mdat", b"wide", b"free", b"skip"):
+                raise Refused("%s is not an MP4 / QuickTime file" % name)
+            continue
         with open(p, "rb") as f:
             data = f.read()
         if ext == "png":
@@ -1874,7 +1900,7 @@ def check_media_dir(d, log=say):
             if why:
                 raise Refused("%s: %s" % (name, why))
         else:
-            raise Refused("%s: only png/gif/wav/padv belong in a media set" % name)
+            raise Refused("%s: only png/gif/wav/padv (and a test clip's mp4/mov/m4v) belong in a media set" % name)
     # A TEST CARD's own items (a kind said: PAD-1279) go on the card's own p3, sized to
     # them - mkmulticard.py testcard; they are not the menu's budget
     apart = test_card_files(m)
@@ -2943,7 +2969,7 @@ def parse_test_spec(spec):
     spec = str(spec)
     kind = None
     head, colon, rest = spec.partition(":")
-    if colon and head in TEST_KINDS:
+    if colon and (head in TEST_KINDS or head == "clip"):
         kind, spec = head, rest
     path, sep, label = spec.partition("|")
     path = path.strip()
@@ -2955,9 +2981,13 @@ def parse_test_spec(spec):
                       % (spec, TEST_LABEL_MAX))
     if not os.path.isfile(path):
         raise Refused("--test %s: not a file" % path)
+    if kind == "clip" and os.path.splitext(path)[1].lower() not in TEST_CLIP_EXTS:
+        raise Refused("--test %s: a clip for the machine's own decoder is a %s file"
+                      % (path, " / ".join(TEST_CLIP_EXTS)))
     if kind:
         got = test_kind(path)
-        fits = {"image": ("picture",), "scene": ("picture",), "video": ("anim",), "sound": ("sound",)}[kind]
+        fits = {"image": ("picture",), "scene": ("picture",), "video": ("anim",), "sound": ("sound",),
+                "clip": ("anim",)}[kind]
         if got not in fits:
             raise Refused("--test %s: a %s is asked for, but it is a %s"
                           % (path, kind, {"picture": "picture", "anim": "video", "sound": "sound"}[got]))
@@ -3017,27 +3047,35 @@ def _prepare_test(k, path, out, work, log=say, want=None):
     kind = test_kind(path)
     if want == "video":
         kind = "padv"
-    ext = {"picture": ".png", "anim": ".gif", "sound": ".wav", "padv": ".padv"}[kind]
+    if want == "clip":
+        kind = "clip"
+    ext = {"picture": ".png", "anim": ".gif", "sound": ".wav", "padv": ".padv",
+           "clip": os.path.splitext(path)[1].lower()}[kind]
     name = "test%d%s" % (k, ext)
     target = os.path.join(out, name)
-    snd = os.path.join(out, "test%d.wav" % k) if kind == "padv" else None
+    snd = os.path.join(out, "test%d.wav" % k) if kind in ("padv", "clip") else None
     stamp = source_stamp(path)
     params = {"test": kind}
     if os.path.isfile(target) and cache_matches(read_sidecar(target), stamp, params):
         side = read_sidecar(target) or {}
         sound = side.get("params", {}).get("sound") if isinstance(side.get("params"), dict) else None
-        if kind == "padv":
+        if kind in ("padv", "clip"):
             sound = os.path.basename(snd) if os.path.isfile(snd) else None
         log("  test %d: %s (kept, %s unchanged)" % (k, name, os.path.basename(path)))
         return {"file": name, "sound": sound}
-    for other in (".png", ".gif", ".wav", ".padv"):
+    for other in (".png", ".gif", ".wav", ".padv") + TEST_CLIP_EXTS:
         stale = os.path.join(out, "test%d%s" % (k, other))
         if other != ext and os.path.exists(stale) and not (snd and stale == snd):
             os.remove(stale)
             drop_sidecar(stale)
     sound = None
-    if kind == "padv":
-        how = _test_padv(path, target, work, log=log)
+    if kind in ("padv", "clip"):
+        if kind == "clip":
+            # as it is: the machine's decoder reads the file the game would
+            shutil.copyfile(path, target)
+            how = "the clip as it is, %s" % fmt_bytes(os.path.getsize(target))
+        else:
+            how = _test_padv(path, target, work, log=log)
         if snd and os.path.exists(snd):
             os.remove(snd)
         try:
@@ -3289,6 +3327,19 @@ def cmd_prepare(a):
     tests_in = [parse_test_spec(t) for t in (getattr(a, "test", None) or [])]
     if len(tests_in) > TEST_MAX:
         raise Refused("--test: %d test pictures; the menu takes at most %d" % (len(tests_in), TEST_MAX))
+    # THE LAYERED TEST (Simon, 2026-11-23): K=PATH puts a scene overlay (.pado, made by
+    # pinball_decryptor.plugins.stern.layered_test) over test K's video
+    overlays = {}
+    for spec in getattr(a, "test_overlay", None) or []:
+        idx, sep, path = str(spec).partition("=")
+        if not sep or not idx.strip().isdigit() or not 0 <= int(idx) < len(tests_in):
+            raise Refused("--test-overlay %r: expected K=PATH, K one of the %d --test items" % (spec, len(tests_in)))
+        if tests_in[int(idx)][2] not in ("video", "clip"):
+            raise Refused("--test-overlay %s: test %s is not a TEST CARD video (video: or clip:)" % (spec, idx))
+        with open(path, "rb") as f:
+            if f.read(8) != b"PADOVL01":
+                raise Refused("--test-overlay %s: not a scene overlay (.pado)" % path)
+        overlays[int(idx)] = path
     visual_only = bool(getattr(a, "visual_only", False))
     say("prepare: %d image%s, panel %dx%d, out %s%s"
         % (n, "" if n == 1 else "s", size[0], size[1], out, " (visual only)" if visual_only else ""))
@@ -3340,9 +3391,16 @@ def cmd_prepare(a):
                 got = _prepare_test(k, path, out, work, want=kind)
                 ent = {"file": got["file"], "label": label, "source": path}
                 if kind:
-                    ent["kind"] = kind
+                    ent["kind"] = "video" if kind == "clip" else kind
                 if got.get("sound"):
                     ent["sound"] = got["sound"]
+                pado = os.path.join(out, os.path.splitext(got["file"])[0] + ".pado")
+                if k in overlays:
+                    shutil.copyfile(overlays[k], pado)
+                    ent["overlay"] = os.path.basename(pado)
+                    say("  test %d: a scene over it, %s" % (k, fmt_bytes(os.path.getsize(pado))))
+                elif os.path.exists(pado):
+                    os.remove(pado)
                 tests_out.append(ent)
     finally:
         for s in sources.values():
@@ -3461,6 +3519,9 @@ def main(argv=None):
                         "menu-sized clip.  KIND (image, video, scene, sound) puts it in that "
                         "list of a TEST CARD: a video then plays whole, in full colour "
                         "(a .padv, up to %d s)" % (TEST_MAX, TEST_VIDEO_MAX_SECONDS))
+    s.add_argument("--test-overlay", action="append", default=[], metavar="K=PATH",
+                   help="a scene overlay (.pado: python -m pinball_decryptor.plugins.stern."
+                        "layered_test) over --test item K's video, 0-based: the layered test")
     s.add_argument("--sound-move", default="auto", metavar="PATH|auto|synth|none")
     s.add_argument("--sound-confirm", action="append", default=[],
                    metavar="PATH|auto|synth|none | N=PATH|auto|synth|none",

@@ -24,8 +24,9 @@ fi
 STERN_KO = b'\x7fELF stern driver\x00version=v5.3.1_27678.20180430\x00vermagic=' + W.KERNEL.encode() + b' SMP preempt\x00'
 
 
-def build(tmp_path, hook=HOOK, supplicant=b'\x7fELF drivers: nl80211 wext', extra=None, module=STERN_KO):
-    mk = shutil.which('mke2fs') or TOOLS + '/mke2fs'
+def build(tmp_path, hook=HOOK, supplicant=b'\x7fELF drivers: nl80211 wext', extra=None, module=STERN_KO,
+          links=None):
+    mk =shutil.which('mke2fs') or TOOLS + '/mke2fs'
     if not os.path.exists(mk):
         pytest.skip('real filesystem tools required')
     tree = tmp_path / 'tree'
@@ -42,6 +43,10 @@ def build(tmp_path, hook=HOOK, supplicant=b'\x7fELF drivers: nl80211 wext', extr
     for rel, data in (extra or {}).items():
         (tree / rel).parent.mkdir(parents=True, exist_ok=True)
         (tree / rel).write_bytes(data)
+    for rel, target in (links or {}).items():                 # PAD-1619: a link in place of the file
+        (tree / rel).parent.mkdir(parents=True, exist_ok=True)
+        (tree / rel).unlink(missing_ok=True)
+        (tree / rel).symlink_to(target)
     fs = tmp_path / 'root.img'
     with fs.open('wb') as f:
         f.truncate(24 << 20)

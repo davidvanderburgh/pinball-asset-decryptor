@@ -19,7 +19,13 @@ it through; the switch lines go down the same pipe, and each one is read back
 off the game's merge and written again until the game has taken it
 (padsw.Confirmer, which swkeys.py uses too). No HELLO, an ERR, or 6 s without a
 ping and the controller falls back to swkeys.py plus re-reading padled over
-\\wsl.localhost, handing over every switch still held. `PAD_VPX_LINK=0` in the
+\\wsl.localhost, handing over every switch still held. The fallback is not
+the rest of the session (PAD-1617): a new link is started beside it 5 s on
+(then 10, 20, 40, every 60 s while it fails), and once that one is up the held
+switches go over to it and the fallback's swkeys.py is retired with a "keep"
+line, so its EOF lets go of nothing the table holds. Live, Walking Dead on
+Spike 3: a sling's switch-to-coil 9 ms on the link, 12 ms (29 ms worst) on the
+fallback, the link back 5 s after it was dropped. `PAD_VPX_LINK=0` in the
 environment VPX starts in skips the link.
 
 A PC whose Windows cannot open the run's files over \\wsl.localhost at all
@@ -521,6 +527,14 @@ and auto-launch lines are commented out (`neuter`). Three lessons:
   kicker feeds a ball stack on all of them; `held_ms` is for a post the game
   holds down (12 s at Deadpool's multiball): a ball goes out each `held_ms`
   while it is down, where a kicker coil lets one go per pulse.
+* **A kicker takes its ball off the ramp-roll list** (PAD-1622). nFozzy/Fleep
+  tables (masonm's Deadpool Color Rush) put a ball on a 5-slot RampBalls list
+  as it climbs a ramp (`WireRampOn`) and drop it only once it is back on the
+  playfield, or when a sub calls `WireRampOff`, as the mod's own Lock_Hit did.
+  The bridge's kicker subs replace the table's, so where the table has a
+  `Sub WireRampOff()` each one calls it before the ball stack takes the ball:
+  otherwise every ball the Katana lock (up on its wire) held stayed on the
+  list for good, its loop sound left running and one slot left for play.
 * **A kicker that teleports keeps its exit** (PAD-905). JPSalas's John Wick
   takes the VUK's ball in at Krampcoude and pops it out of Krampcoude1 on the
   return wire, and the arch lock's in at Karche (the center ramp's top) and

@@ -1119,6 +1119,8 @@ def gen(m, had, quiet=None, dof=None):
         # paddle's shake; the sub's rules stay out)
         return " : " + s["also"] if s.get("also") else ""
     lamps = lamp_groups(m) or lamp_calls(m)
+    # PAD-1622: a kicker taking the ball takes it off the ramp-roll list
+    off = "WireRampOff : " if had.get("WireRampOff") else ""
 
     def calls_orig(name):
         return _calls_orig(m, name)
@@ -1566,7 +1568,7 @@ def gen(m, had, quiet=None, dof=None):
         if s.get("stack"):
             # a full lane: the ball has nowhere to stop and rolls back out
             if s.get("kick_from"):
-                full = ["\t\tMe.DestroyBall : vpmCreateBall %s" % s["kick_from"],
+                full = ["\t\t%sMe.DestroyBall : vpmCreateBall %s" % (off, s["kick_from"]),
                         "\t\t%s.Kick %d, %d" % (s["kick_from"], s["dir"], s["power"])]
             else:
                 full = ["\t\tMe.Kick %d, %d" % (s["dir"], s["power"])]
@@ -1574,7 +1576,7 @@ def gen(m, had, quiet=None, dof=None):
                     "\tIf bs%s.Balls >= %d Then" % (k, 1 + len(s["stack"]))] + full + [
                     "\t\tExit Sub",
                     "\tEnd If",
-                    "\tbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s" % (k, k, fx(k + "_Hit"))]
+                    "\t%sbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s" % (off, k, k, fx(k + "_Hit"))]
             if s.get("held_ms"):          # the post is down: it rolls on through
                 out.append("\tIf PadHeld%s And Not PadHeld%sRun Then PadHeld%s_Next" % (k, k, k))
             out.append("End Sub")
@@ -1585,9 +1587,9 @@ def gen(m, had, quiet=None, dof=None):
             # the ball at this height first (ElevatorKickOut: eBall.Z = 35);
             # the coil does the same here, on the ball the kicker holds
             out += ["Dim PadLiftBall%s" % k,
-                    "Sub %s_Hit : Set PadLiftBall%s = ActiveBall : %sbs%s.AddBall Me : "
+                    "Sub %s_Hit : Set PadLiftBall%s = ActiveBall : %s%sbs%s.AddBall Me : "
                     "PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
-                    % (k, k, enter + " : " if enter else "", k, k, fx(k + "_Hit")),
+                    % (k, k, enter + " : " if enter else "", off, k, k, fx(k + "_Hit")),
                     "Sub PadLift%s_Sol(e)" % k,
                     "\tIf e Then",
                     "\t\tOn Error Resume Next",
@@ -1597,21 +1599,21 @@ def gen(m, had, quiet=None, dof=None):
                     "\tbs%s.SolOut e" % k,
                     "End Sub"]
         else:
-            out.append("Sub %s_Hit : %sbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
-                       % (k, enter + " : " if enter else "", k, k, fx(k + "_Hit")))
+            out.append("Sub %s_Hit : %s%sbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s : End Sub"
+                       % (k, enter + " : " if enter else "", off, k, k, fx(k + "_Hit")))
         for f, fs in s.get("feeders", {}).items():
             # PAD-952: another hole into the same lane (Halloween's three left
             # scoops, one subway): its own entry opto, then the lane's stack
             fenter = "vpmTimer.PulseSw 1%03d : " % fs["enter"] if fs.get("enter") else ""
             cap = 1 + len(s.get("stack", []))
             if s.get("kick_from"):      # a full lane: out where the lane lets balls out
-                full = "Me.DestroyBall : vpmCreateBall %s : %s.Kick %d, %d" % (
-                    s["kick_from"], s["kick_from"], s["dir"], s["power"])
+                full = "%sMe.DestroyBall : vpmCreateBall %s : %s.Kick %d, %d" % (
+                    off, s["kick_from"], s["kick_from"], s["dir"], s["power"])
             else:
                 full = "Me.Kick %d, %d" % (s["dir"], s["power"])
             out += ["Sub %s_Hit" % f,
                     "\t%sIf bs%s.Balls >= %d Then %s : Exit Sub" % (fenter, k, cap, full),
-                    "\tbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s" % (k, f, fx(f + "_Hit")),
+                    "\t%sbs%s.AddBall Me : PlaySoundAt \"fx_kicker_enter\", %s%s" % (off, k, f, fx(f + "_Hit")),
                     "End Sub"]
         if s.get("held_ms"):
             # a lock POST (PAD-901): the game holds it down for as long as it
@@ -1914,6 +1916,18 @@ def flipper_flag(m):
     return f
 
 
+def ramp_roll_off(lines):
+    """PAD-1622: a Fleep / nFozzy table's ramp-roll sounds. `WireRampOn` puts
+    the ActiveBall on a RampBalls list of 5, `WireRampOff` takes it off; on its
+    own a ball leaves the list only once it is down on the playfield (Z < 30).
+    The table's own kicker subs up on a ramp call WireRampOff before they
+    swallow the ball; the bridge's stand-ins must too, or each ball a lock on
+    a ramp takes stays on the list for good (Deadpool Color Rush: the Katana
+    lock's four balls, their wire loop never stopping, one slot left)."""
+    pat = re.compile(r"^\s*(?:Public\s+)?Sub\s+WireRampOff\s*(?:\(\s*\))?\s*(?::|'|$)", re.I)
+    return any(pat.match(ln) for ln in lines)
+
+
 def has_sub(lines, name):
     pat = re.compile(r"^\s*(?:Public\s+|Private\s+)?(?:Sub|Function)\s+%s\b" % re.escape(name), re.I)
     return any(pat.match(ln) for ln in lines)
@@ -1995,6 +2009,10 @@ def patch(script, m):
             rename_sub(lines, f + "_Hit", rep)
     for sub in ("SolLFlipper", "SolRFlipper", "SolULFlipper", "SolURFlipper"):
         had[sub] = has_sub(lines, sub)
+    had["WireRampOff"] = ramp_roll_off(lines)
+    if had["WireRampOff"] and saucers(m):
+        rep.append("ramp sounds: each kicker takes the ball it holds off the table's "
+                   "ramp-roll list first (WireRampOff), so no held ball stays on it")
     rep.extend(flipper_warnings(m, had, lines))
     quiet = {}
     for name in m.get("quiet_subs", []):

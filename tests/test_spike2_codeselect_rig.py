@@ -616,7 +616,7 @@ def test_the_selector_runs_without_the_shim_and_with_stdin_closed():
     script from stdin, so a child that reads stdin eats the rest of it."""
     text = _read("run_game.sh")
     line = next(ln for ln in text.splitlines()
-                if 'chroot "$R" $SEL_BIN --conf /dump/codeselect.conf' in ln)
+                if '$SEL_BIN --conf /dump/codeselect.conf' in ln)
     assert "LD_PRELOAD" not in line
     assert "</dev/null" in line
     assert "--input padsw" in line
@@ -626,6 +626,27 @@ def test_the_selector_runs_without_the_shim_and_with_stdin_closed():
     assert '--timeout "${PAD_SELECT_TIMEOUT:-30}"' in line
     assert "--media /dump/media" in line, "the card's media directory, as the guest sees /dump"
     assert "--audio" not in line, "audio is inherited (PAD_AUDIO_PLAY / PAD_AUDIO_FMT), not a rig flag"
+
+
+
+def test_a_test_cards_menu_gets_the_video_bridge_alone():
+    """Simon (2026-11-22): a test card's clip plays through the game's own GStreamer chain
+    (codeselect/gstclip.c); in the emulator that is the PC's decoder behind padgst.so -
+    gststub.c + gstvid.c without hwshim - preloaded only for a test card with the video
+    host up, through the guest's env (an LD_PRELOAD on the host's chroot would aim an ARM
+    library at an x86 program)."""
+    text = _read("run_game.sh")
+    line = next(ln for ln in text.splitlines()
+                if '$SEL_BIN --conf /dump/codeselect.conf' in ln)
+    assert 'chroot "$R" ${SEL_ENV:+/usr/bin/env $SEL_ENV} $SEL_BIN' in line
+    assert "hwshim" not in line
+    assert 'SEL_ENV="LD_PRELOAD=/lib/padgst.so"' in text
+    guard = text[text.index('SEL_ENV=""'):text.index('SEL_ENV="LD_PRELOAD=/lib/padgst.so"')]
+    assert '"${PAD_TESTCARD:-0}" = 1' in guard and '"${PAD_VID:-0}" = 1' in guard
+    build = _read("build.sh")
+    assert '-o "$R/lib/padgst.so"' in build
+    assert '"$PAD_STAGE/gststub.c" "$PAD_STAGE/gstvid.c" "$PAD_STAGE/padgst.c"' in build
+    assert "case $f in padgst.c) ;;" in build, "padgst.c's pad_say must not be linked into hwshim.so"
 
 
 # ---- item 106: image groups reach the rig conf, or are dropped out loud ----
@@ -689,7 +710,7 @@ def test_pad_select_pick_reaches_the_selector_and_nothing_else_does():
     the roll."""
     text = _read("run_game.sh")
     line = next(ln for ln in text.splitlines()
-                if 'chroot "$R" $SEL_BIN --conf /dump/codeselect.conf' in ln)
+                if '$SEL_BIN --conf /dump/codeselect.conf' in ln)
     assert "$SEL_PICK" in line
     assert "--seed" not in text, "there is no rig knob for the seed, on purpose"
     guard = text[text.index('SEL_PICK=""'):text.index("$SEL_PICK", text.index('SEL_PICK=""') + 20)]
@@ -1292,6 +1313,10 @@ def _srcs(var):
 EXPECTED_SRCS = ["codeselect.c", "conf.c", "conf.h",
                  # PAD-307: the colour correction and the SETTINGS tile's screens
                  "colour.c", "colour.h", "settings.c", "settings.h", "testpics.c", "testpics.h", "video.c", "video.h",
+                 # Simon (2026-11-22): a test clip through the machine's own decoder
+                 "gstclip.c", "gstclip.h",
+                 # ...and the scene over it, the layered test (2026-11-23)
+                 "overlay.c", "overlay.h",
                  "theme.c", "theme.h", "themes.json", "gen_themes.py",
                  "gfx.c", "gfx.h",
                  "egl_stern.c", "egl_stern.h", "input.c", "input.h",

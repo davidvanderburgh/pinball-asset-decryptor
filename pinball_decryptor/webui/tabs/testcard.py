@@ -56,7 +56,10 @@ class TestCardTab(TabService):
         for i, it in enumerate(lst.items):
             rows.append({"i": i, "kind": it.kind, "label": it.label,
                          "from": it.game or os.path.basename(it.project.rstrip("/\\")) if it.project else "",
-                         "where": it.rel if it.project else it.path,
+                         "where": (it.rel if it.project else it.path) + (
+                             # the layered test: the scenes drawn over the clip
+                             "  -  layered: %d scene%s over it (%s)" % (len(it.layers), "" if len(it.layers) == 1 else "s",
+                                                                       ", ".join(it.layers)) if it.layers else ""),
                          "problem": tc.item_problem(it)})
         rows.sort(key=lambda r: KIND_ORDER[r["kind"]])        # stable: each list in its own order
         source_ok = bool(lst.source) and os.path.isfile(lst.source)
@@ -233,6 +236,45 @@ class TestCardTab(TabService):
         return self.build(send_to=address)
 
     @rpc
+    def grow(self):
+        """Grow on the machine…: the test card the machine runs grows to fill its SD card (core/testcard_grow.py).
+        Simon (2026-11-22): it "can be grown remotely but will require reboots".  The machine is read first, so
+        the question says how big it gets; nothing changes until the user says yes."""
+        if self._busy:
+            return False
+        address = self._address()
+        if not address:
+            raise RpcError("Find the machine on the Network tab first: the card it runs is the one grown")
+        fn = self.window.cb.get("on_grow_test_card")
+        if fn is None:
+            raise RpcError("Grow on the machine is not available here")
+        from ...core import remote_send as rs, testcard_grow as tg
+        try:
+            machine = rs.connect(address)
+        except rs.SendError as e:
+            raise RpcError(str(e)) from None
+        try:
+            p, need, free = tg.survey(machine)
+        except rs.SendError as e:
+            raise RpcError(str(e)) from None
+        finally:
+            machine.close()
+        if need > free:
+            raise RpcError("The machine's system partition has %s free, and /data and /dump need %s to be kept "
+                           "safe while the card grows." % (rs._human(free), rs._human(need)))
+        if not compat.messagebox.askyesno(
+                "Grow the card on the machine",
+                "Grow the card on the machine at %s to fill its %s SD card?\n\nIts games partition goes from %s to "
+                "%s. The machine restarts once, and while it starts up it enlarges that partition and moves /data "
+                "and /dump (a few minutes); leave it switched on until PAD says the grow is done.\n\nIts games, test "
+                "files, remote access and settings are kept."
+                % (address, rs._human(p.card * tg.SECTOR), rs._human(p.old[3][1] * tg.SECTOR),
+                   rs._human(p.p3[1] * tg.SECTOR)), icon="warning"):
+            return False
+        fn(address)
+        return True
+
+    @rpc
     def build(self, send_to=""):
         """Build test card… (and, from Send to machine…, send it to *send_to* once built)"""
         if self._busy:
@@ -310,7 +352,7 @@ class TestCardTab(TabService):
                     self._say("test card: " + tc.S3_NO_NETWORK)
                 net = dict(tc.NETWORK_DEFAULTS)
             staged = tc.stage(items, os.path.join(work, "files"), None, log=self._say,
-                              cancel=lambda: self._cancel)
+                              cancel=lambda: self._cancel, clips=not s3)
             if self._cancel:
                 why = "canceled"
                 return

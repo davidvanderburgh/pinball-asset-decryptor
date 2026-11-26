@@ -45,10 +45,15 @@
 #include "audio.h"
 #include "theme.h"
 
+struct gclip_yuv;
+
 #define SETTINGS_IDLE_MS 120000
 /* ...and inside Test pictures, where looking without pressing is the point */
 #define TEST_IDLE_MS 600000
 #define TEST_CAPTION_MS 5000
+/* ACTION held this long on a moving test item backs out; let go sooner, it freezes
+ * the picture or plays on (Simon, 2026-11-22: "quick press to freeze, long press to back out") */
+#define TEST_HOLD_BACK_MS 700
 
 struct settings_env {
     struct gfx *g;
@@ -62,8 +67,16 @@ struct settings_env {
     const char *media_dir;               /* where test= files are (PAD-1279), or NULL */
     int testcard;                        /* a TEST CARD (conf testcard=on): no way back to
                                             a menu, no idle exit, TEST CARD as the heading */
+    int leave;                           /* with testcard: the TEST CARD ENTRY on a game card -
+                                            ACTION on the top screen goes back to the menu */
     int first_image;                     /* the image Color correction opens on, or -1 */
     void (*present)(void *ctx);          /* upload what is dirty and swap */
+    /* THE GRAPHICS CHIP DRAWS A CLIP (the table, 2026-11-25: 10 fps with the CPU
+     * converting): one YUV frame shown at x, y, w x h under the canvas from the next
+     * present on (f NULL: none); 0 shown, -1 cannot (the CPU converts it as before).
+     * NULL, or video_gpu 0 (a snapshot, another machine), never asks. */
+    int (*video)(void *ctx, const struct gclip_yuv *f, int x, int y, int w, int h);
+    int video_gpu;
     void *ctx;
     volatile sig_atomic_t *stop;
 };

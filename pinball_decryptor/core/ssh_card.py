@@ -150,13 +150,61 @@ def _node(reader, path):
     return node
 
 
+def resolve(reader, path, hops=8):
+    """``(path, node)`` of what *path* names once every symbolic link on the way is followed inside this
+    filesystem, node None when nothing is there.  PAD-1619: a card Stern's own updater brought up to date keeps
+    /etc/init.d/game_monitor, game and /etc/fstab as links into /spk/packages/spike-<version>; the files are the
+    ones a stock card has.  ExtrasError for a link loop, or a folder on the way that is not one."""
+    todo = [p for p in path.strip('/').split('/') if p]
+    done, node, seen = [], reader.read_inode(2), 0
+    while todo:
+        name = todo.pop(0)
+        if name == '.':
+            continue
+        if name == '..':
+            done = done[:-1]
+            node = _node(reader, '/' + '/'.join(done)) if done else reader.read_inode(2)
+            continue
+        if stat.S_IFMT(node['mode']) != stat.S_IFDIR:
+            raise ExtrasError('A system folder on the card is not a folder.')
+        ino = next((ino for nm, ino, _ in reader._iter_dir(node) if nm == name), None)
+        if ino is None:
+            return '/' + '/'.join(done + [name] + todo), None
+        child = reader.read_inode(ino)
+        if stat.S_IFMT(child['mode']) == stat.S_IFLNK:
+            seen += 1
+            target = reader.read_symlink(child)
+            if seen > hops or not target or '\0' in target:
+                raise ExtrasError('A system file on the card is a link that does not lead to a file.')
+            todo = [p for p in target.split('/') if p] + todo
+            if target.startswith('/'):
+                done, node = [], reader.read_inode(2)
+            continue
+        done.append(name)
+        node = child
+    return '/' + '/'.join(done), node
+
+
 def _read(reader, path, limit=256 * 1024):
-    node = _node(reader, path)
+    """The bytes of the regular file *path* names, a link followed inside the filesystem (PAD-1619); b'' when
+    there is none."""
+    node = resolve(reader, path)[1]
     if node is None:
         return b''
     if stat.S_IFMT(node['mode']) != stat.S_IFREG or node['size'] > limit:
         raise ExtrasError('An SSH-related file has an unsafe type or size.')
     return reader.read_file_bytes(node)
+
+
+def script_dest(reader, path, what):
+    """The path a rewrite of Stern's own script *path* goes to: *path* itself, or the file its link leads to on
+    this filesystem (PAD-1619: a card Stern's updater brought up to date links game_monitor and game into
+    /spk/packages).  The link stays, as the modes and boot-menu writers leave it (PAD-742).  ExtrasError naming
+    *what* when that is not one plain file."""
+    real, node = resolve(reader, path)
+    if node is not None and (stat.S_IFMT(node['mode']) != stat.S_IFREG or node['links'] != 1):
+        raise ExtrasError('A %s destination on the card is a link or hard-linked file.' % what)
+    return real
 
 
 def _managed(reader):

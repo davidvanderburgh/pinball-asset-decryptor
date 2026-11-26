@@ -819,6 +819,8 @@ class WebMultibootPanel(_Base):
             "scores_column": bool(be.scores_column),
             "emulate": bool(be.emulate),
             "flash": bool(be.flash),
+            # Simon (2026-11-26): a TEST CARD entry in the menu - Spike 2 cards (mkmulticard --test-entry)
+            "test_entry": be.key == "stern",
             # Simon (2026-11-26): the menu on the network with no game running - Spike 2 cards only
             # (core/menu_network.py: padnet on the card's system partition, select.sh starts it)
             "menu_network": be.key == "stern",

@@ -69,7 +69,7 @@ def test_the_runtime_names_the_gate_and_arms_it_before_anything_else():
                      r" \|\| \(cabs_only && n_cabs\)\)\s*\|\| feed_cfg_only\(\) \|\| acc_cfg_only\(\)\)"
                      r"\s*&& !attract_wanted\(\) && !coop_wanted\(\) && !rec_wanted\(\)\) \{.*?"
                      r"if \(\(hand\.on \|\| n_cabs \|\| acc\.on\) && !hook\(fn\(\"tick\"\), on_hand_tick\)\) \{[^{}]*\}"
-                     r"\s*if \(acc\.on && spk_live\) \{[^{}]*\}\s*return;"
+                     r"\s*if \(acc\.on && spk_live\) \{.*?\n        \}\s*return;"   # PAD-1607: Spike 3 ends a ball on the bus
                      r"\s*\}\s*\n\s*if \(!insider_arm\(\)\) return;",
                      src, re.S)
     assert 'hook(fn("agent_header"), on_agent_header)' in src

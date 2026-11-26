@@ -187,7 +187,7 @@ per scene.
 
 - **Games:** 12 (Wonka, GnR, Hobbit, Wizard of Oz, Avatar, Sonic the Hedgehog, etc.)
 - **Reads:** `.iso` Clonezilla image, or **directly from the game SSD**
-- **Tabs:** Extract, Write, Mod Pack, Replace Audio, Replace Video, Emulate, Multi-boot
+- **Tabs:** Extract, Write, Mod Pack, Replace Audio, Replace Video, Replace Images, Emulate, Multi-boot
 
 - **No dongle needed** to extract or write, on every title including the
   Sonic-era engine. The app recognises each title's scheme from the image.
@@ -212,6 +212,9 @@ per scene.
 - **Sonic-era titles:** a replacement must keep its original byte size,
   and the app fits it for you. A PNG or WAV takes the slack in its own
   file; a video is padded with no re-encode, or encoded down to fit first.
+- **Pictures** go on the **Replace Images** tab, scaled to the original's
+  size. On Sonic-era titles one that comes out bigger than its slot is
+  compressed to fit (fewer colors for a PNG, lower quality for a JPEG).
 - **`.ogv` and `.avi`** clips can't be padded, so one that isn't the
   slot's exact size is refused, naming the size to hit.
 - **Checksums** the game checks on load are re-made for you.
@@ -460,7 +463,7 @@ tables.
 | `dmd_scenes/browse.mp4` | Every scene at 2 fps, to skim |
 | `animations/anim_*.mp4` | The game's animations, one MP4 each |
 | `fonts/font_*.png` | Every DMD font as a sprite sheet |
-| `sounds/track_*.wav` | Every DCS music cue, voice line and effect (1993+ games only), via a bundled [DCSExplorer](https://github.com/mjrgh/DCSExplorer) |
+| `sounds/track_*.wav` | Every DCS music cue, voice line and effect (1993+ games only), via [DCSExplorer](https://github.com/mjrgh/DCSExplorer), which PAD downloads the first time it is needed (PAD does not ship it: antivirus programs flag it by mistake) |
 
 **Auto-transcribe samples to callouts.csv** (DCS games) names the sounds
 by their spoken callouts, as on CGC.

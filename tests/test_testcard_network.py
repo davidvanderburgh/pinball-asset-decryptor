@@ -184,15 +184,17 @@ def test_send_needs_remote_access_and_the_machine(monkeypatch):
 def test_send_builds_then_hands_the_card_to_the_apps_send(tmp_path, monkeypatch):
     from pinball_decryptor.webui import compat
     sent = []
+    from pinball_decryptor.core import remote_send as rs
     tab = _tab(send=lambda path, address: sent.append((path, address)))
     lst = tc.shared()
     lst.network = tc.clean_network({"ssh": True})
     asked = []
+    monkeypatch.setattr(rs, "connect", lambda address: _Machine("PAD_TESTCARD\n"))
     monkeypatch.setattr(compat.messagebox, "askyesno", lambda *a, **k: asked.append(a) or True)
     monkeypatch.setattr(tab, "build", lambda send_to="": sent.append(("build", send_to)) or True)
     assert tab.send() is True
     assert sent == [("build", "192.168.1.50")]
-    assert "running a PAD test card already" in asked[0][1]
+    assert "The machine runs a PAD test card" in asked[0][1]
     # ...and once built, the app's own Send takes it (the Network tab's)
     sent[:] = []
     tab._send_to = "192.168.1.50"
@@ -200,6 +202,39 @@ def test_send_builds_then_hands_the_card_to_the_apps_send(tmp_path, monkeypatch)
     open(out, "wb").write(b"x")
     tab._finish(True, "", out)
     assert sent == [(out, "192.168.1.50")] and "Sending it to the machine" in tab.state["msg"][1]
+
+
+def test_send_may_replace_a_multiboot_card_when_asked(tmp_path, monkeypatch):
+    """Simon (2026-11-26): "create a card which is only a test card no multiboot (over the network)" - a machine
+    running a PAD multi-boot card is asked about by name (its games are deleted), and the Send is told it may
+    replace it; a one-game card is still refused before anything is built."""
+    from pinball_decryptor.core import remote_send as rs
+    from pinball_decryptor.webui import compat
+    from pinball_decryptor.webui.rpc import RpcError
+    sent = []
+    tab = _tab(send=lambda path, address, **kw: sent.append((path, address, kw)))
+    lst = tc.shared()
+    lst.network = tc.clean_network({"ssh": True})
+    asked = []
+    monkeypatch.setattr(rs, "connect", lambda address: _Machine("PAD_MENU_CARD\n"))
+    monkeypatch.setattr(compat.messagebox, "askyesno", lambda *a, **k: asked.append(a) or True)
+    monkeypatch.setattr(tab, "build", lambda send_to="": sent.append(("build", send_to)) or True)
+    assert tab.send() is True
+    assert "Replace the multi-boot card" in asked[0][1] and "every game on it are deleted" in asked[0][1]
+    sent[:] = []
+    tab._send_to = "192.168.1.50"
+    out = str(tmp_path / "t.raw")
+    open(out, "wb").write(b"x")
+    tab._finish(True, "", out)
+    assert sent == [(out, "192.168.1.50", {"replace_menu_card": True})]
+    # said no: nothing built
+    asked[:], sent[:] = [], []
+    monkeypatch.setattr(compat.messagebox, "askyesno", lambda *a, **k: asked.append(a) and False)
+    assert tab.send() is False and sent == []
+    # a one-game card: refused, nothing asked
+    monkeypatch.setattr(rs, "connect", lambda address: _Machine(""))
+    with pytest.raises(RpcError, match="its game would be deleted"):
+        tab.send()
 
 
 def test_a_plain_build_does_not_send(tmp_path):
@@ -229,6 +264,9 @@ class _Machine(object):
         self.asked.append(script)
         return 0, self.answer
 
+    def close(self):
+        pass
+
 
 def test_a_test_card_goes_only_to_a_machine_running_one():
     from pinball_decryptor.core import remote_send as rs
@@ -242,8 +280,35 @@ def test_a_test_card_goes_only_to_a_machine_running_one():
     m = _Machine("")
     rs.check_test_card_target(game, m)
     assert m.asked == [], "a game card's Send is not asked anything new"
+    # Simon (2026-11-26): a PAD multi-boot card is replaced only when the user was asked
+    with pytest.raises(rs.SendError, match="asks before it replaces the multi-boot card"):
+        rs.check_test_card_target(card, _Machine("PAD_MENU_CARD\n"))
+    rs.check_test_card_target(card, _Machine("PAD_MENU_CARD\n"), replace_menu_card=True)
+    with pytest.raises(rs.SendError, match="its game would be deleted"):
+        rs.check_test_card_target(card, _Machine(""), replace_menu_card=True)
+    assert rs.machine_card_kind(_Machine("PAD_TESTCARD\n")) == "testcard"
+    assert rs.machine_card_kind(_Machine("PAD_MENU_CARD\n")) == "menu"
+    assert rs.machine_card_kind(_Machine("")) == "game"
     src = open(rs.__file__, encoding="utf-8").read()
-    assert "check_layout(target, machine.layout())\n        check_test_card_target(target, machine)" in src
+    assert ("check_layout(target, machine.layout())\n        check_test_card_target(target, machine, replace_menu_card)"
+            in src)
+
+
+def test_the_send_run_carries_the_permission(monkeypatch):
+    from pinball_decryptor.core import remote_send as rs
+    got = []
+    m = _Machine("")
+    monkeypatch.setattr(rs, "send_image", lambda image, machine, log, progress, cancel, replace_menu_card=False:
+                        got.append(replace_menu_card) or "sent")
+    for flag in (False, True):
+        out = {}
+        rs.SendPipeline("t.raw", "192.168.1.50", lambda *a: None, lambda i: None, lambda *a: None,
+                        lambda ok, summary: out.update(ok=ok), connect_fn=lambda a: m,
+                        replace_menu_card=flag).run()
+        assert out["ok"] is True
+    assert got == [False, True]
+    app = open(os.path.join(os.path.dirname(HERE), "pinball_decryptor", "app.py"), encoding="utf-8").read()
+    assert "backup_keep=keep, replace_menu_card=replace_menu_card)" in app
 
 
 def test_the_page_offers_it():

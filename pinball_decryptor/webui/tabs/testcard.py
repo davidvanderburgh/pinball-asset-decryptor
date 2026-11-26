@@ -226,13 +226,33 @@ class TestCardTab(TabService):
             raise RpcError("Find the machine on the Network tab first: the test card goes to the machine there")
         if self.window.cb.get("on_send_image") is None:
             raise RpcError("Send to machine is not available here")
-        if not compat.messagebox.askyesno(
-                "Send test card to machine",
-                "Build the test card and send it to the machine at %s?\n\nThe machine must be running a PAD "
-                "test card already (a game card is refused: its game would be deleted). Only the files that "
-                "differ are copied, then the machine restarts into the test card menu; leave it switched on "
-                "until then." % address, icon="warning"):
+        # Simon (2026-11-26): "create a card which is only a test card no multiboot (over the network)" - what the
+        # machine runs is read first: a test card is updated, a PAD multi-boot card may be replaced (asked), a
+        # one-game card is refused (its game would be deleted)
+        from ...core import remote_send as rs
+        try:
+            machine = rs.connect(address)
+            try:
+                kind = rs.machine_card_kind(machine)
+            finally:
+                machine.close()
+        except rs.SendError as e:
+            raise RpcError(str(e)) from None
+        if kind == "game":
+            raise RpcError(rs.TESTCARD_ONLY)
+        if kind == "menu":
+            ask = ("Replace the multi-boot card on the machine at %s with this test card?\n\nThe machine runs a "
+                   "PAD multi-boot card. Its menu and every game on it are deleted: afterwards the machine has only "
+                   "the test card. Its remote access and settings are kept. Only the files that differ are copied, "
+                   "then the machine restarts into the test card menu; leave it switched on until then.\n\nTo "
+                   "have the games again, build the multi-boot card and write it to an SD card." % address)
+        else:
+            ask = ("Build the test card and send it to the machine at %s?\n\nThe machine runs a PAD test card. "
+                   "Only the files that differ are copied, then the machine restarts into the test card menu; "
+                   "leave it switched on until then." % address)
+        if not compat.messagebox.askyesno("Send test card to machine", ask, icon="warning"):
             return False
+        self._replace_menu_card = kind == "menu"
         return self.build(send_to=address)
 
     @rpc
@@ -476,8 +496,12 @@ class TestCardTab(TabService):
                          % (out, send_to))
             self._pub_soon()
             fn = self.window.cb.get("on_send_image")
+            replace, self._replace_menu_card = getattr(self, "_replace_menu_card", False), False
             if fn is not None:
-                fn(out, send_to)
+                if replace:
+                    fn(out, send_to, replace_menu_card=True)
+                else:
+                    fn(out, send_to)
             return
         if ok:
             size = os.path.getsize(out) / float(1 << 30) if os.path.exists(out) else 0

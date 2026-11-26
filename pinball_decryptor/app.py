@@ -3239,9 +3239,10 @@ class App:
         fresh image's changes to the machine at *address* (chained from :meth:`_on_done`)."""
         self._start_write(chain_send=address)
 
-    def _start_send(self, image_path, address):
+    def _start_send(self, image_path, address, replace_menu_card=False):
         """PAD-1397: send *image_path* to the machine at *address* over remote access (core/remote_send.py), as a
-        run of its own: the log, the progress bar and the Write tab's Cancel."""
+        run of its own: the log, the progress bar and the Write tab's Cancel.  *replace_menu_card*: a test card may
+        replace the PAD multi-boot card the machine runs (the Test card tab asked, Simon 2026-11-26)."""
         from .core import remote_send
         if self.window._running:
             return
@@ -3260,7 +3261,7 @@ class App:
         from .core import machine_backups
         keep = machine_backups.keep_of(self._settings) if machine_backups.auto_on(self._settings) else None
         self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb,
-                                                 backup_keep=keep)
+                                                 backup_keep=keep, replace_menu_card=replace_menu_card)
         threading.Thread(target=self.pipeline.run, daemon=True, name="pad-send").start()
 
     def _start_grow(self, address):

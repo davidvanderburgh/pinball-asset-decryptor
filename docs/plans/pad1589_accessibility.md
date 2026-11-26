@@ -113,5 +113,15 @@ Proof (emulator, Spike 3 rig slot 167, hidden and muted; sets built by the app's
   (Right Ramp, Optimus, the Megatron targets ...) shown 7f000b for the game's 7f0000, `accessibility.remap`'s value;
   all 89 lamp lines within the game's 856 lights.
 
-Left: the spoken scores on the other eight Spike 3 builds need a carrier each (a census of the requests each game
-plays, as ELG's came from its Spike 2 build's).
+Left (the next run of PAD-1607): the spoken scores on the other eight Spike 3 builds need a carrier each, a call the
+game never plays (ELG's came from its Spike 2 build's census). The recipe:
+
+1. Census per title on the Spike 3 rig: `soundlog.on` in the slot's dump (the runtime then logs every request the
+   sound worker takes, a card of no modes too), attract for a few minutes and two games played through
+   (`C:/tmp/PAD-1607/play_acc.sh`, the title's `proofs/titles/<game>.env` switch names), hidden and muted.
+2. Candidates off the card: the requests whose first sound id names a mono recording of 1.5-2.6 s (calls; the
+   request table and the records: `spike3_modes.carrier_view`, `spike3_requests`), none of them played in the census.
+3. `mode_sounds.TITLES_A64` gets each build's `Carriers(calls=..., status="census")`; `accessibility.carrier_calls`
+   then lets spoken scores on, and one emulator ball's end per title proves the words play.
+4. Also owed on ELG: the left flipper held in attract after a game (play_acc.sh breaks on no game end yet: ELG's
+   start presses give a 3-4 player game, so drain until `in_game 1 -> 0`, then hold).

@@ -167,7 +167,7 @@ def test_a_hold_that_will_restart_shows_a_filling_ring():
     spike2 = src[src.index("#if !defined(PADMENU_FAST) && !defined(PADMENU_S3)"):]
     assert "unsigned eglSwapBuffers(void *dpy, void *surf)" in spike2
     assert 'dlsym(RTLD_NEXT, "eglSwapBuffers")' in spike2
-    for words in ('"HOLD FOR BOOT MENU"', '"RESTARTING TO BOOT MENU"', "RING_SHOW_MS 400", 'getenv("PADMENU_RING")'):
+    for words in ('"HOLD FOR BOOT MENU"', '"RESTARTING TO BOOT MENU"', "RING_SHOW_MS 1000", 'getenv("PADMENU_RING")'):
         assert words in spike2
     for optional in ("glColorMask", "glGetVertexAttribiv", "eglQuerySurface"):
         assert 'RO(' in spike2 and '"%s"' % optional in spike2

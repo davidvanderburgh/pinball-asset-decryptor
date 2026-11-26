@@ -1018,7 +1018,8 @@ static void flip_init(const char *conf)
  * eglSwapBuffers (RTLD_NEXT: libEGL, or the mode runtime's when a mode card re-points the slot -
  * it calls on to this one).  GL is looked up by name at the first frame, from the libraries the
  * game already has loaded: nothing new is linked.  Nothing is drawn unless a hold has been counting
- * RING_SHOW_MS (a flipper tap in attract never flashes it), and a program that does not compile
+ * RING_SHOW_MS, a second (half the hold if that is shorter), and then starts empty and fills over the rest - a
+ * flipper tap in attract or a BACK press in the service menu never flashes it - and a program that does not compile
  * turns the ring off for good, the frames untouched.  PADMENU_RING=0 turns it off. */
 typedef unsigned int GLuint_;
 typedef int GLint_;
@@ -1059,7 +1060,7 @@ typedef int GLint_;
 #define R_GL_LINK_STATUS 0x8B82
 #define R_EGL_WIDTH 0x3057
 #define R_EGL_HEIGHT 0x3056
-#define RING_SHOW_MS 400
+#define RING_SHOW_MS 1000                 /* David: "shouldn't start to animate until being held for like a second" */
 
 static struct {
     void (*GetIntegerv)(unsigned, GLint_ *);
@@ -1226,23 +1227,27 @@ static int ring_words(const char *s, float cx, float top, float cell, float w, f
 }
 
 /* how far the hold that is counting has got: 0..1, 2 once it has fired, -1 nothing to show */
+static double ring_part(long long held, long hold)       /* after the wait, empty to full over the rest */
+{
+    long wait = hold / 2 < RING_SHOW_MS ? hold / 2 : RING_SHOW_MS;
+    return held < wait ? -1 : (double)(held - wait) / (hold - wait);
+}
+
 static double ring_how_far(long long t)
 {
-    double p = -1;
+    double p = -1, q;
     long long s = held_since;              /* BACK, in a game */
     if (fired)
         return 2;
-    if (s >= 0 && hold_ms > 0 && t - s >= RING_SHOW_MS && t - last_sample < GAP_MS) {
-        p = (double)(t - s) / hold_ms;
+    if (s >= 0 && hold_ms > 0 && t - last_sample < GAP_MS && (p = ring_part(t - s, hold_ms)) >= 0)
         ring_who = "BACK";
-    }
     if (flip_was == 1 && t - flip_last < GAP_MS) {
         ring_who = "the right flipper";
         if (flip_fired)
             return 2;
         s = flip_since;
-        if (s >= 0 && flip_hold_cur > 0 && t - s >= RING_SHOW_MS && (double)(t - s) / flip_hold_cur > p)
-            p = (double)(t - s) / flip_hold_cur;
+        if (s >= 0 && flip_hold_cur > 0 && (q = ring_part(t - s, flip_hold_cur)) > p)
+            p = q;
         else if (p >= 0)
             ring_who = "BACK";
     }

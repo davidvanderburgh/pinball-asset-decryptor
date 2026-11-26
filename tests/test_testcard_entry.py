@@ -14,6 +14,7 @@ import sys
 import pytest
 
 RIG = os.path.join(os.path.dirname(__file__), os.pardir, "tools", "spike2_emu")
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 @pytest.fixture
@@ -82,3 +83,48 @@ def test_the_flags_add_keep_and_take_off_the_entry(mk):
     off = mk.conf_for_plan(_Plan(), _args(no_test_entry=True, default=0), existing=ex)
     assert "image=testcard|" not in off and "test_dir=" not in off
 
+
+
+# ---- the Multi-boot tab (Simon, 2026-11-26: "Start the TEST CARD entry") ----------------------------------------
+def test_the_multi_boot_form_asks_the_tools_for_it():
+    import types
+    from pinball_decryptor.webui import multiboot_core as mbc
+    on = types.SimpleNamespace(boot_menu="menu", flip_guard=60, test_entry=True,
+                               test_specs=("--test", "/tmp/a.png|A", "--test", "/tmp/b.mp4|B"))
+    off = types.SimpleNamespace(boot_menu="menu", flip_guard=60, test_entry=False, test_specs=())
+    assert mbc.flip_args(on)[-1] == "--test-entry" and mbc.flip_args(off)[-1] == "--no-test-entry"
+    src = __import__("inspect").getsource(mbc.prepare_args)
+    assert 'args += list(getattr(form, "test_specs", ()) or ())' in src
+    wants = __import__("inspect").getsource(mbc.form_wants_media)
+    assert 'getattr(form, "test_entry", False) and getattr(form, "test_specs", ())' in wants
+    assert mbc.MultibootForm.__dataclass_fields__["test_entry"].default is False
+
+
+def test_the_panel_stages_the_test_card_list_before_the_write():
+    import inspect
+    from pinball_decryptor.webui import multiboot_core as mbc
+    go = inspect.getsource(mbc.MultibootPanel._do_build_flash)
+    assert 'return self._stage_test_entry(lambda: self._do_build_flash(do_write, do_flash))' in go
+    assert go.index("_stage_test_entry") < go.index('self._write_plan()["action"]')
+    st = inspect.getsource(mbc.MultibootPanel._stage_test_entry)
+    assert "tc.shared().items" in st and "tc.stage(items, folder, None, log=log)" in st
+    assert "tc.test_specs(staged, wsl)" in st and "self._kick_drain()" in st
+    assert 'getattr(self, "_stage_busy", False)' in inspect.getsource(mbc.MultibootPanel._drain)
+
+
+def test_a_loaded_card_shows_its_entry():
+    src = open(os.path.join(ROOT, "tools", "spike2_emu", "mkmulticard.py"), encoding="utf-8").read()
+    assert '("test_entry", bool(conf.get("test_entry"))),' in src
+    from pinball_decryptor.webui import multiboot_core as mbc
+    assert "test_entry=bool(info.get(\"test_entry\"))," in __import__("inspect").getsource(mbc)
+
+
+def test_menu_settings_offer_it_on_spike_2():
+    js = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "multiboot.js"),
+              encoding="utf-8").read()
+    assert '${w.test_entry ? html`<${Box} legend="Test card">' in js
+    assert 'k="test_entry" checked=${s.test_entry}' in js
+    panel = open(os.path.join(ROOT, "pinball_decryptor", "webui", "multiboot_panel.py"), encoding="utf-8").read()
+    assert '"test_entry": be.key == "stern",' in panel
+    tab = open(os.path.join(ROOT, "pinball_decryptor", "webui", "tabs", "multiboot.py"), encoding="utf-8").read()
+    assert '("test_entry", "_test_entry_var")' in tab

@@ -819,6 +819,8 @@ class WebMultibootPanel(_Base):
             "scores_column": bool(be.scores_column),
             "emulate": bool(be.emulate),
             "flash": bool(be.flash),
+            # Simon (2026-11-26): a TEST CARD entry in the menu - Spike 2 cards (mkmulticard --test-entry)
+            "test_entry": be.key == "stern",
             "new_text": "New update" if be.update_file else "New card",
             "out_label": be.out_label,
             "out_noun": be.out_noun,

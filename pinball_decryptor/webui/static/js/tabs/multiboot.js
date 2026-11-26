@@ -571,6 +571,13 @@ function CardPreview({ card }) {
     <span class="small muted">${card.note}</span>`;
 }
 
+// Simon (2026-11-23/26): a TEST CARD entry on a game card - the test card screens as one of the menu's choices
+// (mkmulticard --test-entry), its files the Test card tab's list
+const TEST_ENTRY_TIP = { head: "TEST CARD entry", lines: [
+  "Adds TEST CARD as one of the menu's choices: it opens the test card screens (pictures, videos, scenes and sounds) without a separate test card. ACTION on the test card's top screen goes back to the games.",
+  "Its files are the Test card tab's list when the card is built, plus the default PAD test card. Remembered as the last choice like a game.",
+  "Not with editions (No menu: boot the edition ...)." ] };
+
 // --------------------------------------------------------- Menu settings…
 function MenuDialog({ s, w }) {
   const md = s.md;
@@ -654,6 +661,12 @@ function MenuDialog({ s, w }) {
           <span class="small muted">the flippers must have been off this long before the right flipper's hold counts</span></div>`}
       </div>
     <//>
+    ${w.test_entry ? html`<${Box} legend="Test card">
+      <${Check} ns=${NS} k="test_entry" checked=${s.test_entry} wrap
+        label="Add a TEST CARD entry to the menu (the Test card tab's list, and the default PAD test card)"
+        title=${TEST_ENTRY_TIP} />
+      <span class="small muted">The list is the one on the Test card tab, as it is when the card is built; it goes on the card with the games, so the card needs room for it.</span>
+    <//>` : null}
     </div>
   <//>`;
 }

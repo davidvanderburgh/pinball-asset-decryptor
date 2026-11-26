@@ -4541,6 +4541,8 @@ def build_manifest(plan, conf, sources=None, existing=None, written=None, versio
         ("timeout", conf["timeout"]),
         ("back_hold", conf.get("back_hold")),
         ("boot_menu", conf.get("boot_menu")), ("flip_guard", conf.get("flip_guard")),
+        # the TEST CARD entry (Simon, 2026-11-26: on the Multi-boot tab): a loaded card shows its tick as it is
+        ("test_entry", bool(conf.get("test_entry"))),
         ("default", conf["default"]),
         ("volume", conf["volume"]), ("machine_volume", conf.get("machine_volume")),
         ("edition", conf.get("edition")),

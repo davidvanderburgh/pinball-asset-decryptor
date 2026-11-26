@@ -110,7 +110,7 @@ def test_the_emulator_runs_the_test_cards_own_menu_program():
     assert 'SEL_BIN="${SEL_BIN:-/usr/local/codeselect/codeselect}"' in inner
     line = next(ln for ln in run.splitlines() if "--conf /dump/codeselect.conf --out" in ln)
     # (through `env $SEL_ENV`: a test card's clips get the video bridge, test_test_card_clip.py)
-    assert line.strip().startswith('chroot "$R" /usr/bin/env $SEL_ENV $SEL_BIN --conf') and "$SEL_FONT" in line
+    assert line.strip().startswith('chroot "$R" ${SEL_ENV:+/usr/bin/env $SEL_ENV} $SEL_BIN --conf') and "$SEL_FONT" in line
 
 
 def test_a_card_menu_that_does_not_know_an_option_gets_pads_build():

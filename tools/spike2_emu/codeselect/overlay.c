@@ -85,8 +85,15 @@ struct ovl *ovl_open(const char *path, int max_w, int max_h, char *err, int errl
     for (i = 0; i < o->np; i++) {
         const unsigned char *e = o->pict + 16L * i;
         uint32_t off = u32(e + 8), size = u32(e + 12);
+        int32_t px = (int32_t)u32(e), py = (int32_t)u32(e + 4);
         if (off > (uint32_t)len || size > (uint32_t)len - off) {
             snprintf(err, (size_t)errlen, "the overlay's picture %d is past the end", i);
+            goto bad;
+        }
+        /* a picture is cropped out of the canvas, so it starts inside it; a place outside
+         * would reach gfx_blit's clipping sums near INT_MAX/INT_MIN, where they overflow */
+        if (px < 0 || py < 0 || px >= o->cw || py >= o->ch) {
+            snprintf(err, (size_t)errlen, "the overlay's picture %d is placed off its canvas", i);
             goto bad;
         }
     }

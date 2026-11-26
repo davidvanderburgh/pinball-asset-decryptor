@@ -24,9 +24,9 @@ def _store(tmp_path, monkeypatch):
     tc._SHARED[:] = []
 
 
-def _info(w, h, codec="h264"):
+def _info(w, h, codec="h264", fmt=""):
     from pinball_decryptor.core import video
-    return video.VideoInfo("x", vcodec=codec, width=w, height=h, fps=30.0, duration=7.4)
+    return video.VideoInfo("x", vcodec=codec, width=w, height=h, fps=30.0, duration=7.4, pix_fmt=fmt)
 
 
 def test_a_clip_the_decoder_plays_goes_as_it_is(tmp_path, monkeypatch):
@@ -36,6 +36,9 @@ def test_a_clip_the_decoder_plays_goes_as_it_is(tmp_path, monkeypatch):
     monkeypatch.setattr(video, "transcode_video_to", lambda *a, **k: called.append(a) or (True, ""))
     assert tc.as_clip(str(tmp_path / "match.mp4"), str(tmp_path), 0) == str(tmp_path / "match.mp4")
     assert not called
+    monkeypatch.setattr(video, "detect_video_info", lambda p: _info(1360, 768, fmt="yuvj420p"))
+    assert tc.as_clip(str(tmp_path / "jpeg_range.mp4"), str(tmp_path), 0) == str(tmp_path / "jpeg_range.mp4")
+    assert not called
     assert tc.as_clip(str(tmp_path / "anim.gif"), str(tmp_path), 0) is None, "a GIF stays frames"
 
 
@@ -43,6 +46,9 @@ def test_a_clip_the_decoder_plays_goes_as_it_is(tmp_path, monkeypatch):
     ("big.mp4", (3840, 2160, "h264"), (1920, 1080)),      # past the VPU's 1920x1088: fitted inside it
     ("hevc.mp4", (1360, 768, "hevc"), (1360, 768)),      # not H.264: made into it, same size
     ("old.avi", (640, 480, "mpeg4"), (640, 480)),        # not a container the menu opens
+    ("hi10.mp4", (1360, 768, "h264", "yuv420p10le"), (1360, 768)),   # 10-bit: the VPU decodes 8-bit only
+    ("full.mp4", (1360, 768, "h264", "yuv444p"), (1360, 768)),       # 4:4:4: the VPU decodes 4:2:0 only
+    ("odd.mp4", (1359, 767, "h264", "yuv420p"), (1358, 766)),        # odd sizes: chroma read at half the even
 ])
 def test_anything_else_is_made_into_one(tmp_path, monkeypatch, name, info, want):
     from pinball_decryptor.core import video

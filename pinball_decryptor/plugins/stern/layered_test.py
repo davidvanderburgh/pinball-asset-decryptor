@@ -76,8 +76,9 @@ def pin_frame(man, pin):
 
 
 def render_frames(project, scenes, frames):
-    """[RGBA PIL image] x *frames*: the scenes (``(manifest, pin)``, drawn in order, the first
-    lowest) composited over transparency at each clip frame, straight alpha."""
+    """RGBA PIL image per clip frame, yielded one at a time (a long clip's frames are ~4 MB each
+    at full stage size, so they are never all held): the scenes (``(manifest, pin)``, drawn in
+    order, the first lowest) composited over transparency, straight alpha."""
     from PIL import Image
     from . import fontrender as fr
     from . import scene_eval as ev
@@ -86,7 +87,6 @@ def render_frames(project, scenes, frames):
     cache, inks = {}, {}
     w, h = int(scenes[0][0]["stage"][0]), int(scenes[0][0]["stage"][1])
     still = {}
-    out = []
     for k in range(frames):
         frame = Image.new("RGBA", (w, h), (0, 0, 0, 0))
         for i, (man, pin) in enumerate(scenes):
@@ -104,21 +104,22 @@ def render_frames(project, scenes, frames):
                     still[i] = layer
             if layer is not None:
                 if layer.size != (w, h):
-                    raise Refused("the scenes are not one size (%dx%d and %dx%d)" % (w, h) + layer.size)
+                    raise Refused("the scenes are not one size (%dx%d and %dx%d)" % ((w, h) + layer.size))
                 frame = Image.alpha_composite(frame, layer)
-        out.append(frame)
-    return out
+        yield frame
 
 
 def write_pado(images, fps, out):
-    """*images* (RGBA, one canvas size) -> the ``.pado`` at *out*.  -> (frames, pictures, bytes)."""
-    if not images:
-        raise Refused("no frames")
-    w, h = images[0].size
-    if w > MAX_CANVAS[0] or h > MAX_CANVAS[1]:
-        raise Refused("the scene is %dx%d; the test card's screen is %dx%d" % ((w, h) + MAX_CANVAS))
+    """*images* (an iterable of RGBA, one canvas size; read once, a frame at a time) -> the
+    ``.pado`` at *out*.  -> (frames, pictures, bytes)."""
     pics, seen, table = [], {}, []
+    w = h = None
     for im in images:
+        if w is None:
+            w, h = im.size
+            if w > MAX_CANVAS[0] or h > MAX_CANVAS[1]:
+                raise Refused("the scene is %dx%d; the test card's screen is %dx%d"
+                              % ((w, h) + MAX_CANVAS))
         box = im.getbbox()
         if box is None or im.getchannel("A").getbbox() is None:
             table.append(NONE)
@@ -131,7 +132,9 @@ def write_pado(images, fps, out):
             seen[key] = len(pics)
             pics.append((box[0], box[1], buf.getvalue()))
         table.append(seen[key])
-    head = MAGIC + struct.pack("<IIIIII", w, h, int(round(fps * 1000)), len(images), len(pics), 0)
+    if w is None:
+        raise Refused("no frames")
+    head = MAGIC + struct.pack("<IIIIII", w, h, int(round(fps * 1000)), len(table), len(pics), 0)
     index = struct.pack("<%dI" % len(table), *table)
     off = len(head) + len(index) + 16 * len(pics)
     entries, blobs = [], []
@@ -144,7 +147,7 @@ def write_pado(images, fps, out):
     with open(tmp, "wb") as f:
         f.write(data)
     os.replace(tmp, out)
-    return len(images), len(pics), len(data)
+    return len(table), len(pics), len(data)
 
 
 def read_pado(path):
@@ -184,14 +187,19 @@ def make_overlay(project, scene_specs, out, frames, fps=30.0, log=print):
 def clip_frames(path):
     """(frames, fps) of a video, from ffprobe."""
     import subprocess
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)   # no console flashing up under the app
     try:                                    # PAD's own ffprobe (a Windows install has none on the PATH)
         from pinball_decryptor.core.audio import find_ffprobe
         probe = find_ffprobe() or "ffprobe"
     except Exception:                       # noqa: BLE001 - the command line, outside the app
         probe = "ffprobe"
-    r = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-count_packets",
-                        "-show_entries", "stream=nb_read_packets,r_frame_rate", "-of", "json", path],
-                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        r = subprocess.run([probe, "-v", "error", "-select_streams", "v:0", "-count_packets",
+                            "-show_entries", "stream=nb_read_packets,r_frame_rate", "-of", "json",
+                            path], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                           timeout=120, creationflags=flags)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise Refused("ffprobe cannot read %s (%s)" % (path, e))
     try:
         s = json.loads(r.stdout.decode("utf-8", "replace"))["streams"][0]
         num, den = s["r_frame_rate"].split("/")

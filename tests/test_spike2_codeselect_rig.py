@@ -638,7 +638,7 @@ def test_a_test_cards_menu_gets_the_video_bridge_alone():
     text = _read("run_game.sh")
     line = next(ln for ln in text.splitlines()
                 if '$SEL_BIN --conf /dump/codeselect.conf' in ln)
-    assert 'chroot "$R" /usr/bin/env $SEL_ENV $SEL_BIN' in line
+    assert 'chroot "$R" ${SEL_ENV:+/usr/bin/env $SEL_ENV} $SEL_BIN' in line
     assert "hwshim" not in line
     assert 'SEL_ENV="LD_PRELOAD=/lib/padgst.so"' in text
     guard = text[text.index('SEL_ENV=""'):text.index('SEL_ENV="LD_PRELOAD=/lib/padgst.so"')]

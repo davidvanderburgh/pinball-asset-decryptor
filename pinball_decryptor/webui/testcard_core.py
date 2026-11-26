@@ -390,7 +390,7 @@ CLIP_MAX = (1920, 1088)
 
 def as_clip(path, work, n, log=print, cancel=None):
     """The file the machine's decoder plays for the test video *path*: *path* itself when it already is one (H.264
-    in .mp4/.mov/.m4v, no bigger than :data:`CLIP_MAX`), else an H.264 .mp4 made from it in *work*, fitted inside
+    in .mp4/.mov/.m4v, 8-bit 4:2:0 at an even size, no bigger than :data:`CLIP_MAX`), else an H.264 .mp4 made from it in *work*, fitted inside
     CLIP_MAX. ``None`` for a GIF or a file no video tool can read: it stays frames."""
     from pinball_decryptor.core import video
     ext = os.path.splitext(path)[1].lower()
@@ -400,8 +400,11 @@ def as_clip(path, work, n, log=print, cancel=None):
     if info is None or not (info.width > 0 and info.height > 0):
         return None
     w, h = info.width, info.height
-    if (ext in CLIP_EXTS and (info.vcodec or "").lower() == "h264"
-            and w <= CLIP_MAX[0] and h <= CLIP_MAX[1]):
+    # the VPU decodes 8-bit 4:2:0 only, and the menu's conversion reads chroma at half the even size: a 10-bit or
+    # 4:4:4 H.264, or an odd width or height, is made into one like any other file (an unknown format goes as it is)
+    fmt_ok = (info.pix_fmt or "yuv420p").lower() in ("yuv420p", "yuvj420p")
+    if (ext in CLIP_EXTS and (info.vcodec or "").lower() == "h264" and fmt_ok
+            and w % 2 == 0 and h % 2 == 0 and w <= CLIP_MAX[0] and h <= CLIP_MAX[1]):
         return path
     s = min(1.0, CLIP_MAX[0] / float(w), CLIP_MAX[1] / float(h))
     target = video.VideoInfo(path, vcodec="h264", width=max(2, int(w * s) // 2 * 2),

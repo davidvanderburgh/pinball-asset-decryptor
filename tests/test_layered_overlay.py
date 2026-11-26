@@ -263,3 +263,44 @@ def test_closing_a_clip_waits_for_a_frame_under_way():
     close = c[c.index("void gclip_close(struct gclip *g)\n{\n    long long until;"):]
     close = close[:close.index("\n}\n")]
     assert "free(g);" not in close, "a late handoff must find the record"
+
+
+def test_the_overlay_is_written_a_frame_at_a_time(tmp_path):
+    """PR #50 review: a long clip's frames (~4 MB each at full stage size) are never all held - the
+    writer takes a one-pass iterable, and the renderer yields."""
+    import inspect
+    out = str(tmp_path / "t.pado")
+    n, npics, _size = lt.write_pado(iter(_frames()), 30.0, out)
+    assert (n, npics) == (6, 2) and lt.read_pado(out)["table"] == [lt.NONE, 0, 0, 0, 1, 1]
+    assert inspect.isgeneratorfunction(lt.render_frames)
+    with pytest.raises(lt.Refused, match="no frames"):
+        lt.write_pado(iter(()), 30.0, out)
+
+
+def test_scenes_of_two_sizes_are_refused_by_name(monkeypatch):
+    """The message once raised TypeError (four %d over a 2-tuple) instead of saying what was wrong."""
+    from PIL import Image
+    from pinball_decryptor.plugins.stern import fontrender, scene_eval, scene_render
+    monkeypatch.setattr(fontrender, "load_fonts", lambda p: {})
+    monkeypatch.setattr(scene_eval, "draw_list", lambda man, f: [1])
+    monkeypatch.setattr(scene_render, "render_tree",
+                        lambda *a, **k: {"sel": Image.new("RGBA", (32, 16), (0, 0, 0, 0))})
+    man = {"stage": [64, 48], "root": {"frames": 1}}
+    with pytest.raises(lt.Refused, match=r"64x48 and 32x16"):
+        list(lt.render_frames("proj", [(man, None)], 1))
+
+
+def test_no_ffprobe_is_a_refusal_not_a_traceback(monkeypatch, tmp_path):
+    import subprocess
+
+    def gone(*a, **k):
+        raise FileNotFoundError("ffprobe")
+    monkeypatch.setattr(subprocess, "run", gone)
+    with pytest.raises(lt.Refused, match="ffprobe cannot read"):
+        lt.clip_frames(str(tmp_path / "match.mp4"))
+
+
+def test_a_picture_placed_off_its_canvas_is_refused():
+    """A .pado picture's x/y go to gfx_blit, whose clipping sums overflow far outside the screen."""
+    src = _read(SEL, "overlay.c")
+    assert "px >= o->cw || py >= o->ch" in src and "placed off its canvas" in src

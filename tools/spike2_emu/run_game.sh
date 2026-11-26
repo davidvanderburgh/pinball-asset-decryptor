@@ -939,7 +939,8 @@ if [ -n "$SEL_DIRS" ]; then
         SEL_ENV="LD_PRELOAD=/lib/padgst.so"
         echo "[select] test card: clips play through the video host (padgst.so)"
     fi
-    chroot "$R" /usr/bin/env $SEL_ENV $SEL_BIN --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_FONT $SEL_INV $SEL_PICK </dev/null
+    # env only when there is something to preload: every other menu run starts as before
+    chroot "$R" ${SEL_ENV:+/usr/bin/env $SEL_ENV} $SEL_BIN --conf /dump/codeselect.conf --out "$PAD_SELECT_CHOICE" --input padsw --timeout "${PAD_SELECT_TIMEOUT:-30}" --log /dump/codeselect.log --media /dump/media $SEL_FONT $SEL_INV $SEL_PICK </dev/null
     SEL_RC=$?
     # ★ A KILLED SELECTOR IS A STOP, NOT A CHOICE (item 90, 2026-09-02).
     #

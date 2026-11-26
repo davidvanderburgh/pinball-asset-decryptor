@@ -1518,7 +1518,8 @@ def access_into(result, game_elf, scratch, access, only=False):
         result.lines.append("color-blind inserts: left out - %s" % AC.title_refusal(result.profile, "cvd"))
         preset = ""
     spoken = bool(access.get("spoken"))
-    flippers = (SMo.flipper_buttons(game_elf) + [0, 0])[:2] if spoken else (0, 0)
+    flippers = ((SMo.flipper_buttons(game_elf) + [0, 0])[:2] if spoken and AC.flipper_hold_ok(result.profile)
+                else (0, 0))                        # PAD-1607: no flipper hold where the runtime cannot see the edges
     if not preset and not spoken:
         return result
     text = AC.cfg_text(preset, access.get("cvd_setting") or 0, spoken, access.get("spoken_setting") or 0, flippers,

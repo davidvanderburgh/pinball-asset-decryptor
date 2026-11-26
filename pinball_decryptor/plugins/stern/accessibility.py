@@ -348,11 +348,45 @@ def is_spike3(prof):
     return prof is not None and getattr(prof, "arch", "arm") == "a64"
 
 
+#: PAD-1607: the spoken words' carriers on the Spike 3 builds with no modes' carriers (mode_sounds.TITLES_A64; kept
+#: apart so the modes' own sounds stay off these builds until proven): requests of ONE sound id whose recording is
+#: mono, 1.5-2.6 s and named by no other request, none of them played in an emulator census (attract and a 3-ball game
+#: with every playfield switch pressed, the sound log on), longest first. Request 24 (2.52 s on every title: the
+#: framework's own, which Star Wars ELG's Spike 2 census heard played) is never one. The words only swap the carrier's
+#: record while one of them is being said, so a carrier the game plays at another moment still plays its own sound.
+SPEAK_CARRIERS_A64 = {
+    "fallout_le_0_82_spike3": (1296, 1290, 1288, 1293, 1294),
+    "pokemon_le_0_82_spike3": (416, 442, 578, 471, 526),
+    "pokemon_pro_0_87_spike3": (469, 495, 633, 524, 581),
+    "star_wars_2025_le_0_96_spike3": (232, 281, 622, 701, 98),
+    "star_wars_2025_pro_0_84_spike3": (224, 269, 557, 636, 93),
+    "transformers_mtmte_le_0_96_spike3": (867, 865, 841, 874, 1058),
+    "walking_dead_remastered_le_0_92_spike3": (596, 775, 83, 160, 221),
+}
+
+
 def carrier_calls(prof):
     """PAD-1607: the requests a Spike 3 build's spoken words may ride (its measured carriers' calls), or ``()``."""
     from . import mode_sounds as MSo
-    c = MSo.profile_carriers(prof.key) if is_spike3(prof) else None
-    return tuple(int(r) for r in (c.calls if c is not None else ()))
+    if not is_spike3(prof):
+        return ()
+    c = MSo.profile_carriers(prof.key)
+    if c is not None:
+        return tuple(int(r) for r in c.calls)
+    return tuple(SPEAK_CARRIERS_A64.get(prof.key, ()))
+
+
+def flipper_hold_ok(prof):
+    """PAD-1607: whether the runtime can see the left flipper button held in attract on ``prof``'s title (the scores
+    said on it): a Spike 3 port needs its switch edges (``site switch_edge``, as the handicaps' flippers; Pokemon and
+    both Star Wars 2025 have none), a Spike 2 one has its switch drain."""
+    if not is_spike3(prof):
+        return True
+    from . import mode_project as MP
+    try:
+        return "switch_edge" in MP.read_port(MP.port_path(prof)).get("site", {})
+    except (OSError, MP.ModeProjectError):
+        return False
 
 
 def title_refusal(prof, what):

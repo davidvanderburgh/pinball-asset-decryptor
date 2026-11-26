@@ -113,15 +113,25 @@ Proof (emulator, Spike 3 rig slot 167, hidden and muted; sets built by the app's
   (Right Ramp, Optimus, the Megatron targets ...) shown 7f000b for the game's 7f0000, `accessibility.remap`'s value;
   all 89 lamp lines within the game's 856 lights.
 
-Left (the next run of PAD-1607): the spoken scores on the other eight Spike 3 builds need a carrier each, a call the
-game never plays (ELG's came from its Spike 2 build's census). The recipe:
+### The carriers on the other Spike 3 builds (PAD-1607, run 2)
 
-1. Census per title on the Spike 3 rig: `soundlog.on` in the slot's dump (the runtime then logs every request the
-   sound worker takes, a card of no modes too), attract for a few minutes and two games played through
-   (`C:/tmp/PAD-1607/play_acc.sh`, the title's `proofs/titles/<game>.env` switch names), hidden and muted.
-2. Candidates off the card: the requests whose first sound id names a mono recording of 1.5-2.6 s (calls; the
-   request table and the records: `spike3_modes.carrier_view`, `spike3_requests`), none of them played in the census.
-3. `mode_sounds.TITLES_A64` gets each build's `Carriers(calls=..., status="census")`; `accessibility.carrier_calls`
-   then lets spoken scores on, and one emulator ball's end per title proves the words play.
-4. Also owed on ELG: the left flipper held in attract after a game (play_acc.sh breaks on no game end yet: ELG's
-   start presses give a 3-4 player game, so drain until `in_game 1 -> 0`, then hold).
+Star Wars ELG's carriers came from its Spike 2 build's census; no other Spike 3 build has a Spike 2 sibling. Each
+build's carriers (`accessibility.SPEAK_CARRIERS_A64`, kept apart from `mode_sounds.TITLES_A64` so the modes' own
+sounds stay off those builds until proven) were picked in two steps (`C:/tmp/PAD-1607` `cands.py`, `census.sh`,
+`pick.py`):
+
+1. Off the card: requests of ONE sound id whose recording is mono, 1.5-2.6 s and named by no other request. On ELG
+   that gives 8, among them all five of its census carriers (135 202 201 74 238).
+2. A census on the Spike 3 rig (hidden, muted): the card with only its port and the sound log (`soundlog.on` +
+   `soundlog.only` in the set: the game runs stock), attract and a 3-ball game with every playfield switch of the port
+   pressed in each ball (tilt, slam, trough, shooter, start, coin, service and flipper switches left out): 54-88
+   requests played per title. Candidates played there are out; the longest five left are the carriers. Request 24
+   (2.52 s on every title, the framework's own) is never one: ELG's Spike 2 census heard it played, a 3-ball census
+   does not. A carrier the game does play at another moment still plays its own sound (the words swap its record only
+   while one of them is said).
+
+Pokemon LE 0.87 has none: its card is not on this PC (its spoken scores stay refused, with the reason).
+
+The flipper hold in attract needs the runtime to see the switch edges: Pokemon and both Star Wars 2025 ports have no
+`site switch_edge` (PAD-1326), so there `access.cfg` names no flipper buttons and the app says the scores come at
+each ball's end only (`accessibility.flipper_hold_ok`).

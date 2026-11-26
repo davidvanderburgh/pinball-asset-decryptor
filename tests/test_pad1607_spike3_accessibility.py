@@ -72,6 +72,21 @@ def test_spoken_scores_go_on_the_spike3_titles_with_a_carrier():
     assert not hasattr(AC, "NO_SPIKE3")
 
 
+def test_the_spoken_carriers_of_the_census():
+    """Every Spike 3 build with a card on the census PC has its carriers: ELG's are the modes' own (TITLES_A64), the
+    rest SPEAK_CARRIERS_A64's, kept apart so the modes' own sounds stay off those builds; never the framework's 24."""
+    from pinball_decryptor.plugins.stern import mode_sounds as MSo
+    profs = _spike3_profiles()
+    assert set(AC.SPEAK_CARRIERS_A64) <= set(profs)
+    for key, calls in AC.SPEAK_CARRIERS_A64.items():
+        assert len(calls) == 5 and len(set(calls)) == 5 and 24 not in calls, key
+        assert MSo.profile_carriers(key) is None, key
+        assert AC.carrier_calls(profs[key]) == calls
+    missing = sorted(k for k, p in profs.items() if not AC.carrier_calls(p))
+    assert missing == ["pokemon_le_0_87_spike3"]        # its card is not on the census PC
+    assert AC.carrier_calls(MP.profiles()["godzilla_le_1_16"]) == ()
+
+
 @pytest.mark.parametrize("name", sorted(os.listdir(PORTS3)))
 def test_every_spike3_port_names_its_inserts(name):
     port = MP.read_port(os.path.join(PORTS3, name))
@@ -237,7 +252,7 @@ def test_access_wanted_follows_the_project_and_the_title(monkeypatch):
     monkeypatch.setattr(HC, "project_title", lambda p, probe=False: profs["star_wars_elg_1_10_spike3"])
     assert S3M.access_wanted("p", real_card=False) == ({"cvd": "", "spoken": True},
                                                        profs["star_wars_elg_1_10_spike3"])
-    monkeypatch.setattr(HC, "project_title", lambda p, probe=False: profs["transformers_mtmte_le_0_96_spike3"])
+    monkeypatch.setattr(HC, "project_title", lambda p, probe=False: profs["pokemon_le_0_87_spike3"])
     assert S3M.access_wanted("p", real_card=False)[0] == {"cvd": "red_green", "spoken": False}
     monkeypatch.setattr(AC, "load_cvd", lambda p: "")
     assert S3M.access_wanted("p", real_card=False) is None
@@ -293,3 +308,24 @@ def test_the_runtime_ends_an_accessibility_only_ball_on_the_bus():
     arm = src[src.index("if (acc.on && spk_live) {                 /* PAD-1589"):]
     arm = arm[:arm.index("return;")]
     assert 'pm_port_value("ball_end_event", -1)' in arm and "acc_bus_end = 1;" in arm and "events_arm();" in arm
+
+
+def test_the_flipper_hold_only_where_the_runtime_sees_the_edges(tmp_path):
+    """Pokemon and both Star Wars 2025 ports have no switch_edge: the card says the scores at each ball's end only,
+    access.cfg naming no flipper buttons and the Write's line not promising the hold."""
+    from pinball_decryptor.plugins.stern import mode_write as MW
+    profs = _spike3_profiles()
+    no_hold = sorted(k for k, p in profs.items() if not AC.flipper_hold_ok(p))
+    assert no_hold == ["pokemon_le_0_82_spike3", "pokemon_le_0_87_spike3", "pokemon_pro_0_87_spike3",
+                       "star_wars_2025_le_0_96_spike3", "star_wars_2025_pro_0_84_spike3"]
+    assert AC.flipper_hold_ok(MP.profiles()["godzilla_le_1_16"])
+
+    class Plan:
+        lines = []
+        access_file = ""
+    res = Plan()
+    res.profile, res.lines = profs["pokemon_pro_0_87_spike3"], []
+    MW.access_into(res, b"", str(tmp_path), {"spoken": True, "spoken_setting": 0x10}, only=True)
+    text = open(res.access_file, encoding="utf-8").read()
+    assert "spoken\t0x10\t0,0" in text
+    assert "flipper" not in res.lines[0]

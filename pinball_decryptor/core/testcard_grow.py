@@ -376,12 +376,13 @@ class GrowPipeline(BasePipeline):
             self._set_phase(2)
             self._log("Restarting the machine: its start-up enlarges the games partition and moves /data and "
                       "/dump (a few minutes).", "info")
+            booted = getattr(machine, "_boot", "")
             machine.reboot()
         except rs.SendError as e:
             raise PipelineError("Grow", str(e)) from None
         finally:
             machine.close()
-        machine = self._back()
+        machine = self._back(booted)
         try:
             self._set_phase(3)
             room = check_grown(machine, p)
@@ -394,12 +395,20 @@ class GrowPipeline(BasePipeline):
         self._log(summary, "success")
         self._done(True, summary)
 
-    def _back(self):
+    def _back(self, booted=""):
+        """The machine once it has restarted.  *booted* is its boot id before the restart (remote_send's
+        ``_boot``): a machine that still answers with that one hasn't gone down yet (its shutdown can take longer
+        than the wait before the first try), and its kernel still shows the old table, so it is not taken for the
+        grown one."""
         self._sleep(20)
         until = self._clock() + BACK_WITHIN
         while True:
             try:
-                return self._connect(self.address)
+                machine = self._connect(self.address)
+                if not booted or getattr(machine, "_boot", "") != booted:
+                    return machine
+                machine.close()
+                raise rs.Unreachable("it has not restarted yet")
             except rs.SendError:
                 if self._cancelled:
                     # the table is written: the machine finishes the grow at its start-up whether PAD waits or not

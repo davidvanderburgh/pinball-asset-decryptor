@@ -317,3 +317,31 @@ def test_the_multiboot_tab_offers_it_too():
     assert "Find the machine on the Network tab first" in grow
     footer = js[js.index("function CardCard("):]
     assert footer.index("multiboot.run_emulator") < footer.index("<${MbGrow}")
+
+
+def test_the_wait_does_not_take_the_machine_before_it_has_restarted():
+    """PR #51 review: the restart is put off two seconds and a machine's shutdown takes a while, so the first try
+    after it can still reach the old start-up, whose kernel shows the old table: that is not the grown machine
+    ("came back without the grown partitions") - the wait goes on until the boot id is a new one."""
+    first = _Card()
+    first._boot = "boot-1"
+    still = _Card()
+    still._boot = "boot-1"
+    after = _Card(layout={**LAYOUT, **GROWN})
+    after._boot = "boot-2"
+    after.sh = lambda script, stdin=b"", timeout=600, check=True: (0, "done\n")
+    after.free = lambda mount: 7 << 30
+    tries = iter([first, still, rs.Unreachable("down"), after])
+
+    def connect(address):
+        got = next(tries)
+        if isinstance(got, Exception):
+            raise got
+        return got
+
+    out = {}
+    pipe = tg.GrowPipeline("192.168.1.50", lambda *a: None, lambda i: None, lambda *a: None,
+                           lambda ok, s: out.update(ok=ok, summary=s), connect_fn=connect, sleep=lambda s: None)
+    pipe.run()
+    assert out["ok"] is True, out
+    assert next(tries, None) is None, "every try was used: the old machine was not taken for the grown one"

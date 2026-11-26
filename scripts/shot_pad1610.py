@@ -1,16 +1,13 @@
-"""PAD-1610 proof shots: the Visual Pinball tab's Tables card lists masonm's
-"Deadpool v610 nfozzy Color Rush" as a table of its own beside JP's Deadpool (PAD-1491's
-shot, scrolled to the Deadpool rows).
+"""PAD-1610 proof shot: a table row's checklist sheet now lists every DOF
+event the patched table sends and what it is.
 
     python scripts/shot_pad1610.py <out_dir> [--after]
 
-Serves THIS checkout on a scratch settings.json holding one preview code,
-PAD802_CODE from the environment (``tools/preview_code.py issue --name x
---feature vpx``), and Stern Spike 2. Writes <before_|after_>vpx_tables.png, the
-Tables card, and prints its rows.
-
-The tab's state is the kit's real one on this PC (~/.pad-vpx.json, Visual
-Pinball's folder, the card folder). Needs Playwright and the installed Edge.
+Serves THIS checkout on a scratch settings.json (Stern Spike 2), opens the
+first Deadpool row's checklist and writes <before_|after_>vpx_dof_events.png
+(the sheet scrolled to its Lights/DOF part). Reads the kit's real state;
+changes nothing.
+Needs Playwright and the installed Edge.
 """
 import json
 import os
@@ -35,13 +32,19 @@ def main():
         json.dump({"disclaimer_accepted": True, "last_manufacturer": "stern", "theme": "dark",
                    "preview_codes": [code] if code else []}, f)
     userbase = os.path.join(os.environ.get("APPDATA", ""), "Python")
+    # the kit's own record names an installed app's rig (~/.pad-vpx.json
+    # `rig`); the cache check must ask THIS checkout's cardmount.sh
+    rig = os.path.join(os.path.dirname(HERE), "tools", "spike2_emu")
     proc, url = webui_shot.start_server(settings, os.path.join(scratch, "srv"),
-                                        extra_env={"PYTHONUSERBASE": userbase})
+                                        extra_env={"PYTHONUSERBASE": userbase, "PAD_VPX_RIG": rig,
+                                                   "PAD1610_TABLE": os.environ.get("PAD1610_TABLE", "")},
+                                        app_cmd=([sys.executable, os.environ["PAD1610_WRAP"]]
+                                                 if os.environ.get("PAD1610_WRAP") else None))
     from playwright.sync_api import sync_playwright
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(channel="msedge")
-            page = browser.new_page(viewport={"width": 1500, "height": 1100})
+            page = browser.new_page(viewport={"width": 1500, "height": 1250})
             errors = []
             page.on("pageerror", lambda e: errors.append(str(e)))
             page.add_init_script("try { localStorage.setItem('pad.log.open', '0'); } catch (e) {}")
@@ -53,29 +56,36 @@ def main():
                 webui_shot.api(url, "ui.set_era", "spike2")
                 time.sleep(1)
             webui_shot.api(url, "ui.select_tab", "vpx")
-            deadline = time.time() + 120
+            # the page, then its slow parts (the authors' titles, the cache
+            # check over WSL): up to two minutes
+            deadline = time.time() + 180
             while time.time() < deadline:
                 st = webui_shot.state(url).get("vpx") or {}
-                if st.get("loaded") and not st.get("busy"):
+                if st.get("loaded") and not st.get("busy") and not st.get("authors_busy") \
+                        and not st.get("space_busy"):
                     break
                 time.sleep(1)
             st = webui_shot.state(url).get("vpx") or {}
-            for t in st.get("tables") or []:
-                print("  table:", t.get("name"), "|", t.get("by"), "|", t.get("titles"), "|",
-                      t.get("url"), "| patched" if t.get("patched") else "", flush=True)
+            row = next((t for t in st.get("tables") or [] if "deadpool" in (t.get("output") or "").lower()), None)
+            print("row:", row and row.get("output"), flush=True)
+            if os.environ.get("PAD1610_TABLE"):
+                # the tab's own route: Check a table, the dialog answered by the wrapper
+                print("pick:", webui_shot.api(url, "vpx.pick_author_title", "deadpool_pro"), flush=True)
+                webui_shot.api(url, "vpx.checklist", True)
+            else:
+                webui_shot.api(url, "vpx.row_checklist", row["output"])
+            deadline = time.time() + 300
+            while time.time() < deadline and not (webui_shot.state(url).get("vpx") or {}).get("sheet"):
+                time.sleep(1)
+            sheet = (webui_shot.state(url).get("vpx") or {}).get("sheet") or {}
+            print("sheet:", sheet.get("map"), sheet.get("dof_rom"), len(sheet.get("dof") or []), flush=True)
             time.sleep(1.5)
-            # the card scrolls inside itself: put the rows around Deadpool, the same
-            # stretch in both shots
-            # (only the card's own scroller: scrollIntoView moves the page too)
-            page.locator(".vpx-tables").get_by_text(os.environ.get("SHOT_ANCHOR", "Deadpool"), exact=False).first.evaluate(
-                """e => {
-                    let p = e.parentElement;
-                    while (p && p.scrollHeight <= p.clientHeight + 1) p = p.parentElement;
-                    if (p) p.scrollTop += e.getBoundingClientRect().top - p.getBoundingClientRect().top - 120;
-                    window.scrollTo(0, 0);
-                }""")
+            h = page.locator(".vpx-sheet h3", has_text="DOF events")
+            if h.count():
+                h.first.scroll_into_view_if_needed()
+                page.evaluate("document.querySelectorAll('.vpx-sheet h3').forEach(e => { if (/DOF events/.test(e.textContent)) e.scrollIntoView({block: 'start'}); })")
             time.sleep(0.8)
-            page.screenshot(path=os.path.join(out_dir, pre + "vpx_tables_deadpool.png"))
+            page.screenshot(path=os.path.join(out_dir, pre + "vpx_dof_events.png"))
             print("page errors:", errors, flush=True)
             browser.close()
     finally:

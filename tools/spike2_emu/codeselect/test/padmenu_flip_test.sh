@@ -25,6 +25,7 @@
 #   row-on        it reads 15, the card says boot_menu=menu                               -> one restart
 #   row-bad       it reads 9999 (not a value the row holds): the cfg's default, 15        -> one restart
 #   row-guard     it reads 15 and no test guard: 15 s with no game on, the run is shorter  -> none
+#   row-low       it reads 3 (a shared row steps by one): taken as 15 s, the run is shorter -> none
 #   row-unmapped  an address the process has not mapped: never read, the default         -> one restart
 #   shared-off    a MORE SETTINGS word, pad_settings.state says "boot_flip 0"             -> none
 #   shared-none   the same, no state file yet: the default                                -> one restart
@@ -192,6 +193,7 @@ ROWFAST="-E PADMENU_FLIP_MS=400 -E PADMENU_FLIP_GUARD_MS=0"
 ROWV=0 run row-off      1200 0 $ROWFAST -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG="$T/row.cfg"
 ROWV=15 run row-on       1200 1 $ROWFAST -E PADMENU_CONF="$T/conf-off" -E PADMENU_ROW_CFG="$T/row.cfg"
 ROWV=9999 run row-bad  1200 1 $ROWFAST -E PADMENU_CONF="$T/conf-off" -E PADMENU_ROW_CFG="$T/row.cfg"
+ROWV=3 run row-low      1600 0 -E PADMENU_FLIP_MS=400 -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG="$T/row.cfg"
 ROWV=15 run row-guard    1600 0 -E PADMENU_FLIP_MS=400 -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG="$T/row.cfg"
 run row-unmapped 1200 1 $ROWFAST -E PADMENU_CONF="$T/conf-off" -E PADMENU_ROW_CFG="$T/row-unmapped.cfg"
 run shared-off  1200 0 $ROWFAST -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG="$T/shared.cfg" \

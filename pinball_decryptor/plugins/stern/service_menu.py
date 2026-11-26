@@ -238,7 +238,7 @@ def _our_row(s, kind_words):
     """One of ours: its values as the menu will show them (low..), default first."""
     words = kind_words.get(s.kind) if s.kind else None
     vals = [{"v": v, "text": (words[v] if words and v in (0, 1) else str(v))}
-            for v in range(s.low, s.low + s.values)]
+            for v in range(s.low, s.low + s.values * s.step, s.step)]
     text = next(x["text"] for x in vals if x["v"] == s.default)
     return {"id": s.id, "key": s.key, "caption": s.caption, "help": s.help, "ours": True, "values": vals,
             "value": text, "default": text, "name": MS.SETTINGS[s.key][1]}

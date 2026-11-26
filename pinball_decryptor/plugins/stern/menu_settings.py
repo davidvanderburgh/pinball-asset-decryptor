@@ -168,9 +168,11 @@ DEPRECATED = "DEPRECATED"
 MAX_VALUES = 8
 #: the most any setting of ours offers
 VALUES_CEILING = 9
-#: Simon (2026-11-26): BOOT MENU FLIPPER is a plain number of seconds, 0 (Off) to 120, stepped with +/- like the
-#: game's own timed adjustments - the one setting of ours past the ceiling
-WIDE_VALUES = {"boot_flip": 121}
+#: Simon (2026-11-26): BOOT MENU FLIPPER is seconds, and "I'd rather the row jump to off from 15": the game's own step
+#: (the high scores step by a million) - 0 Off, 15, 30 ... 120. A setting here offers its values that far apart on a
+#: row of its own; on the shared MORE SETTINGS rows (the runtime's value row has no step) it is every value between,
+#: and its reader rounds (padmenu.so: 1 to 14 is 15).
+STEPS = {"boot_flip": 15}
 #: a category table record: {category, kind, id}; kind 3 is an adjustment row
 REC = 12
 KIND_ADJUSTMENT = 3
@@ -262,6 +264,7 @@ class MenuSetting:
     #: rewrites it - (descriptor, help string, help room, row caption string, caption room, default/min/max/kind
     #: offsets in the descriptor, kind's -1 when it has none)
     shared: tuple = ()
+    step: int = 1           # STEPS: how far apart its values are (low, low + step, ...); values counts them
 
 
 @dataclass(frozen=True)
@@ -1186,7 +1189,7 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     if ad is None:
         raise MenuSettingError("the game has no spare setting left for %s" % caption)
     values = int(values)
-    ceiling = WIDE_VALUES.get(key) or (MAX_VALUES if help_text is None else VALUES_CEILING)
+    ceiling = MAX_VALUES if help_text is None else VALUES_CEILING
     if not 2 <= values <= ceiling:
         raise MenuSettingError("a setting of ours offers 2 to %d values, not %d" % (ceiling, values))
     if not 1 <= int(default) <= values:
@@ -1254,16 +1257,17 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
         row[0]: row_caption.encode("ascii") + b"\x00" * (row_room + 1 - len(row_caption)),
         table._off(help_va): text.encode("ascii", "replace") + b"\x00" * (help_room + 1 - len(text)),
     }
-    for off, v in ((f["default"], int(default) - 1 + low), (f["min"], low), (f["max"], values - 1 + low),
-                   (f["step"], 1)):
+    step = STEPS.get(key, 1)
+    for off, v in ((f["default"], (int(default) - 1) * step + low), (f["min"], low),
+                   (f["max"], (values - 1) * step + low), (f["step"], step)):
         writes[desc + off] = struct.pack("<i", v)
     if kind:
         writes[desc + f["kind"]] = _kind_bytes(table, kind) if wide else struct.pack("<i", kind)
     where = cat.where(category)
     if wide:            # PAD-1324: the page by its own name (Spike 3 lists it under Machine Settings)
         where = "Adjustments > Machine Settings > %s" % wide_category_names(table).get(category, "?")
-    setting = MenuSetting(key, i, row_caption, text, values, live, category, int(default) - 1 + low,
-                          where, low, kind)
+    setting = MenuSetting(key, i, row_caption, text, values, live, category, (int(default) - 1) * step + low,
+                          where, low, kind, step=step)
     return setting, writes, (None if cat.has(category, i) else cat)
 
 
@@ -1511,7 +1515,7 @@ def plan_shared(table, rows):
     share, refused = [], {}
     for key, values, names, opts in [r for r in rows if r[0] not in NOT_SHARED]:
         values, default = int(values), int(opts.get("default", 1))
-        ceiling = WIDE_VALUES.get(key) or (MAX_VALUES if opts.get("help_text") is None else VALUES_CEILING)
+        ceiling = MAX_VALUES if opts.get("help_text") is None else VALUES_CEILING
         try:
             if key not in SETTINGS:
                 raise MenuSettingError("no such setting: %s" % key)
@@ -1527,6 +1531,9 @@ def plan_shared(table, rows):
         except MenuSettingError as e:
             refused[key] = str(e)
             continue
+        if key in STEPS:                        # the shared value row steps by one: every value between
+            opts = dict(opts, default=(default - 1) * STEPS[key] + 1)
+            values = (values - 1) * STEPS[key] + 1
         share.append((key, values, names, opts, kind))
     if len(share) < 2:
         raise MenuSettingError("fewer than two of them can be shown there")
@@ -1615,7 +1622,8 @@ def check(raw, setting):
     except Exception as ex:                                   # noqa: BLE001
         return ["the program does not read back (%s)" % ex]
     if (e["default"], e["min"], e["max"], e["step"]) != (setting.default, setting.low,
-                                                          setting.values - 1 + setting.low, 1):
+                                                          (setting.values - 1) * setting.step + setting.low,
+                                                          setting.step):
         bad.append("its range reads %d..%d" % (e["min"], e["max"]))
     if setting.kind and _kind_at(t, setting.id) != setting.kind:
         bad.append("it does not show its values as written")

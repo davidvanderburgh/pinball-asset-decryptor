@@ -660,6 +660,7 @@ static FILE *trace;
 #define ROW_SHARED  0xfade0000ul
 #define ROW_HOLD_MS 5000
 #define ROW_MAX_S   600
+#define ROW_MIN_S   15
 static unsigned long row_addr;             /* 0: no row on this card */
 static char row_key[40], row_state[128] = ROW_STATE;
 static int row_def = 15, row_val = -1, row_ok = -1;
@@ -786,6 +787,8 @@ static int flip_row(long long t)
     }
     if (v < 0 || v > ROW_MAX_S)
         v = row_def;                           /* not a value the row can hold */
+    else if (v > 0 && v < ROW_MIN_S)
+        v = ROW_MIN_S;                         /* the shared row steps by one: 1 to 14 is the least, 15 (Simon) */
     return v;
 }
 

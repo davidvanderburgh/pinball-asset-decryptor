@@ -49,15 +49,16 @@ def test_a_ticked_row_is_wanted_by_the_write(project, monkeypatch):
     assert not [w for w in SM.wanted(path) if w[0] == "boot_flip"]
     SM.save(path, {"on": ["boot_flip"]})
     got = [w for w in SM.wanted(path) if w[0] == "boot_flip"]
-    assert got == [("boot_flip", 121, [], {"default": 16, "help_text": BF.MENU_HELP, "from_zero": True})]
+    assert got == [("boot_flip", 9, [], {"default": 2, "help_text": BF.MENU_HELP, "from_zero": True})]
 
 
 def test_the_values_and_help():
     from pinball_decryptor.plugins.stern import boot_flip as BF
     from pinball_decryptor.plugins.stern import menu_settings as MS
     # Simon (2026-11-26): "we let the user set the values" - seconds, 0 Off, 15 to start with
-    assert (BF.MAX_SECONDS, BF.MENU_VALUES, BF.DEFAULT_SECONDS, BF.MENU_DEFAULT) == (120, 121, 15, 16)
-    assert MS.WIDE_VALUES == {"boot_flip": 121}
+    assert (BF.MAX_SECONDS, BF.MENU_VALUES, BF.DEFAULT_SECONDS, BF.MENU_DEFAULT) == (120, 9, 15, 2)
+    # "I'd rather the row jump to off from 15": 0, 15, 30 ... 120 by the game's own step
+    assert MS.STEPS == {"boot_flip": 15} and BF.STEP_SECONDS == 15
     assert len(BF.MENU_HELP) <= 63                          # the spare help lines' room
     assert BF.MENU_HELP == "R flipper 5s: boot menu. 0 Off, secs after game. Min/default 15"   # Simon's wording
     assert MS.SETTINGS[MS.BOOT_FLIP][1:] == ("BOOT MENU FLIPPER", "Boot Menu Flipper", 16)
@@ -114,12 +115,19 @@ def test_it_plans_on_godzilla_116_with_the_other_rows():
     from pinball_decryptor.plugins.stern import menu_settings as MS
     from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
     t = AdjustmentTable(_program(LE116))
-    row = ("boot_flip", 121, (), {"default": 16, "help_text": BF.MENU_HELP, "from_zero": True})
+    row = ("boot_flip", 9, (), {"default": 2, "help_text": BF.MENU_HELP, "from_zero": True})
     settings, _w, _c, refused = MS.plan_many(t, [row])
     assert not refused, refused
     s = next(s for s in settings if s.key == "boot_flip")
     assert not MS.is_shared(s) and s.live and s.default == 15 and s.help == BF.MENU_HELP
-    assert (s.low, s.values) == (0, 121)
+    assert (s.low, s.values, s.step) == (0, 9, 15)       # 0 Off, 15, 30 ... 120
+    # the descriptor's default / min / max / step as written: 15, 0, 120, 15
+    import struct
+    from pinball_decryptor.plugins.stern.adjustments import OFF_DEFAULT, OFF_MAX, OFF_MIN, OFF_STEP
+    desc = t._off(t.table_va + s.id * t.elem)
+    got = {k: struct.unpack("<i", dict(_w)[desc + off])[0]
+           for k, off in (("default", OFF_DEFAULT), ("min", OFF_MIN), ("max", OFF_MAX), ("step", OFF_STEP))}
+    assert got == {"default": 15, "min": 0, "max": 120, "step": 15}
     # with five more rows the spare ones run out: it shares MORE SETTINGS and its word is the runtime's
     from pinball_decryptor.plugins.stern import coop_play as CP, handicap as HC
     from pinball_decryptor.plugins.stern import service_menu as SM
@@ -133,6 +141,8 @@ def test_it_plans_on_godzilla_116_with_the_other_rows():
     if MS.is_shared(s):
         assert s.live >= MS.SHARED_BASE
         assert "boot_flip" in MS.shared_cfg_text(settings)
+        # the runtime's value row steps by one: every second 0..120, 15 to start (padmenu takes 1-14 as 15)
+        assert (s.low, s.values, s.default) == (0, 121, 15)
 
 
 def test_the_card_installer_and_the_emulator_carry_the_file():

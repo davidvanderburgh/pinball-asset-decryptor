@@ -382,6 +382,12 @@ input[type=range] { accent-color: var(--accent); }
 .mach-ways { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .mach-ways li { display: flex; align-items: center; gap: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); }
 .mach-net .mach-ic { color: var(--accent); }
+.mach-ways li.has-list { flex-direction: column; align-items: stretch; }
+.mach-ways .mach-row { background: var(--panel); }
+/* PAD-1585: the online light - green when the machine answers now, grey when nothing does */
+.mach-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; background: var(--line); }
+.mach-dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
+.mach-dot.off { background: var(--ink-3, var(--line)); opacity: .6; }
 
 /* ------------------------------------------------------------- responsive */
 /* Breakpoints are classes the shell sets on <html> from the EFFECTIVE width

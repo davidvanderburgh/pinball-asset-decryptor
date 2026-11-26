@@ -103,3 +103,29 @@ def test_the_top_bar_has_the_button_and_the_picker_no_longer_carries_the_list():
     # the empty state names both ways to add one: a card image, and remote access
     for key in ("emptyHead", "wayCard", "wayNet", "wayNetNone"):
         assert key + ":" in js
+
+
+def test_the_page_lights_the_machines_that_answer_now(tmp_path, monkeypatch):
+    """David: "if the game was detected online we'd show a green light next to it": every address the page shows
+    is asked when it opens (the banner only), and the answer published per address."""
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import machine_scan
+    keys = tmp_path / "remote_access"
+    keys.mkdir()
+    (keys / "machines.json").write_text(json.dumps(NETWORK))
+    monkeypatch.setattr(pad_ssh_key, "KEY_DIR", str(keys))
+    monkeypatch.delenv("PAD_UI_CAPTURE", raising=False)
+    asked = []
+    monkeypatch.setattr(machine_scan, "online", lambda a, **kw: asked.append(a) or a == "10.0.0.7")
+    with web_app(tmp_path) as w:
+        assert _until(w, lambda: len(_m(w)["network"]) == 2)
+        assert _m(w)["online"] == {}                    # nothing asked before the page opens
+        assert w.call("shellx.machines_open")
+        assert _until(w, lambda: _m(w)["online"] == {"10.0.0.7": True, "10.0.0.9": False})
+        assert sorted(set(asked)) == ["10.0.0.7", "10.0.0.9"]
+
+
+def test_online_is_the_banner_check(monkeypatch):
+    from pinball_decryptor.core import machine_scan
+    monkeypatch.setattr(machine_scan, "_banner", lambda h, p, t: "SSH-2.0-x" if h == "a" else None)
+    assert machine_scan.online("a") is True and machine_scan.online("b") is False

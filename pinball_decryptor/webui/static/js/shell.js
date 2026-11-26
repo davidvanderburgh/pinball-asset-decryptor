@@ -945,11 +945,20 @@ const MACH = {
   netHead: "Found on your network",
   netText: "Remote access found these machines. Add one with the card image it runs to update it from here.",
   netAdd: (n) => ({ head: "Add " + (n.title || "this machine"), lines: ["Pick the card image the machine at " + n.address + " runs: My machines knows a machine by its card.", "It stays linked to " + n.address + ", so Update's Send to machine goes to it."] }),
-  address: (r) => ({ head: "On your network", lines: [r.name + " is reached at " + r.address + " (remote access, Network tab).", "Update sends to this machine."] }),
+  address: (r, on) => ({ head: on === true ? "Online" : on === false ? "Not answering" : "On your network", lines: [
+    on === true ? r.name + " answers at " + r.address + " right now (remote access)." : on === false ? "Nothing answers at " + r.address + " right now: the machine is off, or on another network." : r.name + " is reached at " + r.address + " (remote access, Network tab); checking whether it is on…",
+    "Update sends to this machine. The light is checked every 30 seconds while this page is open."] }),
+  online: (n, on) => on === true ? n.address + " answers right now: the machine is on." : on === false ? "Nothing answers at " + n.address + " right now." : "Checking " + n.address + "…",
   header: (m) => ({ head: "My machines", lines: [(m.rows || []).length ? (m.rows.length + " machine" + (m.rows.length === 1 ? "" : "s")) + (m.newer_count ? ": newer game code is out for " + m.newer_count + "." : ".") : "The pinball machines you own: add one to see its build, hear about new code and update your work onto it."] }),
 };
 
-function MachineRow({ r }) {
+// PAD-1585 (David: "if the game was detected online we'd show a green light next to it"): green when the
+// machine's remote access answers right now, grey when nothing does, none while it is being checked.
+function Light({ on }) {
+  return html`<span class=${cx("mach-dot", on === true && "on", on === false && "off")} aria-hidden="true"></span>`;
+}
+
+function MachineRow({ r, on }) {
   const more = (e) => openShellMenu(e.currentTarget, [
     { label: "Show the " + r.noun, icon: "folder", disabled: r.card_missing, onClick: () => call("shellx.machines_show_card", r.id) },
     { label: r.noun === "card image" ? "Change card…" : "Change " + r.noun + "…", icon: "sd", onClick: () => call("shellx.machines_rebind", r.id) },
@@ -966,7 +975,7 @@ function MachineRow({ r }) {
         <span class="notr">${r.title}${r.edition ? html` <span class="muted">${r.edition}</span>` : null}</span>
         ${r.build ? html`<${Chip} kind="info" sm>${r.build}<//>` : null}
         <${Chip} sm kind=${r.lineage === "Stock" ? "" : "warn"}>${r.lineage}<//>
-        ${r.address ? html`<${Chip} sm kind="info" title=${MACH.address(r)}><${Icon} name="globe" />${r.address}<//>` : null}
+        ${r.address ? html`<${Chip} sm kind=${on === true ? "ok" : ""} title=${MACH.address(r, on)}><${Light} on=${on} />${r.address}<//>` : null}
         ${r.newer ? html`<button type="button" class="mach-newer" onClick=${() => call("shellx.machines_open_page", r.id)}
             ...${tip(MACH.newer({ ...r, build_next: r.newer }))}><${Icon} name="star" />${r.newer} is out<${Icon} name="external" /></button>` : null}
       </div>
@@ -997,7 +1006,14 @@ function MyMachines({ shell }) {
   useEffect(() => { call("shellx.machines_refresh"); }, []);
   const rows = m.rows || [];
   const net = m.network || [];
+  const online = m.online || {};
   const working = shell.view === "mfr";
+  const found = net.map((n) => html`<div class="mach-row mach-net" key=${n.address}>
+    <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="globe" /></span>
+    <div class="stack grow" style="gap:2px"><span class="t">${n.title || "A Stern machine"}</span>
+      <span class="muted small mono" ...${tip(MACH.online(n, online[n.address]))}><${Light} on=${online[n.address]} />${n.address}${online[n.address] === true ? " · online" : ""}</span></div>
+    <${Button} size="sm" icon="plus" disabled=${running} title=${MACH.netAdd(n)} onClick=${() => call("shellx.machines_add_network", n.address)}>Add with its card image…<//>
+  </div>`);
   const add = html`<${Button} drop icon="plus" kind=${rows.length ? "" : "primary"} disabled=${running} title=${MACH.add}
       onClick=${() => call("shellx.machines_add")}>${rows.length ? "Add machine…" : "Add a card image…"}<//>`;
   return html`<div class="picker sx-mach-page"><div class="inner">
@@ -1009,7 +1025,7 @@ function MyMachines({ shell }) {
       ${rows.length ? add : null}
       <${Button} cls="sx-mach-close" onClick=${() => call("shellx.machines_close")}>${working && shell.mfr ? "Back to " + shell.mfr.display : "Choose a manufacturer"}<//>
     </div>
-    ${rows.length ? html`<section class="mach"><div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} />`)}</div>
+    ${rows.length ? html`<section class="mach"><div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} on=${online[r.address]} />`)}</div>
       ${m.watch_text ? html`<div class="muted small">${m.watch_text}</div>` : null}</section>`
       : html`<section class="mach-empty">
         <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="sd" /></span>
@@ -1017,18 +1033,16 @@ function MyMachines({ shell }) {
           <div><h2 class="h2" style="margin:0">${MACH.emptyHead}</h2><p class="dim" style="margin:4px 0 0">${MACH.emptyText}</p></div>
           <ol class="mach-ways">
             <li><div class="grow"><b>${MACH.wayCard}</b><div class="dim small">${MACH.wayCardText}</div></div>${add}</li>
-            <li><div class="grow"><b>${MACH.wayNet}</b><div class="dim small">${net.length ? MACH.wayNetText : MACH.wayNetNone}</div></div>
-              ${net.length ? null : html`<${Button} icon="globe" onClick=${() => call("shellx.machines_go_network")}>Network tab<//>`}</li>
+            <li class=${cx(net.length && "has-list")}><div class="row" style="align-items:center;gap:16px">
+                <div class="grow"><b>${MACH.wayNet}</b><div class="dim small">${net.length ? MACH.wayNetText : MACH.wayNetNone}</div></div>
+                ${net.length ? null : html`<${Button} icon="globe" onClick=${() => call("shellx.machines_go_network")}>Network tab<//>`}</div>
+              ${net.length ? html`<div class="mach-list">${found}</div>` : null}</li>
           </ol>
         </div>
       </section>`}
-    ${net.length ? html`<section class="mach">
+    ${rows.length && net.length ? html`<section class="mach">
       <div><h2 class="h2" style="margin:0">${MACH.netHead}</h2><p class="dim small" style="margin:2px 0 0">${MACH.netText}</p></div>
-      <div class="mach-list">${net.map((n) => html`<div class="mach-row mach-net" key=${n.address}>
-        <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="globe" /></span>
-        <div class="stack grow" style="gap:2px"><span class="t">${n.title || "A Stern machine"}</span><span class="muted small mono">${n.address}</span></div>
-        <${Button} size="sm" icon="plus" disabled=${running} title=${MACH.netAdd(n)} onClick=${() => call("shellx.machines_add_network", n.address)}>Add with its card image…<//>
-      </div>`)}</div></section>` : null}
+      <div class="mach-list">${found}</div></section>` : null}
   </div></div>`;
 }
 

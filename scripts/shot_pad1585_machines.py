@@ -44,7 +44,9 @@ def _shoot(out, prefix, name, add_cards, width, height):
     with open(os.path.join(net, "machines.json"), "w", encoding="utf-8") as f:
         json.dump(NETWORK, f)
     stub = base._stub_server()
-    env = {"PAD_CODE_WATCH_URL": "http://127.0.0.1:%d/support/game-code/" % stub.server_address[1]}
+    env = {"PAD_CODE_WATCH_URL": "http://127.0.0.1:%d/support/game-code/" % stub.server_address[1],
+           # the lights: the Godzilla answers, the Jaws Pro does not (a capture has no machine to ask)
+           "PAD_SHOT_ONLINE": "192.168.1.42"}
     if os.environ.get("APPDATA"):
         env["PYTHONUSERBASE"] = os.path.join(os.environ["APPDATA"], "Python")
     proc, url = ws.start_server(settings, scratch, extra_env=env)
@@ -73,9 +75,13 @@ def _shoot(out, prefix, name, add_cards, width, height):
                 print(name, ": the header's My machines button opened its page")
             else:
                 print(name, ": no My machines button in this build - the picker, where it sat")
-            time.sleep(2.5)
+            for _ in range(40):                         # the lights: the page checks when it opens
+                if ((ws.state(url).get("shellx") or {}).get("machines") or {}).get("online"):
+                    break
+                time.sleep(0.25)
+            time.sleep(1.5)
             st = (ws.state(url).get("shellx") or {}).get("machines") or {}
-            print(json.dumps({k: st.get(k) for k in ("open", "network", "newer_count")}, default=str)[:600])
+            print(json.dumps({k: st.get(k) for k in ("open", "network", "newer_count", "online")}, default=str)[:600])
             page.screenshot(path=os.path.join(out, prefix + name + ".png"))
             browser.close()
     finally:

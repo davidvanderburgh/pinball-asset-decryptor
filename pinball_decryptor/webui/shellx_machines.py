@@ -66,8 +66,11 @@ class MachinesMixin:
         self._mach_checking = False
         self._mach_open = False
         self._mach_last = ([], False, [])
+        self._mach_online = {}          # PAD-1585: address -> True (answers now) / False; absent = not checked yet
+        self._mach_probing = False
         self.set(machines={"rows": [], "watch": False, "watch_text": "",
-                           "checking": False, "open": False, "network": [], "newer_count": 0})
+                           "checking": False, "open": False, "network": [], "newer_count": 0,
+                           "online": {}})
         self.ctx.loop.after(0, self._machines_refresh)
         self.ctx.loop.after(WATCH_FIRST_MS, self._machines_tick)
 
@@ -113,6 +116,8 @@ class MachinesMixin:
         rows, unlinked = link_network(rows, network)
         self._mach_last = (rows, on, unlinked)
         self._machines_set()
+        if self._mach_open:
+            self._machines_probe()
 
     def _machines_set(self):
         rows, on, unlinked = self._mach_last
@@ -120,7 +125,58 @@ class MachinesMixin:
                            "watch_text": self._watch_text(rows, on),
                            "checking": self._mach_checking,
                            "open": bool(self._mach_open), "network": unlinked,
-                           "newer_count": sum(1 for r in rows if r.get("newer"))})
+                           "newer_count": sum(1 for r in rows if r.get("newer")),
+                           "online": dict(self._mach_online)})
+
+    # -- the green light (PAD-1585): which machines answer on the network right now ------------------------
+    def _mach_addresses(self):
+        rows, _on, unlinked = self._mach_last
+        return sorted({r["address"] for r in rows if r.get("address")} | {n["address"] for n in unlinked})
+
+    def _machines_probe(self):
+        """Ask every address the page shows whether its SSH server answers (the banner only, all at once, off
+        the loop); the page shows a green light for those that do."""
+        addresses = self._mach_addresses()
+        if not addresses or self._mach_probing:
+            return
+        self._mach_probing = True
+
+        def work():
+            from ..core import machine_scan
+            got = {}
+            # a screen capture (PAD_UI_CAPTURE) names its "online" machines: it has no machine to ask
+            shot = (os.environ.get("PAD_SHOT_ONLINE") or "").split(",") \
+                if os.environ.get("PAD_UI_CAPTURE") else None
+
+            def one(a):
+                if shot is not None:
+                    got[a] = a in shot
+                    return
+                try:
+                    got[a] = bool(machine_scan.online(a))
+                except Exception:                       # noqa: BLE001
+                    got[a] = False
+            threads = [threading.Thread(target=one, args=(a,), daemon=True) for a in addresses]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(5)
+            self.ctx.loop.post(self._machines_probed, got)
+
+        threading.Thread(target=work, name="pad-machines-online", daemon=True).start()
+
+    def _machines_probed(self, got):
+        self._mach_probing = False
+        self._mach_online = got
+        self._machines_set()
+
+    def _machines_online_tick(self):
+        """While the page is open, the lights are checked again every :data:`ONLINE_EVERY_MS`."""
+        if not self._mach_open:
+            self._mach_online_ticking = False
+            return
+        self._machines_probe()
+        self.ctx.loop.after(ONLINE_EVERY_MS, self._machines_online_tick)
 
     # -- the page (PAD-1585: its own place, from the top bar) ----------------------
     @rpc
@@ -131,6 +187,9 @@ class MachinesMixin:
             self.getting_started_close()
         self._machines_set()
         self._machines_refresh()
+        if not getattr(self, "_mach_online_ticking", False):
+            self._mach_online_ticking = True
+            self.ctx.loop.after(ONLINE_EVERY_MS, self._machines_online_tick)
         return True
 
     @rpc
@@ -637,6 +696,10 @@ class MachinesMixin:
             return False
         self.window.select_tab("write")
         return True
+
+
+#: how often the open page checks again which machines answer
+ONLINE_EVERY_MS = 30000
 
 
 def _network_machines():

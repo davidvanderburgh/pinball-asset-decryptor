@@ -80,7 +80,7 @@ def test_the_write_puts_the_row_and_its_file_on_the_card():
     from pinball_decryptor.plugins.stern import mode_write as MW
     src = inspect.getsource(E)
     assert "flip_menu = (_BootFlipMenu(log) if not _is_spike3(disk_f)" in src
-    assert "image_menu, saved_menu, flip_menu], log)" in src
+    assert "spk_menu, flip_menu], log)" in src            # after v1.615.0's COLOR BLIND / SPOKEN SCORES
     assert "mode_plan.flip_file = flip_cfg" in src
     assert "settings_cfg or flip_cfg)):" in src                # the runtime's files go on for this row alone too
     assert "or flip_cfg):" in src
@@ -171,7 +171,7 @@ def test_the_row_alone_is_a_write_of_its_own():
     src = inspect.getsource(E)
     assert 'else "Service menu settings")' in src
     assert "if (flip_cfg or settings_cfg) and not (mode_list or code_list):" in src
-    assert "scenes_prof, _menu_prof))" in src
+    assert "scenes_prof, acc_prof, _menu_prof))" in src
     assert "menu_prof=_menu_prof or _mprof if (flip_cfg or settings_cfg) else None" in src
     assert "menu_prof=None" in str(inspect.signature(MW.plan))
     plan_src = inspect.getsource(MW.plan)
@@ -199,6 +199,6 @@ def test_the_emulator_runs_a_multi_boot_cards_own_runtime_files():
     """A multi-boot card's hook preloads padmenu.so and the runtime on one line; the rig looked for the plain hook only
     and ran neither the card's runtime nor its padmenu.cfg."""
     src = open(os.path.join(ROOT, "tools", "spike2_emu", "modes", "cardmodes.sh"), encoding="utf-8").read()
-    assert 'grep -qF -e "$HOOK" -e "PADPRE:}$CARD_DIR/mode.so"' in src
+    assert "hooked()" in src and r'grep -qF "PADPRE=\${PADPRE:+\$PADPRE:}$CARD_DIR/mode.so"' in src   # David's PAD-1552
     assert 'FLIPROW=$(grep -c "^flip_secs\t" "$S/padmenu.cfg"' in src
-    assert '[ "$SCENES" = 0 ] && [ "$FLIPROW" = 0 ]; }; then' in src
+    assert '[ "$ACC" = 0 ] && [ "$FLIPROW" = 0 ]; }; then' in src

@@ -201,6 +201,9 @@ def test_multi_boot_puts_it_on_after_the_write_and_before_the_flash():
     assert 'getattr(backend_for(self.form()), "key", "") != "stern"' in step, "Spike 2 cards only"
     assert "MN.apply_to_build(out, out, want, log=log)" in step
     assert step.index("MN.apply_to_build") < step.index("after()", step.index("def fin"))
+    # the drain must keep coming back until it is done: the first real build never said so, nor flashed
+    assert "self._net_busy = True" in step and "self._kick_drain()" in step
+    assert 'getattr(self, "_net_busy", False)' in inspect.getsource(mbc.MultibootPanel._drain)
 
 
 def test_multi_boot_step_runs_then_flashes(tmp_path, monkeypatch):
@@ -218,7 +221,7 @@ def test_multi_boot_step_runs_then_flashes(tmp_path, monkeypatch):
         _error = lambda self, t: calls.append(("err", t))
         _log_sink = lambda self, t: None
         _ui = lambda self, fn: fn()
-        _drain = lambda self: None
+        _kick_drain = lambda self: None
     monkeypatch.setattr(mbc, "backend_for", lambda f: type("B", (), {"key": "stern"})())
     monkeypatch.setattr(mbc.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda s: target()})())
     monkeypatch.setattr(MN, "has_remote_access", lambda p: True)

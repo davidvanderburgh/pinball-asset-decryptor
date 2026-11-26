@@ -7854,6 +7854,7 @@ class MultibootPanel:
         self._measure_job = None
         self._probe_job = None
         self._probe_busy = False
+        self._net_busy = False          # the menu network going on a finished card (_with_menu_network)
         self._probe_gen = 0
         self._probe_text = None         # the text a probe is out about
         self._probe_slow_job = None     # ...and the 'say we are looking' timer
@@ -7920,7 +7921,7 @@ class MultibootPanel:
         # its answer back through the same queue, and a drain that stopped
         # rescheduling while one was out left the row silently never
         # updating.
-        if (self._busy or self._pv_busy or self._probe_busy
+        if (self._busy or self._pv_busy or self._probe_busy or getattr(self, "_net_busy", False)
                 or self._colour_reading or not self._queue.empty()):
             try:
                 self._drain_job = self._timer().after(self.DRAIN_MS,
@@ -12489,22 +12490,31 @@ class MultibootPanel:
             def log(text, level="info"):
                 self._ui(lambda: self._log_sink("[card] " + text))
 
+            # THE DRAIN COMES BACK ONLY WHILE SOMETHING IS UP: without this flag the first end-to-end build
+            # (2026-11-26) added the files but never said so, and a flash chained after it never started
+            self._net_busy = True
+
             def run():
                 try:
                     note = MN.apply_to_build(out, out, want, log=log)
                 except Exception as exc:                    # noqa: BLE001 - reported, never lost
                     err = str(exc)
-                    self._ui(lambda: self._error("The menu network could not be added to %s: %s" % (out, err)))
+
+                    def failed():
+                        self._net_busy = False
+                        self._error("The menu network could not be added to %s: %s" % (out, err))
+                    self._ui(failed)
                     return
 
                 def fin():
+                    self._net_busy = False
                     self._ok(note)
                     if after is not None:
                         after()
                 self._ui(fin)
 
             threading.Thread(target=run, daemon=True).start()
-            self._drain()
+            self._kick_drain()
         return step
 
     # ------------------------------------------------------------------

@@ -74,6 +74,8 @@ def wanted(project, honour_off=True):
     from . import saved_progress as SP
     if SP.project_wants(project):                       # PAD-1402: SAVED PROGRESS, when a mode keeps progress
         jobs.append(E._SavedProgressMenu(log))
+    if FLIP_KEY in on_keys(project):                    # Simon: BOOT MENU FLIPPER, when ticked on the Service menu tab
+        jobs.append(E._BootFlipMenu(log))
     if honour_off:
         off = off_keys(project)
         jobs = [j for j in jobs if j.KEY not in off]
@@ -132,6 +134,11 @@ STAGED_KEY = "service_menu"
 #: setting of them goes on the card only once the owner ticks its row (the sidecar's "on" list). The round-2 "off"
 #: list is read no more: everything is off until ticked.
 OFF_KEYS = ("music_mode", "edition", "image_set")
+#: Simon (2026-11-25): BOOT MENU FLIPPER (:mod:`.boot_flip`) is ticked here too, and only here: it needs nothing in the
+#: project, so a ticked row is the real setting (never a placeholder) and an unticked one is not on the card
+FLIP_KEY = "boot_flip"
+#: every row the "on" list can hold
+TICK_KEYS = OFF_KEYS + (FLIP_KEY,)
 
 
 def on_keys(project):
@@ -158,7 +165,7 @@ def load(project):
     if isinstance(raw, dict) and isinstance(raw.get("order"), list):
         out["order"] = [k for k in raw["order"] if isinstance(k, str)]
     if isinstance(raw, dict) and isinstance(raw.get("on"), list):
-        out["on"] = [k for k in raw["on"] if k in OFF_KEYS]
+        out["on"] = [k for k in raw["on"] if k in TICK_KEYS]
     if isinstance(raw, dict):
         out["coop"] = raw.get("coop") is True
     return out
@@ -168,7 +175,7 @@ def save(project, data):
     from ...core import staged_changes
     side = staged_changes.load(project)
     order = list(data.get("order") or [])
-    on = [k for k in OFF_KEYS if k in (data.get("on") or ())]
+    on = [k for k in TICK_KEYS if k in (data.get("on") or ())]
     coop = data.get("coop") is True
     if order or on or coop:
         side[STAGED_KEY] = {k: v for k, v in (("order", order), ("on", on), ("coop", coop)) if v}
@@ -231,7 +238,7 @@ def _our_row(s, kind_words):
     """One of ours: its values as the menu will show them (low..), default first."""
     words = kind_words.get(s.kind) if s.kind else None
     vals = [{"v": v, "text": (words[v] if words and v in (0, 1) else str(v))}
-            for v in range(s.low, s.low + s.values)]
+            for v in range(s.low, s.low + s.values * s.step, s.step)]
     text = next(x["text"] for x in vals if x["v"] == s.default)
     return {"id": s.id, "key": s.key, "caption": s.caption, "help": s.help, "ours": True, "values": vals,
             "value": text, "default": text, "name": MS.SETTINGS[s.key][1]}

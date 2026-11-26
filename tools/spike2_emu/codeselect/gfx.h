@@ -24,6 +24,8 @@ void gfx_free(struct gfx *g);
 
 void gfx_fill(struct gfx *g, unsigned rgb);
 void gfx_rect(struct gfx *g, int x, int y, int w, int h, unsigned rgb);
+/* a see-through hole (alpha 0): the graphics chip's video layer shows there */
+void gfx_clear(struct gfx *g, int x, int y, int w, int h);
 void gfx_round_rect(struct gfx *g, int x, int y, int w, int h, int r, unsigned rgb);
 /* a rounded rectangle with a border t pixels wide in frame_rgb and the inside
  * in fill_rgb */

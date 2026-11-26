@@ -1,7 +1,8 @@
 #!/bin/bash
 # check_elf.sh CROSS BIN - the readelf ceiling the card's loader imposes:
 #   max GLIBC_ version node <= 2.18 (rootfs libc is 2.21, nodes up to 2.18)
-#   NEEDED only libEGL.so.1 libGLESv2.so.2 libasound.so.2 libpthread.so.0 libc.so.6 libm.so.6 libgcc_s.so.1
+#   NEEDED only libEGL.so.1 libGLESv2.so.2 libasound.so.2 libpthread.so.0 libdl.so.2 libc.so.6 libm.so.6 libgcc_s.so.1
+#   (libdl.so.2 since the test clip: gstclip.c dlopens the card's GStreamer 0.10)
 #   (libpthread.so.0 since 2.8: the input scan and the frame cache are threads; the
 #   rootfs ships /lib/libpthread-2.21.so)
 #   interpreter /lib/ld-linux-armhf.so.3
@@ -22,7 +23,7 @@ bad=0
 needed=$("${CROSS}readelf" -d "$BIN" | grep NEEDED | sed 's/.*\[\(.*\)\]/\1/')
 for n in $needed; do
     case "$n" in
-        libEGL.so.1|libGLESv2.so.2|libasound.so.2|libpthread.so.0|libc.so.6|libm.so.6|libgcc_s.so.1) ;;
+        libEGL.so.1|libGLESv2.so.2|libasound.so.2|libpthread.so.0|libdl.so.2|libc.so.6|libm.so.6|libgcc_s.so.1) ;;
         *) echo "check_elf: FAIL unexpected NEEDED $n"; bad=1 ;;
     esac
 done

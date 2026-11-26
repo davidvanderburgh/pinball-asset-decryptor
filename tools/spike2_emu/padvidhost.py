@@ -83,6 +83,8 @@ START_BASE = CH_BASE + CHANNELS * CH_BYTES        # 4524
 # and the clip plays. It looked like a working emulator showing the wrong film.
 _GAME = os.environ.get("PAD_GAME") or "godzilla_pro"
 GUEST_ROOT = "/games/" + _GAME
+#: the TEST CARD entry's files (mkmulticard --test-entry), beside the title on the card
+PADTEST_GUEST = "/games/padtest"
 HOST_ROOT = os.environ.get(
     "PAD_VID_ROOT", os.path.join(padpath.root(), "games", _GAME))
 
@@ -211,6 +213,15 @@ def host_path(p):
     p = (p or "").strip()
     if not p:
         return None
+    # THE TEST CARD ENTRY's clips (Simon, 2026-11-23): /games/padtest on the card's games
+    # partition, beside the title directory - the menu plays them, not the game
+    if p.startswith(PADTEST_GUEST + "/"):
+        base = os.path.normpath(os.path.join(os.path.dirname(os.path.normpath(HOST_ROOT)), "padtest"))
+        full = os.path.normpath(os.path.join(base, p[len(PADTEST_GUEST) + 1:]))
+        if not full.startswith(base + os.sep):
+            log("refusing path outside the test files: %r" % p)
+            return None
+        return full if os.path.isfile(full) else None
     if p.startswith("./"):
         p = p[2:]
     elif p.startswith(GUEST_ROOT + "/"):

@@ -23,6 +23,11 @@ A THIRD, "pause", is the Pause / F9 key (PAD-204): one press of it, a step
 of padsw's pause_req, which padglhost polls and toggles the freeze on. There
 is nothing to hold, so nothing to release.
 
+A FOURTH, "keep", is a HAND-OVER (PAD-1617): the controller has started a
+helper that holds the same switches (its WSL link, back after a drop) and
+retires this one. EOF after "keep" leaves everything as it is: releasing
+would open the trough switches the table holds closed until the next edge.
+
 EVERY SWITCH EDGE IS READ BACK (PAD-1306). The guest merges by last edge wins
 with no lock, so an edge can be lost (a take collapsing, a write the shim took
 as its baseline before the game's first read); the holder reads the merge back
@@ -50,6 +55,8 @@ def parse(line):
     p = line.split()
     if p == ["pause"]:
         return ("pause", None, None)
+    if p == ["keep"]:
+        return ("keep", None, None)
     try:
         if len(p) == 3 and p[0] == "cab":
             if p[1] not in padsw.CAB_NAMES:
@@ -74,10 +81,13 @@ class Holder:
         self.m = m
         self.sw = padsw.Confirmer(m, on_lost=on_lost)
         self.cab_held = {}
+        self.keep = False
 
     def handle(self, edge):
         kind, what, val = edge
-        if kind == "pause":
+        if kind == "keep":
+            self.keep = True        # handed over: EOF must not release (PAD-1617)
+        elif kind == "pause":
             padsw.request_pause(self.m)
         elif kind == "cab":
             padsw.set_cab(self.m, what, val)
@@ -89,6 +99,8 @@ class Holder:
         self.sw.tick()
 
     def release(self):
+        if self.keep:
+            return
         self.sw.release()
         for name, val in self.cab_held.items():
             if val:

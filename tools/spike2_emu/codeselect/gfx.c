@@ -85,6 +85,18 @@ static inline void put(unsigned char *p, unsigned rgb)
 static inline void blend(unsigned char *p, unsigned rgb, unsigned a)
 {
     unsigned ia = 255 - a;
+    if (p[3] != 0xff) {
+        /* over a SEE-THROUGH pixel (gfx_clear: the test card's clip shows through,
+         * drawn by the graphics chip under the canvas): straight-alpha "over" */
+        unsigned da = p[3], oa = a + da * ia / 255, k;
+        if (!oa) { p[0] = p[1] = p[2] = p[3] = 0; return; }
+        for (k = 0; k < 3; k++) {
+            unsigned sc = (rgb >> (16 - 8 * k)) & 0xff;
+            p[k] = (unsigned char)((sc * a * 255 + p[k] * da * ia) / (oa * 255));
+        }
+        p[3] = (unsigned char)oa;
+        return;
+    }
     p[0] = (unsigned char)((p[0] * ia + ((rgb >> 16) & 0xff) * a) / 255);
     p[1] = (unsigned char)((p[1] * ia + ((rgb >> 8) & 0xff) * a) / 255);
     p[2] = (unsigned char)((p[2] * ia + (rgb & 0xff) * a) / 255);
@@ -107,6 +119,20 @@ static void span(struct gfx *g, int y, int x0, int x1, unsigned rgb)
     mark(g, x0, y, x1, y + 1);
     p = g->px + ((size_t)y * g->w + x0) * 4;
     for (x = x0; x < x1; x++, p += 4) put(p, rgb);
+}
+
+/* a see-through hole: what is under the canvas shows there (the test card's clip,
+ * drawn by the graphics chip - Simon, 2026-11-25: "only at 1.4FPS") */
+void gfx_clear(struct gfx *g, int x, int y, int w, int h)
+{
+    int yy;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > g->w) w = g->w - x;
+    if (y + h > g->h) h = g->h - y;
+    if (w <= 0 || h <= 0) return;
+    mark(g, x, y, x + w, y + h);
+    for (yy = y; yy < y + h; yy++) memset(g->px + ((size_t)yy * g->w + x) * 4, 0, (size_t)w * 4);
 }
 
 void gfx_rect(struct gfx *g, int x, int y, int w, int h, unsigned rgb)

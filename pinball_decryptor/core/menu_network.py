@@ -198,7 +198,7 @@ def wpa_conf(name, key):
 
 
 def _read(reader, path, limit):
-    node = ssh_card._node(reader, path)
+    node = ssh_card.resolve(reader, path)[1]               # PAD-1619: Stern's updater links /etc/init.d/game
     if node is None or stat.S_IFMT(node['mode']) != stat.S_IFREG or node['size'] > limit:
         return None
     return bytes(reader.read_file_bytes(node))

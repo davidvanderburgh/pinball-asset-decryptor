@@ -170,7 +170,7 @@ class TextTab(TabService):
         # DMD game's, whose every line is the game program's)
         caps = getattr(mfr, "capabilities", None)
         self.set(scanning=False, empty=EMPTY_NO_FOLDER,
-                 scenes=bool(getattr(caps, "replace_image", False)
+                 scenes=bool(getattr(caps, "scenes", False)
                              and not getattr(caps, "dmd_shades", False)))
         self._mirror_folder()
 

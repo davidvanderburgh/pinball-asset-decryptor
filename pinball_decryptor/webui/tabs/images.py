@@ -498,6 +498,9 @@ class ImagesTab(TestTagMixin, ColourSaveMixin, FindOriginalsMixin, PixelEditMixi
                  # no scenes to group by
                  shades_only=bool(getattr(mfr.capabilities, "dmd_shades",
                                           False)),
+                 # PAD-1612: Fonts… and Group by scene need scene trees
+                 # (Stern); JJP's loose pictures have none
+                 scenes=bool(getattr(mfr.capabilities, "scenes", False)),
                  empty={"text": EMPTY_NO_FOLDER, "busy": False})
         self._refresh_pillow()
         self._refresh_image_list()

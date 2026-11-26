@@ -1,0 +1,30 @@
+note start a game on Wonka with Try it's modes in it
+wait installed: 240
+wait game state 2 -> 4 240
+sleep 30
+press dswitch_coin_1
+press dswitch_coin_1
+sleep 1
+press dswitch_start
+wait game state \d+ -> 5 90
+sleep 3
+plunge
+sleep 3
+note the starter mode's start switch
+press switch_target_tv
+wait "PAD Mode" STARTED 15
+sleep 2
+shot /tmp/pad1605_mode_running.png
+note its scoring shots: five completes it
+press switch_target_tv
+sleep 1
+press switch_ramp_center_made
+sleep 1
+press switch_ramp_left_made
+sleep 1
+press switch_target_tv
+sleep 1
+press switch_ramp_center_made
+wait "PAD Mode" 30
+sleep 2
+shot /tmp/pad1605_after_shots.png

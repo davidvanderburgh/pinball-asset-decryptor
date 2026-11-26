@@ -22810,6 +22810,19 @@ static void coop_cer_begin(void);
 static void coop_cer_end(void);
 static void ccer_quiet(void);
 
+/* PAD-1611: a quiet list keeps only the requests still playing (reqs, n of them; n < 0: none known), so the next time
+ * the game plays one it is faded again (PAD-1220's rule for the intro's; tests lift it verbatim); returns the count */
+static unsigned quiet_forget(unsigned *quiet, unsigned n_quiet, const unsigned *reqs, int n)
+{
+    unsigned k, m;
+    int j;
+    for (k = m = 0; k < n_quiet; k++) {
+        for (j = 0; j < n && j < 8 && reqs[j] != quiet[k]; j++) ;
+        if (j < n && j < 8) quiet[m++] = quiet[k];
+    }
+    return m;
+}
+
 /* ---- PAD-1317: the co-op awards ceremony's own music ----------------------------------------------------------
  * DoomWalrus666: "Please add an option in the mode tab in the characters builder to add a custom audio track to play
  * during the award ceremony". sounds.cfg `ccer <request> <carrier key> <the music's key> <ms>`: the owner's track, a
@@ -22862,10 +22875,11 @@ static void ccer_quiet(void)
     if (!ccer.on) return;
     ccer.quiet_at = pm_ms();
     n = pm_sound_playing(reqs, buses, 8);
+    ccer.n_quiet = quiet_forget(ccer.quiet, ccer.n_quiet, reqs, n);   /* PAD-1611: one played again is faded again */
     for (i = 0; i < n && i < 8; i++) {
         if (!reqs[i] || reqs[i] == ccer.request) continue;
         for (k = 0; k < ccer.n_quiet && ccer.quiet[k] != reqs[i]; k++) ;
-        if (k < ccer.n_quiet) continue;                       /* faded already (a fade asked for again starts over) */
+        if (k < ccer.n_quiet) continue;                       /* fading already */
         if (ccer.n_quiet < CCER_QUIET_N) ccer.quiet[ccer.n_quiet++] = reqs[i];
         if (pm_sound_fade(reqs[i], CCER_QUIET_MS))
             say("co-op awards: the game's sound %u (bus 0x%x) faded under the ceremony's music", reqs[i], buses[i]);
@@ -24906,10 +24920,11 @@ static void cselm_quiet(void)
     int n = pm_sound_playing(reqs, buses, 8), i;
     unsigned k;
     cselm.quiet_at = pm_ms();
+    cselm.n_quiet = quiet_forget(cselm.quiet, cselm.n_quiet, reqs, n);   /* one the game plays again is faded again */
     for (i = 0; i < n && i < 8; i++) {
         if (!reqs[i] || reqs[i] == cselm.request) continue;
         for (k = 0; k < cselm.n_quiet && cselm.quiet[k] != reqs[i]; k++) ;
-        if (k < cselm.n_quiet) continue;                      /* faded already */
+        if (k < cselm.n_quiet) continue;                      /* fading already */
         if (cselm.n_quiet < CSELM_QUIET_N) cselm.quiet[cselm.n_quiet++] = reqs[i];
         if (buses[i] & BUS_MUSIC_BIT) {
             for (k = 0; k < cselm.n_music && cselm.music[k] != reqs[i]; k++) ;

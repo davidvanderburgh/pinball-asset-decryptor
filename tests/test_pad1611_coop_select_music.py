@@ -210,3 +210,29 @@ def test_the_lookup_takes_the_musics_record():
     src = T.RUNTIME.read_text(encoding="utf-8")
     look = R._lift(src, "static int cselm_lookup(pm_reg *r)\n{")
     assert "LOOKUP_TAKE(r, cselm.host);" in look and "key_is(k, cselm.key)" in look and "cselm.swap_until" in look
+
+
+FORGET = r"""
+#include <stdio.h>
+@FNS@
+int main(void)
+{
+    unsigned q[4] = {66, 74, 585, 0}, playing[2] = {74, 900};
+    unsigned n = quiet_forget(q, 3, playing, 2);
+    printf("kept %u %u\n", n, q[0]);
+    printf("none %u\n", quiet_forget(q, n, playing, -1));
+    return 0;
+}
+"""
+
+
+def test_a_sound_the_game_plays_again_is_faded_again(tmp_path):
+    # the emulator (Godzilla LE 1.16, teammate 2's pick): the game faded music 74 under the track, then asked for it
+    # again while the pick was open - a quiet list that never forgot it let the second one play unfaded
+    src = T.RUNTIME.read_text(encoding="utf-8")
+    fns = R._lift(src, "static unsigned quiet_forget(unsigned *quiet, unsigned n_quiet, const unsigned *reqs, int n)")
+    out = R._host_run(tmp_path, FORGET.replace("@FNS@", fns)).splitlines()
+    assert "kept 1 74" in out and "none 0" in out
+    for name in ("static void cselm_quiet(void)\n{", "static void ccer_quiet(void)\n{"):
+        body = R._lift(src, name)
+        assert "quiet_forget(" in body and body.index("quiet_forget(") < body.index("pm_sound_fade(reqs[i]")

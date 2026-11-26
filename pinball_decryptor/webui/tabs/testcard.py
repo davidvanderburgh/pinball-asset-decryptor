@@ -260,11 +260,11 @@ class TestCardTab(TabService):
             raise RpcError("The machine's system partition has %s free, and /data and /dump need %s to be kept "
                            "safe while the card grows." % (rs._human(free), rs._human(need)))
         if not compat.messagebox.askyesno(
-                "Grow the test card on the machine",
-                "Grow the test card on the machine at %s to fill its %s SD card?\n\nIts test files area goes from "
-                "%s to %s. The machine restarts once, and while it starts up it makes the new partitions; leave it "
-                "switched on until PAD says the grow is done.\n\nThe test files on the machine are cleared: press "
-                "Send to machine afterwards to put them back. Its remote access and settings are kept."
+                "Grow the card on the machine",
+                "Grow the card on the machine at %s to fill its %s SD card?\n\nIts games partition goes from %s to "
+                "%s. The machine restarts once, and while it starts up it enlarges that partition and moves /data "
+                "and /dump (a few minutes); leave it switched on until PAD says the grow is done.\n\nIts games, test "
+                "files, remote access and settings are kept."
                 % (address, rs._human(p.card * tg.SECTOR), rs._human(p.old[3][1] * tg.SECTOR),
                    rs._human(p.p3[1] * tg.SECTOR)), icon="warning"):
             return False

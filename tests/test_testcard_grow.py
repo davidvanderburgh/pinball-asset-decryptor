@@ -5,7 +5,10 @@ the limits of their SD card", and it "can be grown remotely but will require reb
 new table written on the running machine (p1/p2 untouched, p3 to the end, p5/p6 moved to the very end), /data and
 /dump saved on the system partition, and a start-up script that - only under exactly that table - makes the new
 file systems and puts /data and /dump back.  Proven on a copy of a test card in WSL with the card's own BusyBox,
-mke2fs and tar (8 GB card: p3 2 GiB -> 7.4 GB, the remote access host key the same after)."""
+mke2fs and tar (8 GB card: p3 2 GiB -> 7.4 GB, the remote access host key the same after).
+
+Simon (2026-11-26): "all tests should be done via network updates" - /games keeps its files (PAD's own e2fsck and
+resize2fs enlarge it), and a multi-boot card grows as a test card does."""
 
 import os
 import struct
@@ -65,7 +68,7 @@ def test_the_grown_table(tmp_path):
 def test_a_card_that_cannot_grow_is_refused():
     with pytest.raises(tg.GrowError, match="already fills"):
         tg.plan(LAYOUT, 5173248 + 262144 + 4096, _mbr())
-    with pytest.raises(tg.GrowError, match="isn't laid out as a PAD test card"):
+    with pytest.raises(tg.GrowError, match="isn't laid out as a PAD test card or multi-boot card"):
         tg.plan({**LAYOUT, 7: (9000000, 100)}, CARD, _mbr())
     with pytest.raises(tg.GrowError, match="no partition table"):
         tg.plan(LAYOUT, CARD, bytes(512))
@@ -76,7 +79,7 @@ def test_the_startup_script_formats_only_under_the_grown_table():
     s = tg.startup_script()
     assert s.startswith("#!/bin/sh\n") and "@" not in s
     check = s.index("nothing changed\"\n    exit 0")
-    for word in ("mke2fs", "mount -o remount,rw /", "tar -xf"):
+    for word in ("mke2fs", "mount -o remount,rw /", "tar -xf", "resize2fs"):
         assert s.index(word) > check, word
     for n in ("3", "5", "6"):
         assert '[ "$(part %s start)" != "$P%s_START" ]' % (n, n) in s
@@ -84,7 +87,27 @@ def test_the_startup_script_formats_only_under_the_grown_table():
     # it removes itself and the saved copies only when all of it worked
     done = s.index('if [ $ok = 1 ]; then')
     assert s.index("rm -rf $D", done) and s.index("rm -f $0", done)
-    assert "rm -f /data/pad/hash_cache.json /data/pad/remote_send.json" in s
+
+
+def test_games_keep_their_files():
+    """/games is checked and enlarged with PAD's own tools, never made afresh; the Send's records of it stay."""
+    s = tg.startup_script()
+    assert "mke2fs -q -F -t ext4 -L games" not in s
+    fsck, grow = s.index("$D/e2fsck -fy /dev/mmcblk0p3"), s.index("$D/resize2fs /dev/mmcblk0p3")
+    assert fsck < grow and "[ $rc -le 1 ]" in s[fsck:grow], "enlarged only after a clean (or fixed) check"
+    assert "hash_cache.json" not in s and "remote_send.json" not in s
+    assert 'say "p3 /games not enlarged' in s
+
+
+def test_the_tools_go_with_pad():
+    """Static 32-bit ARM builds (installer/build_machine_e2fsprogs.sh), with e2fsprogs' NOTICE and their source."""
+    kit = tg.tools()
+    assert sorted(kit) == ["e2fsck", "resize2fs"]
+    for name, data in kit.items():
+        assert data[:4] == b"\x7fELF" and data[4] == 1 and data[18] == 40, name + ": 32-bit ARM"
+        assert b"/lib/ld-linux" not in data, name + ": static"
+    assert os.path.isfile(os.path.join(tg.TOOLS_DIR, "NOTICE"))
+    assert "e2fsprogs 1.47.3" in open(os.path.join(tg.TOOLS_DIR, "SOURCE"), encoding="utf-8").read()
 
 
 def test_the_startup_script_runs_at_the_right_moment():
@@ -113,10 +136,23 @@ class _Card(object):
     def close(self):
         pass
 
+    # PAD-1427: the Send's own hold, screen and restart
+    def pause_game(self):
+        self.scripts.append("pause_game")
+
+    def screen_changing(self):
+        self.scripts.append("screen_changing")
+
+    def screen_stopped(self, changed):
+        self.scripts.append("screen_stopped %s" % changed)
+
+    def reboot(self):
+        self.scripts.append("reboot")
+
     def sh(self, script, stdin=b"", timeout=600, check=True):
         self.scripts.append(script)
-        if "PAD_TESTCARD" in script:
-            return 0, "PAD_TESTCARD\n" if self.testcard else ""
+        if "PAD_MENU_CARD" in script:
+            return 0, "PAD_MENU_CARD\n" if self.testcard else ""
         if "UNFINISHED" in script:
             return 0, self.left
         if script == "cat /sys/block/mmcblk0/size":
@@ -142,12 +178,15 @@ class _Card(object):
 def test_survey_and_prepare_write_the_table_and_the_startup():
     m = _Card()
     p, need, free = tg.survey(m)
-    assert p.expect == GROWN and need == 300 * 1024 + tg.SPARE and free == 180 << 20
+    assert p.expect == GROWN and free == 180 << 20
+    assert need == 300 * 1024 + tg.SPARE + sum(map(len, tg.tools().values()))
     said = []
     tg.prepare(m, p, lambda t, lv="info": said.append(t))
     assert m.sectors[0] == p.sectors[-1][1] and m.sectors[16248832] == p.sectors[0][1]
     assert m.files[tg.GROW_DIR + "/grow.conf"] == p.conf().encode()
     assert m.files[tg.BOOT_SCRIPT_PATH] == tg.startup_script().encode()
+    for name, data in tg.tools().items():
+        assert m.files[tg.GROW_DIR + "/" + name] == data
     joined = "\n".join(m.scripts)
     assert "tar -cf %s/data.tar -C /data ." % tg.GROW_DIR in joined and "tar -cf %s/dump.tar -C /dump ." % tg.GROW_DIR
     assert "conv=" not in joined, "the card's BusyBox 1.23 dd has no conv="
@@ -164,11 +203,11 @@ def test_a_table_the_card_does_not_take_is_put_back():
     assert any(s.startswith("rm -rf %s; rm -f %s" % (tg.GROW_DIR, tg.BOOT_SCRIPT_PATH)) for s in m.scripts)
 
 
-def test_only_a_test_card_is_grown_and_an_unfinished_grow_is_said():
-    with pytest.raises(tg.GrowError, match="isn't running a PAD test card"):
+def test_only_a_pad_card_is_grown_and_an_unfinished_grow_is_said():
+    with pytest.raises(tg.GrowError, match="isn't running a PAD test card or multi-boot card"):
         tg.survey(_Card(testcard=False))
-    with pytest.raises(tg.GrowError, match="still under way.*p3 /games made"):
-        tg.survey(_Card(left="UNFINISHED\np3 /games made\n"))
+    with pytest.raises(tg.GrowError, match="still under way.*p3 /games enlarged"):
+        tg.survey(_Card(left="UNFINISHED\np3 /games enlarged\n"))
     grown = _Card(layout={**LAYOUT, **GROWN, 4: (16248832, 2)}, left="GROWN\n")
     grown.sectors[0] = tg.plan(LAYOUT, CARD, _mbr()).sectors[-1][1]
     with pytest.raises(tg.GrowError, match="grown already"):
@@ -210,9 +249,22 @@ def test_the_run_restarts_the_machine_and_waits_for_it():
                            sleep=lambda s: None)
     pipe.run()
     assert out["ok"] is True, out
-    assert "grown" in out["summary"] and "Send to machine" in out["summary"]
+    assert "grown" in out["summary"] and "its files as they were" in out["summary"]
     assert out["phases"] == [0, 1, 2, 3]
-    assert any("reboot" in s for s in first.scripts)
+    # the game held before /data is saved, as a Send (PAD-1427); changing from the table on; then the restart
+    order = [s for s in first.scripts if s in ("pause_game", "screen_changing", "reboot")]
+    assert order == ["pause_game", "screen_changing", "reboot"]
+    assert first.scripts.index("pause_game") < next(i for i, s in enumerate(first.scripts) if "data.tar" in s)
+
+
+def test_a_grow_that_stops_before_the_table_puts_the_game_back():
+    m = _Card(refuse_table=True)
+    out = {}
+    pipe = tg.GrowPipeline("192.168.1.50", lambda *a: None, lambda i: None, lambda *a: None,
+                           lambda ok, s: out.update(ok=ok, summary=s), connect_fn=lambda a: m, sleep=lambda s: None)
+    pipe.run()
+    assert out["ok"] is False and "the old one is back" in out["summary"]
+    assert "screen_stopped False" in m.scripts and "reboot" not in m.scripts
 
 
 # ---- the tab and the app ---------------------------------------------------------------------------------------
@@ -233,11 +285,12 @@ def test_the_tab_asks_with_the_sizes_then_starts_the_run(monkeypatch):
     monkeypatch.setattr(compat.messagebox, "askyesno", lambda *a, **k: asked.append(a) or True)
     assert _tab(cb=started.append).grow() is True
     assert started == ["192.168.1.50"]
-    assert "8.0 GB SD card" in asked[0][1] and "Send to machine afterwards" in asked[0][1]
+    assert "8.0 GB SD card" in asked[0][1]
+    assert "games, test files, remote access and settings are kept" in asked[0][1]
     with pytest.raises(RpcError, match="Network tab"):
         _tab(cb=started.append, address="").grow()
     monkeypatch.setattr(rs, "connect", lambda address: _Card(testcard=False))
-    with pytest.raises(RpcError, match="isn't running a PAD test card"):
+    with pytest.raises(RpcError, match="isn't running a PAD test card or multi-boot card"):
         _tab(cb=started.append).grow()
     assert started == ["192.168.1.50"]
 

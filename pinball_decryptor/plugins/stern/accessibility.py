@@ -209,7 +209,7 @@ def make_words(cache_dir, log=None, timeout=300):
         if log:
             log("Spoken scores: making %d spoken number(s) with %s." % (len(todo), how), "info")
         if kind == "sapi":
-            with tempfile.TemporaryDirectory() as tmp:
+            with tempfile.TemporaryDirectory(prefix="pad_speak_") as tmp:
                 lst, ps1 = os.path.join(tmp, "words.txt"), os.path.join(tmp, "say.ps1")
                 with open(lst, "w", encoding="utf-8") as f:
                     f.write("".join("%s\t%s\n" % (WORDS[i], p) for i, p in todo))

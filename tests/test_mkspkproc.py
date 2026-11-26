@@ -24,6 +24,12 @@ import mkspkproc as sp  # noqa: E402
 
 pytest.importorskip("Crypto.Cipher.AES")      # the app's own requirement; the rig uses openssl
 
+
+@pytest.fixture(autouse=True)
+def _own_index_cache(tmp_path, monkeypatch):
+    """the member lists in this test's own folder, not the real %TEMP% (PAD-1598)"""
+    monkeypatch.setattr(mk, "INDEX_CACHE", str(tmp_path / "pad_spkmulti"))
+
 LAUNCHER = os.path.join(REPO, "tools", "spike2_emu", "codeselect", "padselect_proc.sh")
 AC_XINITRC = """#!/bin/sh
 userresources=$HOME/.Xresources
@@ -208,3 +214,30 @@ def test_the_openssl_path_matches(tmp_path, monkeypatch):
     monkeypatch.setattr(sp, "_have_crypto", lambda: True)
     sp.aes_decrypt(str(tmp_path / "ossl.pkg"), str(tmp_path / "c.zip"), "ac_pkg")     # pycryptodome
     assert open(z, "rb").read() == open(tmp_path / "c.zip", "rb").read()
+
+
+def test_a_recopied_update_keeps_one_unpacked_copy_and_reads_it(tmp_path, sel, monkeypatch):
+    """PAD-1598: the unpacked layer is keyed by the update's name, size and content, not its
+    modified time - a re-copied update finds the copy it left (no second 2 GB, no decrypt)"""
+    import shutil
+    import time
+    stock, mod = _rm(tmp_path)
+    cache = tmp_path / "cache"
+    one = _build(stock, mod, str(tmp_path / "o1"), sel, "--cache-dir", str(cache))
+    first = sorted(os.listdir(cache))
+    # the stock and the mod are named alike: both kept, each once
+    assert len([n for n in first if n.endswith(".zip")]) == 2
+    copies = []
+    for d, src in (("s2", stock), ("m2", mod)):
+        (tmp_path / d).mkdir()
+        p = shutil.copy(src, str(tmp_path / d / os.path.basename(src)))
+        t = time.time() + 3600
+        os.utime(p, (t, t))
+        copies.append(p)
+    calls = []
+    real = sp.aes_decrypt
+    monkeypatch.setattr(sp, "aes_decrypt", lambda *a, **k: calls.append(a) or real(*a, **k))
+    two = _build(copies[0], copies[1], str(tmp_path / "o2"), sel, "--cache-dir", str(cache))
+    assert calls == [], "the second build decrypted an update it had kept"
+    assert sorted(os.listdir(cache)) == first
+    assert sorted(_members(one, tmp_path / "w1")) == sorted(_members(two, tmp_path / "w2"))

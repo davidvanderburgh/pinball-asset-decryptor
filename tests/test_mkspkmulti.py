@@ -25,6 +25,13 @@ import mkspkmulti as mk  # noqa: E402
 LAUNCHER = os.path.join(REPO, "tools", "spike2_emu", "codeselect", "padselect_spk.sh")
 
 
+@pytest.fixture(autouse=True)
+def _own_index_cache(tmp_path, monkeypatch):
+    """the member lists in this test's own folder: INDEX_CACHE is fixed when the tool is imported,
+    before the suite moves TEMP, so they once landed in the real %TEMP% (PAD-1598)"""
+    monkeypatch.setattr(mk, "INDEX_CACHE", str(tmp_path / "pad_spkmulti"))
+
+
 def _tar(path, files, mode="w:gz"):
     with tarfile.open(path, mode) as tf:
         for rel, data in files.items():
@@ -293,3 +300,61 @@ def test_other_games_still_refused(tmp_path, h78um, scooby, sel):
     stock, _mod = scooby
     assert mk.main(["plan", "--primary", h78um["um"], "--extra", stock]) == 2
     assert mk.TITLES["scooby_doo"]["family"] == "scooby_doo"
+
+
+def test_a_recopied_update_is_not_read_again(tmp_path, scooby, monkeypatch):
+    """PAD-1598: a re-copied update (same bytes, new modified time) finds its kept member list"""
+    import shutil
+    stock, mod = scooby
+    assert mk.main(["plan", "--primary", stock, "--extra", mod]) == 0
+    idx = tmp_path / "pad_spkmulti"
+    before = sorted(os.listdir(idx))
+    assert len(before) == 2
+    (tmp_path / "again").mkdir()
+    again = shutil.copy(stock, str(tmp_path / "again" / os.path.basename(stock)))
+    t = os.path.getmtime(stock) + 86400
+    os.utime(again, (t, t))
+    opened = []
+    real = tarfile.open
+    monkeypatch.setattr(tarfile, "open", lambda *a, **k: opened.append(a) or real(*a, **k))
+    assert mk.main(["plan", "--primary", again, "--extra", mod]) == 0
+    assert opened == [] and sorted(os.listdir(idx)) == before
+
+
+def test_tidy_cache(tmp_path):
+    """PAD-1598: unused 30 days, half-written by a run that died, the old modified-time names -
+    gone; what is in use, or someone else's (Stern's card lists share the folder), stays"""
+    import time
+    now = time.time()
+    d = tmp_path / "c"
+    d.mkdir()
+
+    def f(name, age_days=0, size=10):
+        p = d / name
+        p.write_bytes(b"x" * size)
+        t = now - age_days * 86400
+        os.utime(str(p), (t, t))
+        return str(p)
+
+    fresh = f("code_UM.pkg.9015.0123456789ab.tar.gz", 29)
+    mod = f("code_UM.pkg.9035.ba9876543210.tar.gz", 1)      # the mod, named alike: kept too
+    idx = f("code_UM.pkg.9015.0123456789ab.index.json", 2)
+    stale = f("code_UM.pkg.8000.aaaaaaaaaaaa.zip", 31)
+    held = f("rm.pkg.680.bbbbbbbbbbbb.zip", 45)
+    mk._IN_USE.add(held)
+    old_layer = f("code_UM.pkg.9015.1763900000.tar.gz", 0, 100)
+    old_index = f("code_UM.pkg.a1b2c3d4e5.9015.1763900000.index.json", 0)
+    dead_part = f("code_UM.pkg.9015.0123456789ab.tar.gz.tmp4242", 2)
+    live_part = f("code_UM.pkg.9015.0123456789ab.zip.tmp4243", 0)
+    old_part = f("x.pkg.1.2.index.json.part", 3)
+    stern = [f("100-200-abcdef.json", 90), f("delta-aa-bb.json", 90), f("edits-cc.sha256", 90)]
+    (d / "cards").mkdir()
+    try:
+        freed = mk.tidy_cache(str(d), now=now)
+    finally:
+        mk._IN_USE.discard(held)
+    left = set(str(p) for p in d.iterdir())
+    assert left == {fresh, mod, idx, held, live_part, str(d / "cards")} | set(stern)
+    assert freed == 10 + 100 + 10 + 10 + 10
+    for gone in (stale, old_layer, old_index, dead_part, old_part):
+        assert gone not in left

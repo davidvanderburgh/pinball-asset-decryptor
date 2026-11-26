@@ -280,3 +280,25 @@ def test_the_page_has_the_list_and_matching_pickers():
     css = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "css", "tabs", "text_scenes.css"),
                encoding="utf-8").read()
     assert ".lt-picker { display: grid; grid-template-columns: 380px 240px;" in css
+
+
+# ---- the table run's video (Simon, 2026-11-26): the loop's stutter, the update's flicker -------------------------
+def test_a_clip_loops_at_its_last_frame_not_300_ms_later():
+    """"the strange stutter in play back as the '0' overlay ends": the last frame was held ~0.4 s per loop."""
+    src = open(os.path.join(ROOT, "tools", "spike2_emu", "codeselect", "gstclip.c"), encoding="utf-8").read()
+    loop = src[src.index("static void maybe_loop("):]
+    loop = loop[:loop.index("\n}\n")]
+    assert "frame_ms = g->fps > 0 ? (long long)(1000.0f / g->fps) : 33;" in loop
+    assert "quiet >= frame_ms + frame_ms / 2" in loop, "the end is the last frame's own time"
+    assert "pos >= g->dur_ns - 200000000LL" in loop, "and the position is at the end"
+
+
+def test_a_send_freezes_a_menu_card_s_menu_and_lets_it_go():
+    """"This flickering is happening when the card is being updated": the test card's menu kept drawing beside the
+    message screen.  Frozen, not ended - ended, select.sh would stop the menu network the Send is using."""
+    from pinball_decryptor.core import remote_send as rs
+    pause = rs.PAUSE_SCRIPT
+    assert "c=$(pids_named codeselect)" in pause and "kill -STOP $c" in pause
+    assert "kill -9 $c" not in pause and "kill $c" not in pause
+    assert pause.index("kill -STOP $c") < pause.index("pad_say @TEXT@")
+    assert "kill -CONT $c" in rs.SCREEN_FNS[rs.SCREEN_FNS.index("pad_resume()"):]

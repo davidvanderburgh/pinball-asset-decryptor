@@ -738,6 +738,9 @@ pad_say() {
 pad_resume() {
   touch $W/done
   for p in $(pids_named boot_display) $(pids_named jimg); do kill $p 2>/dev/null; done
+  c=$(cat $W/menu 2>/dev/null)
+  [ -n "$c" ] && kill -CONT $c 2>/dev/null
+  rm -f $W/menu
   m=$(cat $W/monitor 2>/dev/null)
   if [ -z "$m" ]; then echo "PAD_SEND_NOT_RUNNING"; return 0; fi
   old=" $(cat $W/game 2>/dev/null) "
@@ -807,6 +810,12 @@ for p in $m; do
   done
 done
 [ -n "$g" ] && kill -9 $g
+# Simon (2026-11-26): "This flickering is happening when the card is being updated" - a test card's menu (or a
+# multi-boot card's) is not a game: it kept drawing beside the message screen.  It is frozen, not ended: ended, its
+# select.sh would stop the menu network (padnet) the Send is using
+c=$(pids_named codeselect)
+echo "$c" > $W/menu
+[ -n "$c" ] && kill -STOP $c
 sleep 1
 # PAD-1587: a game the loop started as the hold began (its restart and the hold crossed) is ended too, so no game
 # runs on files a Send changes; the loop is stopped now, so none comes after it

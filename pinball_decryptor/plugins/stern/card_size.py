@@ -92,6 +92,7 @@ THE RULES THAT KEEP IT SAFE.
 """
 
 import collections
+import contextlib
 import hashlib
 import os
 import shlex
@@ -218,6 +219,30 @@ def size_fixed():
     """Whether this build can't take an SD card size at all: Port + build
     (:data:`FIXED_ENV`) makes every card at its own original's size."""
     return os.environ.get(FIXED_ENV) == "1"
+
+
+@contextlib.contextmanager
+def own_size():
+    """PAD-1626: everything built inside the ``with`` comes out at its own
+    original's size, whatever the Write tab asks for (:data:`ENV`,
+    :data:`FIT_ENV`), and a build that runs out of room is never told to set
+    a size (:data:`FIXED_ENV`).  For a build that is not the project's own
+    card: the copy a flash puts the network settings on is the image the user
+    picked, written as it is (a multi-boot card the Multi-boot tab sized, a
+    card already built at the size it wants).  The settings are back when the
+    block ends."""
+    kept = {k: os.environ.get(k) for k in (ENV, FIT_ENV, FIXED_ENV)}
+    os.environ.pop(ENV, None)
+    os.environ.pop(FIT_ENV, None)
+    os.environ[FIXED_ENV] = "1"
+    try:
+        yield
+    finally:
+        for k, v in kept.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 def fit_requested():

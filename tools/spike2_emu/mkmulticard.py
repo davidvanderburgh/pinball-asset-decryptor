@@ -5599,20 +5599,29 @@ def _find_tree_game(root):
     raise Refused("no title directory with a game file in %s" % root)
 
 
-def apply_bypass_fs(ops, prefix):
+def apply_bypass_fs(ops, prefix, deltas=None):
     """The validator bypass on the tree at `prefix` through a mounted filesystem (never a raw
     write behind a mount): the patched ELF and the refreshed .sidx are written tmp + rename
     with the old files' mode/owner/mtime.  -> (state before, {rel: sha256 of what is now on the
-    card}, notes)."""
+    card}, notes).  `deltas`: the store tree's record of its delta files (item 107).  A game or
+    .sidx kept as one is read as the file the tree really holds, base + delta (PAD-1626: its
+    own name links the BASE - another tree's stock game - and patching that put the stock game
+    under a mode build's image); what is written is that file whole, so the caller drops it
+    from the tree's deltas (:func:`drop_bypassed_deltas`)."""
     ts = _treesync()
     root = ops._p(prefix) if prefix else ops.root
     title, gpath, spath = _find_tree_game(root)
-    with open(os.path.join(root, gpath), "rb") as f:
-        elf = f.read()
-    sdata = None
-    if spath:
-        with open(os.path.join(root, spath), "rb") as f:
-            sdata = f.read()
+
+    def _read(rel):
+        if deltas and rel in deltas:
+            try:
+                return ts.delta_content(ops, deltas[rel])
+            except ValueError as e:
+                raise Refused("%s is stored as a delta that can't be rebuilt (%s)" % (rel, e))
+        with open(os.path.join(root, rel), "rb") as f:
+            return f.read()
+    elf = _read(gpath)
+    sdata = _read(spath) if spath else None
     state, new_elf, new_sidx, notes = bypass_tree_bytes(elf, sdata, gpath, title)
     written = {}
     for rel, data in ((gpath, new_elf), (spath, new_sidx)):
@@ -5648,6 +5657,17 @@ def adopt_written(ops, prefix, written):
                 ops.unlink(tmp)
             ops.link(blob, tmp)
             ops.rename(tmp, full)
+
+
+def drop_bypassed_deltas(ops, prefix, deltas, written):
+    """After :func:`apply_bypass_fs` wrote a store tree's game / .sidx whole (PAD-1626): the
+    tree's deltas without those files, its `.multiboot/deltas` index rewritten to match (so the
+    card never rebuilds the old file over the patched one at boot) -> the deltas left, or None."""
+    if not deltas or not any(rel in deltas for rel in written):
+        return deltas or None
+    left = {rel: v for rel, v in deltas.items() if rel not in written}
+    _treesync().write_delta_index(ops, prefix, left)
+    return left or None
 
 
 def build_store(plan, out, trees):
@@ -5767,35 +5787,41 @@ def bypass_store(card, plan, trees):
     the store under their own keys (two trees with the same stock game share one patched one);
     the digests go into the record; blobs nothing links any more are removed."""
     print("== validator bypass (through the store's mount)")
-    ts = _treesync()
     p3 = plan.prims[2]
     with LoopMount(card, p3.start * SECTOR, p3.count * SECTOR) as mp:
         ops = DirOps(mp)
-        for i, (part, sub) in enumerate(plan.trees):
-            dev = device_name(part.num, sub)
-            try:
-                state, written, notes, gpath, spath = apply_bypass_fs(ops, sub or "")
-            except Refused as e:
-                print("image %d %s: validator: SKIPPED (%s)" % (i, dev, e))
-                continue
-            adopt_written(ops, sub or "", written)
-            im = trees.image(i)
-            if written:
-                by = {"game_path": gpath, "sidx_path": spath}
-                for rel, sha in written.items():
-                    by["game" if rel == gpath else "sidx"] = sha
-                im.bypass = by
-            after = "bypassed" if (written and gpath in written) or state == "bypassed" else state
-            line = bypass_words(after)
-            if written:
-                line += " (%s written)" % ", ".join(sorted(written))
-            elif state == "bypassed":
-                line += " (already)"
-            print("image %d %s: %s - %s" % (i, dev, line, "; ".join(notes)))
-        n, nbytes = ts.gc_blobs(ops, keep_deltas=trees.delta_names())
-        if n:
-            say("store: %d blob(s) no tree links any more removed (%s)" % (n, _gb(nbytes)))
+        bypass_store_ops(ops, plan, trees)
         ops.commit()
+
+
+def bypass_store_ops(ops, plan, trees):
+    """:func:`bypass_store`'s work on the store's mounted p3 (`ops`), every tree in turn."""
+    ts = _treesync()
+    for i, (part, sub) in enumerate(plan.trees):
+        dev = device_name(part.num, sub)
+        im = trees.image(i)
+        try:
+            state, written, notes, gpath, spath = apply_bypass_fs(ops, sub or "", im.deltas)
+        except Refused as e:
+            print("image %d %s: validator: SKIPPED (%s)" % (i, dev, e))
+            continue
+        adopt_written(ops, sub or "", written)
+        im.deltas = drop_bypassed_deltas(ops, sub or "", im.deltas, written)
+        if written:
+            by = {"game_path": gpath, "sidx_path": spath}
+            for rel, sha in written.items():
+                by["game" if rel == gpath else "sidx"] = sha
+            im.bypass = by
+        after = "bypassed" if (written and gpath in written) or state == "bypassed" else state
+        line = bypass_words(after)
+        if written:
+            line += " (%s written)" % ", ".join(sorted(written))
+        elif state == "bypassed":
+            line += " (already)"
+        print("image %d %s: %s - %s" % (i, dev, line, "; ".join(notes)))
+    n, nbytes = ts.gc_blobs(ops, keep_deltas=trees.delta_names())
+    if n:
+        say("store: %d blob(s) no tree links any more removed (%s)" % (n, _gb(nbytes)))
 
 
 def verify_store(card, plan, rec, check, mode="full"):
@@ -6688,7 +6714,8 @@ def _update_locked(a, ts, card, dry):
                 want_bypass = a.bypass_validation or (
                     bool(old_im is not None and old_im.bypass) and not getattr(a, "restore_validation", False))
                 if want_bypass:
-                    state, written, notes, gpath, spath = apply_bypass_fs(ops, prefix)
+                    state, written, notes, gpath, spath = apply_bypass_fs(
+                        ops, prefix, delta_records.get(i) if store else None)
                     states[i] = state
                     for line in notes:
                         say("image %d bypass: %s" % (i, line))
@@ -6705,6 +6732,9 @@ def _update_locked(a, ts, card, dry):
                         touched.setdefault(i, []).append(rel)
                     if store:
                         adopt_written(ops, prefix, written)
+                        if i in delta_records:
+                            delta_records[i] = drop_bypassed_deltas(ops, prefix, delta_records[i],
+                                                                    written) or {}
             if store:
                 # keep every delta some tree of the NEW list names: the ones just written or
                 # kept above, and the untouched trees' recorded ones

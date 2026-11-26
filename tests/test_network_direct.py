@@ -198,3 +198,36 @@ def test_straight_onto_a_card_image_and_off_again(tmp_path):
     assert node(card, B.MONITOR)['data'].decode() == STOCK and node(card, W.MODULE)['data'] == node(image, W.MODULE)['data']
     with pytest.raises(ExtrasError, match='nothing to put'):
         A.to_card(str(card))
+
+
+def test_keep_my_network_settings_writes_the_image_at_its_own_size(tmp_path, monkeypatch):
+    # PAD-1626: a 3-image multi-boot card flashed with the tick, the Write tab left at 32 GB (and "as small as it
+    # can be") from the project's own builds: the copy the settings go on is the picked image as it is, not a
+    # build for another SD card size, which a multi-boot card refuses ("more than two logical partitions")
+    from pinball_decryptor.plugins.stern import card_size as cs, multiimage, pipeline as P
+    image = tmp_path / 'multi.raw'
+    image.write_bytes(b'card' * 1024)
+    project = _project(tmp_path, ssh=True)
+    monkeypatch.setattr(multiimage, 'images_for_path', lambda p: [object(), object(), object()])
+    monkeypatch.setenv(cs.ENV, '32G')
+    monkeypatch.setenv(cs.FIT_ENV, '1')
+    monkeypatch.delenv(cs.FIXED_ENV, raising=False)
+    with pytest.raises(cs.CardSizeError):
+        cs.preflight(str(image), cs.requested(), tools=False)           # what the copy's build met before
+    asked = []
+
+    def build(self):                                                    # the build's own first questions
+        asked.append((cs.preflight(self.original_path, cs.requested(), tools=False), cs.fit_requested(),
+                      cs.size_fixed()))
+        shutil.copyfile(self.original_path, self.output_path)
+    monkeypatch.setattr(P.SternWritePipeline, '_run', build)
+    pipe = P.SternFlashImagePipeline(str(image), r'\\.\PHYSICALDRIVE9', lambda *a, **k: None, lambda *a: None,
+                                     lambda *a, **k: None, lambda *a: None, network_from=str(project))
+    out = pipe._with_network()
+    try:
+        assert asked == [(None, False, True)]                           # its own size, never made smaller
+        assert open(out, 'rb').read() == image.read_bytes()
+    finally:
+        K.clean(out)
+    assert os.environ[cs.ENV] == '32G' and os.environ[cs.FIT_ENV] == '1'    # the Write tab's choice is back
+    assert cs.FIXED_ENV not in os.environ

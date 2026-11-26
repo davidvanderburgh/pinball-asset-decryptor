@@ -29,6 +29,7 @@ loop mount, the p2 record and the CLI.  Everything here runs on Windows in the t
 import collections
 import errno
 import hashlib
+import io
 import json
 import os
 import re
@@ -1131,7 +1132,18 @@ def gc_blobs(ops, keep_deltas=None):
     n = nbytes = 0
     if not ops.exists(BLOBS_DIR):
         return 0, 0
-    for name in sorted(ops.listdir(BLOBS_DIR)):
+    names = sorted(ops.listdir(BLOBS_DIR))
+    # PAD-1626: the BASE of every delta that stays is kept too, linked or not.  A bypass that
+    # patched the last tree linking the stock game left a third tree's delta over it with
+    # nothing to rebuild from (verify: "base ... missing"; at boot the image lost its game).
+    bases = set()
+    for name in names:
+        if (name.endswith(DELTA_SUFFIX) and not is_tmp(name)
+                and (keep_deltas is None or name in keep_deltas)):
+            base = delta_base(ops, BLOBS_DIR + "/" + name)
+            if base:
+                bases.add(base)
+    for name in names:
         rel = BLOBS_DIR + "/" + name
         st = ops.lstat(rel)
         if st is None or st["kind"] != "file":
@@ -1140,6 +1152,8 @@ def gc_blobs(ops, keep_deltas=None):
             dead = True
         elif name.endswith(DELTA_SUFFIX):
             dead = keep_deltas is not None and name not in keep_deltas
+        elif name in bases:
+            dead = False
         else:
             dead = st.get("nlink", 1) <= 1
         if dead:
@@ -1147,6 +1161,41 @@ def gc_blobs(ops, keep_deltas=None):
             n += 1
             nbytes += st.get("size", 0)
     return n, nbytes
+
+
+def delta_base(ops, rel):
+    """The base blob key a delta blob at `rel` names in its header, or None when it is not one
+    (PAD-1626).  Reads only as far as the header's blank line."""
+    mz = _materialize()
+    buf = b""
+    try:
+        for c in ops.read_chunks(rel, 1 << 16):
+            buf += c
+            if b"\n\n" in buf or len(buf) > 64 << 20:
+                break
+        return mz.read_header(io.BytesIO(buf))["base"]
+    except (ValueError, OSError, KeyError):
+        return None
+
+
+def delta_content(ops, entry):
+    """The bytes of a file a store tree keeps as a DELTA (item 107; `entry` is the record's
+    {"base", "delta", "size", ...}): the base blob with the delta's ranges laid over it, what
+    materialize.py rebuilds at boot - the file the tree really holds, where the tree's own
+    name for it links the BASE (PAD-1626: the bypass patched that, the stock game).  Raises
+    ValueError when the blobs are missing or rebuild to another size or digest."""
+    mz = _materialize()
+    base_rel, delta_rel = BLOBS_DIR + "/" + entry["base"], BLOBS_DIR + "/" + entry["delta"]
+    if ops.lstat(base_rel) is None or ops.lstat(delta_rel) is None:
+        raise ValueError("delta %s or its base %s is not in the store" % (entry["delta"], entry["base"]))
+    work = io.BytesIO(b"".join(ops.read_chunks(base_rel)))
+    delta = io.BytesIO(b"".join(ops.read_chunks(delta_rel)))
+    h = mz.read_header(delta)
+    mz.apply_delta(work, delta, h)
+    data = work.getvalue()
+    if len(data) != h["size"] or (h.get("sha256") and hashlib.sha256(data).hexdigest() != h["sha256"]):
+        raise ValueError("delta %s does not rebuild to the file it names" % entry["delta"])
+    return data
 
 
 def write_delta_index(ops, prefix, delta_files):

@@ -1117,7 +1117,10 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
         if not specs:
             return "Pick at least one scene to draw over the clip."
         path = os.path.join(self.assets_dir, *str(clip_rel or "").split("/"))
-        if not clip_rel or not os.path.isfile(path):
+        vdir = os.path.realpath(os.path.join(self.assets_dir, "video"))
+        # one of layered_options' clips: a video file in the project's own video folder, never a path elsewhere
+        if (not clip_rel or not os.path.isfile(path) or os.path.splitext(path)[1].lower() not in tc.VIDEO_EXTS
+                or not os.path.realpath(path).startswith(vdir + os.sep)):
             return "Pick the video to play under the scenes."
         name = tc.clean_label(label or "%s over %s" % (self._scenes[layers[-1]["d"]].get("label") or "scene",
                                                         os.path.splitext(os.path.basename(path))[0]), "layered test")

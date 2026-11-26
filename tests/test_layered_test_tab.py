@@ -136,3 +136,19 @@ def test_a_layered_tests_row_says_so(monkeypatch):
     t._pub()
     row = t.state["rows"][0]
     assert "layered: 1 scene over it (0335207f)" in row["where"]
+
+
+def test_the_clip_under_a_layered_test_is_one_of_the_projects_videos(tmp_path):
+    """PR #50 review: add_layered's clip comes from the browser; only a video file in the project's own video
+    folder is taken (layered_options offers nothing else), never a file elsewhere on the PC."""
+    from pinball_decryptor.webui import text_scenes as TS
+    proj = tmp_path / "proj"
+    (proj / "video").mkdir(parents=True)
+    (proj / "video" / "match.txt").write_text("x")
+    (tmp_path / "secret.mp4").write_bytes(b"x")
+    (proj / "notes.mp4").write_bytes(b"x")
+    svc = TS.TextScenesService.__new__(TS.TextScenesService)
+    svc.assets_dir, svc._scenes, svc.window = str(proj), {"/s/0335207f": {"label": "Match"}}, None
+    layers = [{"d": "/s/0335207f", "pin": ""}]
+    for rel in ("../secret.mp4", "notes.mp4", "video/match.txt", "video/../../secret.mp4", ""):
+        assert svc.add_layered(layers, rel) == "Pick the video to play under the scenes.", rel

@@ -309,6 +309,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.mode_project" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_records" \
     --hidden-import "pinball_decryptor.plugins.stern.saved_progress" \
+    --hidden-import "pinball_decryptor.plugins.stern.boot_flip" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_runtime" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_sounds" \
     --hidden-import "pinball_decryptor.plugins.stern.mode_tryit" \

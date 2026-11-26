@@ -315,6 +315,8 @@ TEST_ENTRY_DEVICE = "testcard"
 TEST_ENTRY_TITLE = "TEST CARD"
 TEST_ENTRY_SUBTITLE = "test pictures, videos, scenes and sounds"
 TEST_ENTRY_SUBDIR = "padtest"
+#: what the entry's files leave free on the games partition
+TEST_ENTRY_HEADROOM = 16 << 20
 PADV_MAGIC = b"PADVJPG1"
 P2_FREE_MARGIN = 8 << 20                      # never fill p2 to the last block
 #: images.conf v2: a device is '/dev/mmcblk0pN' (parts layout),
@@ -1741,39 +1743,77 @@ def check_test_entry(entry):
     return (title, sub)
 
 
-def put_test_entry_files(card, test_files):
-    """THE TEST CARD ENTRY's files into /games/<TEST_ENTRY_SUBDIR> on the card's p3 (the primary's
-    games partition): the folder is emptied first, so an inject leaves exactly these.  Refused
-    when p3 has no room - a whole card of video is the user's to size, not this writer's."""
-    need_tools("debugfs", "e2fsck")
+def test_entry_wanted(a, existing):
+    """Is the TEST CARD entry on the card once this run is done?  --test-entry puts it on,
+    --no-test-entry takes it off, neither keeps what the card's images.conf (`existing`, parsed)
+    has - the rule conf_for_plan applies to the menu line, so the files follow the line."""
+    if getattr(a, "test_entry", False):
+        return True
+    if getattr(a, "no_test_entry", False):
+        return False
+    return bool((existing or {}).get("test_entry"))
+
+
+def _test_entry_dir(card):
+    """(debugfs ref of the card's p3, its free bytes, {name: bytes} already in /games/<TEST_ENTRY_SUBDIR>
+    or None when there is no such folder)."""
     geom = Geometry.from_file(card)
     t3, s3, c3 = geom.part(3)
     if t3 != 0x83:
         raise Refused("%s: p3 is type 0x%02x, not the games partition" % (card, t3))
     ref = fs_ref(card, s3 * SECTOR)
-    want = sum(os.path.getsize(p) for p in test_files.values())
     used, total = ext_used_bytes(card, s3 * SECTOR)
-    if want + (16 << 20) > total - used:
-        raise Refused("the TEST CARD entry's files are %s; the games partition has %s free"
-                      % (_gb(want), _gb(total - used)))
     d = "/" + TEST_ENTRY_SUBDIR
-    cmds = []
+    have = None
     if debugfs_exists(ref, d):
-        for ent in debugfs_ls(ref, d):
-            if ent[4] not in (".", ".."):
-                cmds.append("rm %s" % dq(d + "/" + ent[4]))
-    else:
+        have = {ent[4]: ent[5] for ent in debugfs_ls(ref, d) if ent[4] not in (".", "..")}
+    return ref, total - used, have
+
+
+def check_test_entry_room(card, test_files):
+    """Refuse when the TEST CARD entry's files do not fit p3 - what is in /games/<TEST_ENTRY_SUBDIR>
+    now is given back first.  `update` asks before it writes anything, so a card is never left
+    half updated for want of room."""
+    need_tools("debugfs")
+    _ref, free, have = _test_entry_dir(card)
+    want = sum(os.path.getsize(p) for p in test_files.values())
+    room = free + sum((have or {}).values())
+    if test_files and want + TEST_ENTRY_HEADROOM > room:
+        raise Refused("the TEST CARD entry's files are %s; the games partition has %s free"
+                      % (_gb(want), _gb(room)))
+    return want
+
+
+def put_test_entry_files(card, test_files):
+    """THE TEST CARD ENTRY's files into /games/<TEST_ENTRY_SUBDIR> on the card's p3 (the primary's
+    games partition): the folder is emptied first, so an inject leaves exactly these.  Refused
+    when p3 has no room - a whole card of video is the user's to size, not this writer's.
+    An empty `test_files` (the entry taken off) empties the folder and makes none."""
+    need_tools("debugfs", "e2fsck")
+    want = check_test_entry_room(card, test_files)
+    ref, _free, have = _test_entry_dir(card)
+    if have is None and not test_files:
+        return
+    d = "/" + TEST_ENTRY_SUBDIR
+    cmds = ["rm %s" % dq(d + "/" + nm) for nm in sorted(have or {})]
+    if have is None:
         cmds.append("mkdir %s" % dq(d))
         cmds += ["sif %s %s" % (dq(d), f) for f in ("mode 040755", "uid 0", "gid 0")]
     for nm, src in sorted(test_files.items()):
         cmds.append("write %s %s" % (dq(src), dq(d + "/" + nm)))
         cmds += ["sif %s %s" % (dq(d + "/" + nm), f) for f in ("mode 0100644", "uid 0", "gid 0")]
+    if not cmds:
+        return
     debugfs_write_script(ref, cmds)
     rc, txt = e2fsck(ref)
     if rc not in (0, 1):
         raise Refused("p3 after the TEST CARD files: e2fsck says\n%s" % txt.strip())
-    say("TEST CARD entry: %d file%s in /games/%s (%s)" % (len(test_files), "" if len(test_files) == 1 else "s",
-                                                         TEST_ENTRY_SUBDIR, _gb(want)))
+    if test_files:
+        say("TEST CARD entry: %d file%s in /games/%s (%s)" % (len(test_files), "" if len(test_files) == 1 else "s",
+                                                             TEST_ENTRY_SUBDIR, _gb(want)))
+    else:
+        say("TEST CARD entry off: /games/%s emptied (%d file%s)" % (TEST_ENTRY_SUBDIR, len(have or {}),
+                                                                   "" if len(have or {}) == 1 else "s"))
 
 
 def _media_name_ok(name, what):
@@ -5326,12 +5366,15 @@ def tree_skip(plan, sub):
     """What a walk of a games tree's root leaves out: lost+found - and, at a store card's root,
     the store and the extras' trees, which live beside the primary's own (item 95)."""
     ts = _treesync()
+    # the TEST CARD entry's files (/games/padtest) sit at the primary's root and are the menu's, not the
+    # game's: a tree record, an update's change check and verify all leave them out
+    entry = () if sub else (TEST_ENTRY_SUBDIR,)
     if plan is not None and plan.layout == "store" and not sub:
-        return tuple(ts.SKIP_ROOT) + tuple(ts.STORE_SKIP) + tuple(plan.store_subdirs)
+        return tuple(ts.SKIP_ROOT) + tuple(ts.STORE_SKIP) + tuple(plan.store_subdirs) + entry
     if plan is not None and plan.layout == "store":
         # every store tree may carry its own .multiboot/deltas (item 107): the tool's, not the game's
         return tuple(ts.SKIP_ROOT) + tuple(ts.TREE_SKIP)
-    return tuple(ts.SKIP_ROOT)
+    return tuple(ts.SKIP_ROOT) + entry
 
 
 def p2_digest(path, cache_dir=None):
@@ -6514,7 +6557,9 @@ def _update_locked(a, ts, card, dry):
     u["free_after"] = sum(fr for fr, _t in free.values()) - u["size"] + removed_bytes + (grow[1] if grow else 0)
     # the menu: re-injected when the image list moved or the menu flags say something new
     list_changed = any(a_.action != "keep" for a_ in actions)
-    media = plan_media(a.media_dir, len(newplan.trees)) if a.media_dir else None
+    # the TEST CARD entry's own files go to p3, not with the menu's media (as inject does)
+    entry_on = test_entry_wanted(a, conf_now)
+    media = plan_media(a.media_dir, len(newplan.trees), tests_apart=entry_on) if a.media_dir else None
     newconf = conf_for_plan(newplan, a, existing=conf_now, media=media, colours=plan_colours(versions))
     # ...and when an image's custom modes are not the ones on the card: a swapped image (or a
     # source whose modes changed) would otherwise boot the old image's modes (PAD-1386)
@@ -6540,6 +6585,10 @@ def _update_locked(a, ts, card, dry):
         return 0
     if not a.selector_dir and u["inject"]:
         raise Refused("the menu must be re-injected (the image list or the menu changed): pass --selector-dir")
+    # the TEST CARD entry's files must fit p3 BEFORE a game is touched (inject writes them last)
+    entry_files = (media or {}).get("test_files") if entry_on else None
+    if u["inject"] and entry_files:
+        check_test_entry_room(card, entry_files)
     # ---- execute
     t0 = time.monotonic()
     # EVERY PARTITION MOUNTED RW IS A SYNCED ONE from here on - a rw mount alone moves the
@@ -6663,7 +6712,11 @@ def _update_locked(a, ts, card, dry):
     newrec = ts.CardTrees(images, primary=identity, synced=synced, dirty=[], layout=plan.layout, version=VERSION)
     PROGRESS.step("recording what is on the card")
     if u["inject"]:
-        media = plan_media(a.media_dir, len(newplan.trees)) if a.media_dir else None
+        media = plan_media(a.media_dir, len(newplan.trees), tests_apart=entry_on) if a.media_dir else None
+        if entry_on and media and media.get("test_files"):
+            put_test_entry_files(card, media["test_files"])
+        elif conf_now.get("test_entry") and not entry_on:
+            put_test_entry_files(card, {})          # taken off: its files go with it
         manifests = selector_manifests(newplan, newconf, a.media_dir, sources, old_build, old_media,
                                        versions=versions, trees=newrec)
         inject_card(card, a.selector_dir, newconf, workdir=workdir, media_files=media["files"] if media else None,
@@ -8360,6 +8413,16 @@ def verify_card(card, plan, selector_dir=None, media_dir=None, mode="full", touc
         trees_rec = None
         check("trees.json readable", False, str(e))
     synced = set(trees_rec.synced) if trees_rec else set()
+    # THE TEST CARD ENTRY's files were written into the primary's games partition after the copy,
+    # so no range md5 of it can hold: like a partition synced in place, it is held to the record
+    # (whose walk leaves /games/padtest out)
+    if trees_rec is not None and plan.trees:
+        p0, sub0 = plan.trees[0]
+        if not sub0 and p0.num not in synced and debugfs_exists(fs_ref(card, p0.start * SECTOR),
+                                                                "/" + TEST_ENTRY_SUBDIR):
+            print("p%d: holds the TEST CARD entry's files (/games/%s) - held to %s, not to a range md5"
+                  % (p0.num, TEST_ENTRY_SUBDIR, TREES_MANIFEST))
+            synced.add(p0.num)
     O = Geometry.from_file(card)
     got = [(n, t, st, cnt) for (n, t, st, cnt) in O.prim] + [(5 + i, t, st, cnt) for i, (_e, t, st, cnt) in enumerate(O.logical)]
     check("table parse-back (own parser)", plan.table() == got, "" if plan.table() == got else "got %r" % (got,))
@@ -10157,8 +10220,78 @@ def selftest(d, selector_file=None):
         rc8b = main(["inject", "--card", out8, "--selector-dir", sel8])
     ok &= rc8b == 2 and "carries no version string" in buf8b.getvalue(), (rc8b, buf8b.getvalue()[-400:])
     print("SELFTEST part 8 (group)", "PASS" if ok else "FAIL")
+    ok &= selftest_test_entry(d, sel)
     ok &= selftest_modes(d, sel)
     print("SELFTEST", "PASS" if ok else "FAIL")
+    return bool(ok)
+
+
+def selftest_test_entry(d, sel):
+    """PART 10: THE TEST CARD ENTRY's files (/games/padtest on the primary's p3) through build,
+    an update whose Test card list changed, an update that takes the entry off, and inject on
+    and off - each leaving exactly the list's files there, none of them in the menu's media,
+    and a card verify passes (PAD-1615: an update put them with the media and failed its verify)."""
+    print("== the TEST CARD entry")
+    ok = Checks()
+    V = [make_synthetic_card(os.path.join(d, "T%d.img" % i), "T%d" % i, 0x0E0E0E00 + i, with_fs=True,
+                             title="turtles_pro", version="1_59_0", node_fw="1_33_0") for i in range(2)]
+
+    def media_set(name, tests):
+        m = synth_media_dir(os.path.join(d, name), 2)
+        with open(os.path.join(m, MEDIA_MANIFEST)) as f:
+            man = json.load(f)
+        for t in tests:
+            if t["file"].endswith(".png"):
+                synth_png(os.path.join(m, t["file"]), rgb=(len(t["file"]), 1, 2))
+            else:
+                synth_wav(os.path.join(m, t["file"]))
+        man["tests"] = tests
+        with open(os.path.join(m, MEDIA_MANIFEST), "w") as f:
+            json.dump(man, f)
+        return m
+
+    def padtest(card):
+        _t, s3, _c = Geometry.from_file(card).part(3)
+        ref = fs_ref(card, s3 * SECTOR)
+        if not debugfs_exists(ref, "/" + TEST_ENTRY_SUBDIR):
+            return None
+        return sorted(e[4] for e in debugfs_ls(ref, "/" + TEST_ENTRY_SUBDIR) if e[4] not in (".", ".."))
+
+    def p2_media(card):
+        return sorted(e[4] for e in debugfs_ls(select_ref(card), MEDIA_DIR) if e[4] not in (".", ".."))
+
+    def entry(card):
+        return bool((card_conf(card, select_ref(card)) or {}).get("test_entry"))
+
+    def verify():
+        return main(["verify", "--card", card, "--primary", V[0], "--extra", V[1]]) == 0
+
+    m1 = media_set("entry media one", [{"file": "t1.png", "label": "one", "kind": "image"},
+                                       {"file": "s1.wav", "label": "beep", "kind": "sound"}])
+    m2 = media_set("entry media two", [{"file": "t2.png", "label": "two", "kind": "image"}])
+    card = os.path.join(d, "test entry.img")
+    global TEST_ENTRY_HEADROOM
+    headroom, TEST_ENTRY_HEADROOM = TEST_ENTRY_HEADROOM, 64 << 10      # a synthetic p3 is a few MB
+    try:
+        ok &= main(["build", "--primary", V[0], "--extra", V[1], "--out", card, "--selector-dir", sel,
+                    "--media-dir", m1, "--layout", "parts", "--force", "--test-entry"]) == 0
+        ok &= entry(card) and padtest(card) == ["s1.wav", "t1.png"], padtest(card)
+        ok &= not {"t1.png", "s1.wav"} & set(p2_media(card)), p2_media(card)
+        ok &= verify()
+        ok &= main(["update", "--card", card, "--selector-dir", sel, "--media-dir", m2, "--test-entry"]) == 0
+        ok &= entry(card) and padtest(card) == ["t2.png"], padtest(card)
+        ok &= "t2.png" not in p2_media(card), p2_media(card)
+        ok &= verify()
+        ok &= main(["update", "--card", card, "--selector-dir", sel, "--no-test-entry", "--timeout", "9"]) == 0
+        ok &= not entry(card) and not padtest(card), padtest(card)
+        ok &= main(["inject", "--card", card, "--selector-dir", sel, "--media-dir", m1, "--test-entry"]) == 0
+        ok &= padtest(card) == ["s1.wav", "t1.png"], padtest(card)
+        ok &= main(["inject", "--card", card, "--selector-dir", sel, "--no-test-entry"]) == 0
+        ok &= not entry(card) and not padtest(card), padtest(card)
+        ok &= verify()
+    finally:
+        TEST_ENTRY_HEADROOM = headroom
+    print("SELFTEST part 10 (TEST CARD entry)", "PASS" if ok else "FAIL")
     return bool(ok)
 
 
@@ -10849,8 +10982,8 @@ def main(argv=None):
             media = None
             # the TEST CARD entry (asked for, or already on the card and not taken off): its
             # files go to p3, not with the menu's media
-            entry_on = bool(a.test_entry) or (bool((card_conf(a.card, select_ref(a.card)) or {}).get("test_entry"))
-                                              and not a.no_test_entry)
+            had_entry = bool((card_conf(a.card, select_ref(a.card)) or {}).get("test_entry"))
+            entry_on = test_entry_wanted(a, {"test_entry": had_entry})
             if a.media_dir:
                 media = plan_media(a.media_dir, len(plan.trees), tests_apart=entry_on)
                 for name in media["files"]:
@@ -10881,6 +11014,8 @@ def main(argv=None):
             print("== %s\n%s" % (BUILD_MANIFEST, manifests[BUILD_MANIFEST].rstrip()))
             if entry_on and media and media.get("test_files"):
                 put_test_entry_files(a.card, media["test_files"])
+            elif had_entry and not entry_on:
+                put_test_entry_files(a.card, {})    # taken off: its files go with it
             written = inject_card(a.card, a.selector_dir, conf, workdir=os.path.dirname(os.path.abspath(a.card)),
                                   media_files=media["files"] if media else None, replace_media=bool(a.media_dir),
                                   manifests=manifests)

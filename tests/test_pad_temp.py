@@ -174,7 +174,12 @@ def test_lookup_longest_prefix_and_exact_names():
 def test_the_tests_temp_folder_is_not_the_real_one(tmp_path_factory):
     td = os.path.realpath(tempfile.gettempdir())
     base = os.path.realpath(str(tmp_path_factory.getbasetemp()))
-    assert td.startswith(base)
+    if sys.platform == "darwin":
+        # conftest's short folder of the session's own there (a unix socket path caps at 104 bytes)
+        assert os.path.dirname(td) == os.path.realpath("/tmp")
+        assert os.path.basename(td).startswith("padt-")
+    else:
+        assert td.startswith(base)
     assert os.environ["TEMP"] == tempfile.gettempdir()
 
 

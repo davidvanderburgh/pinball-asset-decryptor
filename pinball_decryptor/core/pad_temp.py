@@ -107,6 +107,7 @@ NAMES = (
     _n("jjp_", "Jersey Jack Pinball", "staging"),
     _n("pad-ra-", "Jersey Jack Pinball", "remote access staging"),
     _n("pad_jjp_usb_", "Jersey Jack Pinball", "USB stick hand-over"),
+    _n("pad_jjp_pic_", "Jersey Jack Pinball", "replacement image recompress"),
     _n("pad_sam_", "Williams / Stern SAM", "ROM capture staging"),
     _n("pad_ap_playfield.log", "American Pinball", "playfield log",
        exact=True),

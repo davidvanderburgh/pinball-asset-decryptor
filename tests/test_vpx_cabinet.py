@@ -501,3 +501,66 @@ def test_poll_routes_cabinet_events_to_one_dof_only():
     src = open(os.path.join(VPX, "padcontroller.py"), encoding="utf-8").read()
     i = src.index("            if self.b2s and self.b2s.up:\n                self._poll_b2s(data)")
     assert "if not (self.dof and self.dof.up):\n                    self._poll_b2s_dof(data)" in src[i:i + 200]
+
+
+def test_the_log_says_when_the_game_ran_its_shaker(tmp_path, monkeypatch):
+    """PAD-1608 (Mike St P: Pro games send no shaker to DOF): a Pro build runs
+    its shaker exactly as the LE does, but the controller log never said
+    whether the game had shaken, so a report could not tell PAD from the DOF
+    config. The first run is logged, then every 30 s how often and how long."""
+    kit = padcabinet.update({}, dof_shaker=192)
+    pc, b = _bridge(tmp_path, kit)
+    said = []
+    monkeypatch.setattr(pc, "log", lambda s: said.append(s) if s.startswith("DOF shaker") else None)
+    route = "the DOF in B2S.Server"
+    b._poll_coils(_coil_data(pc, {}), 0.0)
+    b._note_shaker(route, now=0.0)
+    assert said == []                                          # no shake, nothing said
+    b._poll_coils(_coil_data(pc, {(1, 0): 1}), 1.0)            # the game shakes
+    b._note_shaker(route, now=1.0)
+    assert said == ["DOF shaker: the game ran its shaker motor (node 1 coil 0), sent as E192 to"
+                    " the DOF in B2S.Server"]
+    b.sol_state[b._sol_num((1, 0))] = 0                        # the board ended it 0.5 s on
+    b._note_shaker(route, now=1.5)
+    b.sol_state[b._sol_num((1, 0))] = 1                        # and a second one
+    b._note_shaker(route, now=10.0)
+    b.sol_state[b._sol_num((1, 0))] = 0
+    b._note_shaker(route, now=11.0)
+    assert len(said) == 1
+    b._note_shaker(route, now=31.0)
+    assert said[-1] == ("DOF shaker, last 31 s: the game ran it 2 times, 1.5 s in all, sent as E192 to"
+                        " the DOF in B2S.Server")
+    b._note_shaker(route, now=62.0)                            # a quiet 30 s says nothing
+    assert len(said) == 2
+    # the Shaker box off: the log says the shake went nowhere, and why
+    pc, b = _bridge(tmp_path / "off", {})
+    said.clear()
+    monkeypatch.setattr(pc, "log", lambda s: said.append(s) if s.startswith("DOF shaker") else None)
+    b._poll_coils(_coil_data(pc, {}), 0.0)
+    b._poll_coils(_coil_data(pc, {(1, 0): 1}), 1.0)
+    b._note_shaker(route, now=1.0)
+    assert said == ["DOF shaker: the game ran its shaker motor (node 1 coil 0), not sent: the Shaker box"
+                    " on the Visual Pinball tab's Cabinet row is off (192 suggested)"]
+
+
+def test_both_routes_log_the_shaker(tmp_path, monkeypatch):
+    kit = padcabinet.update({}, dof_shaker=192)
+    pc, b = _bridge(tmp_path, kit)
+    said = []
+    monkeypatch.setattr(pc, "log", lambda s: said.append(s))
+    dof = FakeDOF()
+    b.dof_init("mtl_180h", "x.vpx", factory=lambda: dof)
+    b._poll_coils(_coil_data(pc, {}), 100.0)
+    b._poll_coils(_coil_data(pc, {(1, 0): 1}), 100.01)
+    b._poll_dof(_data(pc, {}))
+    b.dof_finish()
+    assert any(s.startswith("DOF shaker: the game ran") and "PAD's own DOF" in s for s in said)
+    pc2, b2 = _bridge(tmp_path / "b2s", kit)
+    said.clear()
+    fake = FakeB2SData()
+    assert b2.b2s_attach(fake, direct=True)
+    b2._poll_coils(_coil_data(pc2, {}), 100.0)
+    b2._poll_coils(_coil_data(pc2, {(1, 0): 1}), 100.01)
+    b2._poll_b2s_dof(_data(pc2, {}))
+    b2.b2s_finish()
+    assert any(s.startswith("DOF shaker: the game ran") and "B2S.Server" in s for s in said)

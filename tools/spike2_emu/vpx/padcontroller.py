@@ -2195,6 +2195,7 @@ class Bridge:
         for n, v in ev:
             self._dof_set("E", n, v)
         self._note_strips("PAD's own DOF", ev)
+        self._note_shaker("PAD's own DOF")
 
     #: how often the controller log says what the strips sent DOF (PAD-1603)
     STRIP_LOG_S = 30.0
@@ -2242,6 +2243,41 @@ class Bridge:
                    base, top - 1))
         sl.update(t=now, sent=0, polls=0, lit=0, shown=[])
 
+    def _note_shaker(self, route, now=None):
+        """The shaker motor in the controller log (PAD-1608): the first time
+        the game runs it, and every STRIP_LOG_S how often and how long it ran
+        and where that went - DOF as the Shaker box's E number, or nowhere
+        with the box off. Mike St P asked for the shaker on Pro games, which
+        run it exactly as the LE's do (the same calls, SHAKER MOTOR 4 as they
+        come); his report could not show whether the game had shaken at all."""
+        key = getattr(self, "cab_shaker", None)
+        if not key:
+            return
+        now = time.monotonic() if now is None else now
+        on = bool(self.sol_state.get(self._sol_num(key)))
+        n = (getattr(self, "cab", None) or {}).get("dof_shaker")
+        sent = (("sent as E%d to %s" % (n, route)) if n else
+                "not sent: the Shaker box on the Visual Pinball tab's Cabinet row is off (192 suggested)")
+        sh = getattr(self, "_shake_log", None)
+        if sh is None:
+            sh = self._shake_log = {"t": now, "on": False, "since": now, "runs": 0, "ms": 0.0, "first": True}
+        if on and not sh["on"]:
+            sh["runs"] += 1
+            sh["since"] = now
+            if sh["first"]:
+                sh["first"] = False
+                log("DOF shaker: the game ran its shaker motor (node %d coil %d), %s" % (key[0], key[1], sent))
+        elif sh["on"] and not on:
+            sh["ms"] += (now - sh["since"]) * 1000.0
+        sh["on"] = on
+        if now - sh["t"] < self.STRIP_LOG_S:
+            return
+        ms = sh["ms"] + ((now - sh["since"]) * 1000.0 if on else 0.0)
+        if sh["runs"]:
+            log("DOF shaker, last %.0f s: the game ran it %d time%s, %.1f s in all, %s"
+                % (now - sh["t"], sh["runs"], "" if sh["runs"] == 1 else "s", ms / 1000.0, sent))
+        sh.update(t=now, runs=0, ms=0.0, since=now)
+
     def _cab_events(self, data):
         """[(E number, value)] of the cabinet's own DOF events: the buttons'
         LEDs (PAD-1304) and the machine's shaker motor, on while the game
@@ -2268,6 +2304,7 @@ class Bridge:
         shaker never reached it."""
         ev = self._cab_events(data)
         self._note_strips("the DOF in B2S.Server", ev)
+        self._note_shaker("the DOF in B2S.Server")
         for n, v in ev:
             if self._b2s_dof.get(n) != v:
                 if not self._b2s_dof:
@@ -2685,6 +2722,7 @@ class Bridge:
         except Exception:                                   # noqa: BLE001
             self.cab_strips = None
         self._strip_log = None              # PAD-1603: a fresh strip log a run
+        self._shake_log = None              # PAD-1608: and a fresh shaker log
         bulbs = self.cab["gi_bulbs"].get(self.title, [])
         log("cabinet lights: %s; DOF start E%s, lockdown E%s, shaker E%s (%s), strips %s; BACKBOX GI bulbs: %s"
             % (", ".join("%s %s" % (k, v) for k, v in sorted(self.cab_leds.items())) or "none named",

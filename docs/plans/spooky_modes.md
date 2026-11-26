@@ -739,6 +739,24 @@ emulator: Scooby-Doo, Looney Tunes, Jetsons; P-ROC by the stand-in game. Then `i
 runs only inside another of ours) on all four, and `in_place_of` on P-ROC (`mkspkmodes.IN_PLACE_ENGINES`):
 Rick and Morty's `Skillshot` held off at the ball's start, ours started in its place.
 
+## PAD-1623: a challenge of its own on START BUTTON HOLD (Halloween, Ultraman)
+
+Neither game has a mode-select menu. Holding Start 3 s in attract (free play only) plays a
+one-ball wizard game: `machineMode.StartButtonWasHeld` sets `GameMode` from the START BUTTON HOLD
+feature setting (OFF / ZETTON or BOOGEYMAN / ULTRA BROTHERS or THE NIGHT HE CAME HOME; a name it
+does not know is Normal). `start_hold = yes` makes a mode one more choice of that setting
+(`glue_pc.cs`): with it chosen, ours makes the game the wizard kind at its first ball (Hook runs
+before `skillshotMode.evt_ball_started`; one ball, stock rules, skill shot and ball save off),
+takes the stock wizard (`theNightUltraBros` / `wizardmode`) out the next frame with its delays,
+and the runtime starts just that mode for the ball; every other mode of ours is blocked in that
+game, and a start_hold mode never runs in a normal game. The game rebuilds `game_features` at
+boot and on every service-menu exit (an unknown choice comes back OFF and is saved so), so the
+runtime keeps the choice in `/game/pad_start_hold_choice.txt` and restores it on each new
+setting object. Texas Chainsaw's and Evil Dead's hold restarts a running game; Scooby-Doo and
+Beetlejuice have none: the check refuses `start_hold = yes` there. Proven on the rig, both
+titles: choice restored at boot, held Start, stock wizard out, 4 shots scored, the normal-game
+mode's start switches not counted, game over after the one ball, then a normal 3-ball game.
+
 ## Rig fix made on the way
 
 Both Spooky rigs now stub `sync` (logging no-op on the game's PATH): WSL's

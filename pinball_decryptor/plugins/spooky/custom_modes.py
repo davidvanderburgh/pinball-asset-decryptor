@@ -39,7 +39,7 @@ FORM_GROUPS = (
     ("Mode", ("name", "title", "start", "start_count", "shots", "points", "seconds", "complete",
               "complete_points")),
     # PAD-1424: JJP's start rules, lamps, balls and coils (the JJP form's groups)
-    ("Starts", ("start_on", "start_after", "start_score", "start_combo", "combo_seconds",
+    ("Starts", ("start_hold", "start_on", "start_after", "start_score", "start_combo", "combo_seconds",
                 "start_count_reset", "start_once")),
     ("Sounds", ("sound_start", "sound_shot", "sound_complete", "sound_end", "sound_channel", "music")),
     ("Picture and video", ("picture", "picture_at", "video", "video_at", "video_loop")),
@@ -88,6 +88,7 @@ DEFAULTS = {
     "panel": "middle", "sound_channel": "fanfare", "picture_at": "0 0 100 100", "video_at": "0 0 100 100",
     "video_loop": "yes", "lamp_color": "ffffff", "lamp_blink": "4", "coil_hold_on": "shots", "coil_holds": "off",
     "combo_seconds": "5", "start_count_reset": "game", "start_once": "no",
+    "start_hold": "no",
     "points_ladder": "fixed",
 }
 LABELS = {
@@ -108,6 +109,8 @@ LABELS = {
     "start_score": "Starts at a score", "start_combo": "Starts on a combo (in order)",
     "combo_seconds": "Combo seconds between shots", "start_count_reset": "Start count resets every",
     "start_once": "Starts at most once a",
+    # PAD-1623: Halloween, Ultraman
+    "start_hold": "A challenge of its own (hold Start)",
     "sound_channel": "Channel for our sound files", "music": "Music (a file of ours)",
     "picture": "Picture (a file of ours)", "picture_at": "Picture box (x y w h, % of screen)",
     "video": "Video (a file of ours)", "video_at": "Video box (x y w h, % of screen)", "video_loop": "Video loops",

@@ -103,9 +103,35 @@ def test_the_saved_state_and_the_preview(tmp_path):
     assert (got["boot_menu"], got["flip_guard"]) == ("hidden", 20)
     bad = menu_from_state({"boot_menu": "x", "flip_guard": 7})
     assert (bad["boot_menu"], bad["flip_guard"]) == ("menu", 60)
-    # the menu draws the right flipper's line for 'flipper' and 'hidden', so the preview carries the key
-    assert "boot_menu" not in write_preview_conf(_form(tmp_path))
+    # the menu names the ways back that are on (BACK, the right flipper, both), so the preview carries both keys
+    plain = write_preview_conf(_form(tmp_path)).splitlines()
+    assert "back_hold=3" in plain and "boot_menu=menu" in plain
     assert "boot_menu=flipper" in write_preview_conf(_form(tmp_path, boot_menu="flipper")).splitlines()
+    assert "back_hold=0" in write_preview_conf(_form(tmp_path, back_hold=0)).splitlines()
+
+
+def test_the_flipper_keys_are_a_stern_cards_alone(tmp_path, monkeypatch):
+    """PR #48 review: other makers' cards are as they were - no boot_menu=, so no new line on their menus."""
+    import pinball_decryptor.webui.multiboot_core as core
+    assert core.flip_args(_form(tmp_path, boot_menu="flipper"))[:2] == ["--boot-menu", "flipper"]
+    monkeypatch.setattr(core, "backend_for", lambda f: type("B", (), {"key": "spk"})())
+    assert core.flip_args(_form(tmp_path)) == []
+
+
+def test_the_menu_names_each_way_back():
+    """PR #48 review (David: "choose either or and label them on the multiboot menu as such"): the selector reads
+    back_hold= too and says BACK, the right flipper or both; the dialog offers the four ways as one choice."""
+    conf_c = open(os.path.join(SEL, "conf.c"), encoding="utf-8").read()
+    assert '"back_hold"' in conf_c and "boot_menu_set = 1" in conf_c
+    cs = open(os.path.join(SEL, "codeselect.c"), encoding="utf-8").read()
+    for words in ('hold the coin door BACK button %d s during a "', 'or the right flipper %d s when no game is running',
+                  'BACK button %d s during a game",', 'hold the right flipper %d s when no game is running",'):
+        assert words in cs
+    js = open(os.path.join(os.path.dirname(__file__), os.pardir, "pinball_decryptor", "webui", "static", "js", "tabs",
+                           "multiboot.js"), encoding="utf-8").read()
+    for value in ('"back"', '"flipper"', '"both"', '"off"'):
+        assert "value: %s" % value in js
+    assert "Back to this menu:" in js
 
 
 def test_the_menu_and_the_watcher_read_the_same_keys():
@@ -131,3 +157,18 @@ def test_a_loaded_cards_flipper_change_is_a_change():
     assert "boot menu" in menu
     menu, _ = mbc.diff_forms(before, dataclasses.replace(before, flip_guard=20))
     assert "after a game" in menu
+
+
+def test_a_hold_that_will_restart_shows_a_filling_ring():
+    """PR #48 review (David: "show some animation overlay (like a circle filling up) to let the user know it's
+    coming"): padmenu.so is the game's eglSwapBuffers on Spike 2, draws the ring and the words over the frame and
+    hands it on; GL calls only PAD's emulator bridge lacks are optional, and vertices come from a buffer of its own."""
+    src = open(os.path.join(SEL, "padmenu.c"), encoding="utf-8").read()
+    spike2 = src[src.index("#if !defined(PADMENU_FAST) && !defined(PADMENU_S3)"):]
+    assert "unsigned eglSwapBuffers(void *dpy, void *surf)" in spike2
+    assert 'dlsym(RTLD_NEXT, "eglSwapBuffers")' in spike2
+    for words in ('"HOLD FOR BOOT MENU"', '"RESTARTING TO BOOT MENU"', "RING_SHOW_MS 1000", 'getenv("PADMENU_RING")'):
+        assert words in spike2
+    for optional in ("glColorMask", "glGetVertexAttribiv", "eglQuerySurface"):
+        assert 'RO(' in spike2 and '"%s"' % optional in spike2
+    assert "gl.GenBuffers(1, &ring_buf)" in spike2

@@ -19,14 +19,26 @@ const noColon = (t) => String(t || "").replace(/:\s*$/, "");
 // A dialog field's id names its store key, so Enter can send what is in the
 // box before it presses OK (see okOnEnter).
 const FID = "mb-f-";
-// Simon, 2026-11-22: "1. Multiboot menu alone 2. Multiboot menu plus facility to reinvoke the flippers 3. No menu
-// appears, available only through flippers" (images.conf boot_menu=; After a game = flip_guard=)
-const BOOT_MENU_OPTS = [
-  { value: "menu", label: "At power-up" },
-  { value: "flipper", label: "At power-up + right flipper 5 s in attract" },
-  { value: "hidden", label: "Only by the right flipper (no menu at power-up)" },
+// The ways back to the menu from a game (PR #48 review, David: "we need to be able to choose either or and label
+// them on the multiboot menu as such"): the coin door's BACK held in a game (PAD-1309, images.conf back_hold=), the
+// right flipper held in attract with no game on (Simon, boot_menu=flipper; After a game = flip_guard=), either, or
+// neither. The card keeps its two keys; this one choice sets both, and the menu names the ones that are on.
+const WAY_BACK_OPTS = [
+  { value: "back", label: "Hold the coin door BACK button during a game" },
+  { value: "flipper", label: "Hold the right flipper button when no game is running" },
+  { value: "both", label: "Either: the coin door BACK button or the right flipper" },
+  { value: "off", label: "Neither: only by switching the machine off and on" },
 ];
 const FLIP_GUARD_OPTS = [{ value: "20", label: "20 s" }, { value: "60", label: "60 s" }];
+const wayBack = (s) => {
+  const back = Number(s.back_hold) > 0, flip = (s.boot_menu || "menu") !== "menu";
+  return back && flip ? "both" : back ? "back" : flip ? "flipper" : "off";
+};
+const setWayBack = (s, v) => {
+  const back = v === "back" || v === "both", flip = v === "flipper" || v === "both";
+  setField(NS, "back_hold", back ? String(Number(s.back_hold) > 0 ? Number(s.back_hold) : 3) : "0", { flush: true });
+  setField(NS, "boot_menu", flip ? (s.boot_menu === "hidden" ? "hidden" : "flipper") : "menu", { flush: true });
+};
 const fid = (k) => FID + k;
 
 // ------------------------------------------------- Tk's _Modal, on the page
@@ -687,19 +699,27 @@ function MenuDialog({ s, w }) {
         <label class="k" for=${fid("default")}>Default image:</label>
         <div class="row wrap"><${Field} id=${fid("default")} ns=${NS} k="default" value=${s.default} ...${num} max=${md.default_max} />
           <span class="small muted">highlighted at power-up (the last choice wins once one was made)</span></div>
-        ${md.back_hold_ok !== false && html`
+        ${md.flip_ok ? html`
+        <label class="k" for=${fid("way_back")}>Back to this menu:</label>
+        <div class="row wrap"><${Select} id=${fid("way_back")} value=${wayBack(s)} width=${400} options=${WAY_BACK_OPTS}
+            onChange=${(v) => setWayBack(s, v)} />
+          <span class="small muted">how a player leaves a game and comes back to this menu without switching the machine off. The menu lists the ways that are on along its bottom.</span></div>
+        <label class="k" for=${fid("back_hold")}>Hold BACK for (s):</label>
+        <div class="row wrap"><${Field} id=${fid("back_hold")} ns=${NS} k="back_hold" value=${s.back_hold} ...${num} min=${1} max=${60}
+            disabled=${Number(s.back_hold) <= 0} />
+          <span class="small muted">seconds the coin door BACK button must be held during a game before the machine restarts into this menu</span></div>
+        <label class="k" for=${fid("flip_guard")}>Right flipper waits:</label>
+        <div class="row wrap"><${Select} id=${fid("flip_guard")} ns=${NS} k="flip_guard" value=${String(s.flip_guard)} width=${120}
+            disabled=${(s.boot_menu || "menu") === "menu"} options=${FLIP_GUARD_OPTS} />
+          <span class="small muted">the right flipper is always held for 5 s. So it can never fire by accident during play, that hold only works once no game has been running for this long (after a game ends, a tilt, or the bonus count). This is not how long to hold it.</span></div>
+        <span></span>
+        <${Check} checked=${s.boot_menu !== "hidden"} disabled=${(s.boot_menu || "menu") === "menu"} wrap
+          label="Show this menu at power-up. Unticked, the machine shows a short start-up screen and then starts the default image; holding the right flipper on that screen opens this menu."
+          onChange=${(on) => setField(NS, "boot_menu", on ? "flipper" : "hidden", { flush: true })} />`
+        : md.back_hold_ok !== false && html`
         <label class="k" for=${fid("back_hold")}>Hold BACK (s):</label>
         <div class="row wrap"><${Field} id=${fid("back_hold")} ns=${NS} k="back_hold" value=${s.back_hold} ...${num} max=${60} />
           <span class="small muted">in a game, holding the coin door's BACK (EXIT on some machines) this long restarts into this menu; 0 = off</span></div>`}
-        ${md.flip_ok && html`
-        <label class="k" for=${fid("boot_menu")}>Boot menu:</label>
-        <div class="row wrap"><${Select} id=${fid("boot_menu")} ns=${NS} k="boot_menu" value=${s.boot_menu} width=${330} options=${BOOT_MENU_OPTS}
-            title="How this menu is reached. With the right flipper, it works only when no game is being played (attract), and the menu screen says so." /></div>
-        <label class="k" for=${fid("flip_guard")}>After a game:</label>
-        <div class="row wrap"><${Select} id=${fid("flip_guard")} ns=${NS} k="flip_guard" value=${String(s.flip_guard)} width=${120}
-            disabled=${(s.boot_menu || "menu") === "menu"} options=${FLIP_GUARD_OPTS}
-            title=${(s.boot_menu || "menu") === "menu" ? "Only with the right flipper back to the menu" : "A tilt, the bonus between balls and the initials after a game switch the flippers off too, so the right flipper only counts once they have been off this long"} />
-          <span class="small muted">the flippers must have been off this long before the right flipper's hold counts</span></div>`}
       </div>
     <//>
     ${w.menu_network ? html`<${MbNetwork} />` : null}

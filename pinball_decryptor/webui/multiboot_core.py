@@ -2999,8 +2999,11 @@ FLIP_GUARDS = (20, 60)
 def flip_args(form):
     """mkmulticard's ``--boot-menu`` / ``--flip-guard`` (Simon, 2026-11-22: "Multiboot menu alone ... plus facility
     to reinvoke the flippers ... No menu appears, available only through flippers")."""
+    if backend_for(form).key != "stern":
+        return []                       # the right flipper reads a Spike 2 node bus; other makers' cards are as they were
     return (["--boot-menu", str(form.boot_menu or "menu"), "--flip-guard", str(int(form.flip_guard))]
-            # the TEST CARD entry: on, or taken off a card that has one (build, update and inject all take both)
+            # the TEST CARD entry (Stern cards only, as the tab offers it): on, or taken off a card that has one
+            # (build, update and inject all take both)
             + (["--test-entry"] if getattr(form, "test_entry", False) else ["--no-test-entry"]))
 
 
@@ -4060,8 +4063,12 @@ def write_preview_conf(form):
         lines.append("footer=%s" % (form.footer or "").strip())
     # ...and the right flipper's line along the bottom (Simon, 2026-11-22): the menu draws it for a card whose
     # menu the right flipper comes back to, so the preview does too
-    if be.key == "stern" and (form.boot_menu or "menu") != "menu":
-        lines.append("boot_menu=%s" % form.boot_menu)
+    # (PR #48 review, David: BACK and the right flipper are a choice, each named on the menu) - the preview
+    # says the ways back as the card will, so it carries both keys
+    if be.key == "stern":
+        lines.append("back_hold=%d" % max(0, int(form.back_hold)))
+        lines.append("boot_menu=%s" % (form.boot_menu or "menu"))
+        lines.append("flip_guard=%d" % int(form.flip_guard))
     # ...and the SETTINGS card, as the card will carry it (PAD-307): the
     # images' built profiles, which are what put the card in the menu, and
     # the owner's switch

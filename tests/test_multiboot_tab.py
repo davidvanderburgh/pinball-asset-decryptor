@@ -410,7 +410,10 @@ def test_preview_conf_is_the_form_with_placeholder_devices(tmp_path):
         "text_size=uniform",
         # ...and PAD-190: with the card's own two lines under the cards
         "counter=on", "countdown_word=starting", "volume=40",
-        "font=/usr/local/codeselect/font.ttf", "theme=midnight"]
+        "font=/usr/local/codeselect/font.ttf",
+        # PR #48 review: the ways back to the menu, which the menu names along the bottom
+        "back_hold=3", "boot_menu=menu", "flip_guard=60",
+        "theme=midnight"]
     assert text.endswith("\n") and "\r" not in text
     # PAD-135: an emptied heading reaches the preview as 'heading=', which is
     # what the selector reads as no line across the top

@@ -29,13 +29,14 @@ DEFAULT_SECONDS = 15
 MENU_DEFAULT = DEFAULT_SECONDS // STEP_SECONDS + 1
 #: the help line (63 characters is the spare help lines' room). Simon (2026-11-26): "we should state default and
 #: recommended MINIMUM - 15 sec if there is text room" - exactly 63
-MENU_HELP = "R flipper 5s: boot menu. 0 Off, secs after game. Min/default 15"
+MENU_HELP = "Hold R flipper 5s=boot menu if no game for N s. 0 Off, min 15"
 #: beside the mode runtime on the card (/usr/local/padmode), read by padmenu.so
 CFG_NAME = "padmenu.cfg"
 #: where the Service menu tab says it does something
-WHERE = ("For a multi-boot card (Multi-boot tab): the operator sets the right flipper hold that restarts into the "
-         "boot menu - 0 Off, or the seconds after a game before it works (15 to start with, and the recommended "
-         "minimum). It wins over the tab's own setting.")
+WHERE = ("For a multi-boot card (Multi-boot tab): the operator's switch for the right flipper hold back to the boot "
+         "menu. The hold is always 5 s; the value is how many seconds no game must have been running before that "
+         "hold works, so it never fires during play (0 Off, 15 to start with and the recommended minimum, up to "
+         "120). It wins over the tab's own setting.")
 
 
 def cfg_text(live, key, default=DEFAULT_SECONDS):

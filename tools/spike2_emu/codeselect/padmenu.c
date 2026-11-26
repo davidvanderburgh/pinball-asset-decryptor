@@ -645,6 +645,8 @@ static long flip_ms, flip_quiet_ms;
 static int flip_fire, flip_fired;
 static long long flip_since = -1, flip_last = -1;
 static int flip_was = -1;
+static long flip_hold_cur;                 /* the hold now counting, ms (the ring) */
+static const char *ring_who = "";          /* which hold the ring shows (the trace) */
 static FILE *trace;
 /* THE SERVICE MENU ROW (Simon, 2026-11-25: "there is no way to enable or disable the right flipper action").  A
  * game the app wrote with BOOT MENU FLIPPER ticked has /usr/local/padmode/padmenu.cfg (boot_flip.py):
@@ -817,6 +819,7 @@ static void flip_check(long long t)
         flip_since = -1;                       /* no game on, for the whole hold */
         return;
     }
+    flip_hold_cur = hold;                     /* the ring's (eglSwapBuffers) */
     if (flip_since < 0) {
         flip_since = t;
         return;
@@ -1000,6 +1003,402 @@ static void flip_init(const char *conf)
     unsetenv("PADMENU_FLIP_GUARD_MS");
     unsetenv("PADMENU_FLIP_LOG");
     unsetenv("PADMENU_TRACE");
+}
+
+/* ---- THE HOLD, SHOWN (David, PR #48 review) ----------------------------------------------------
+ * David: "as the user is holding the flipper to show some animation overlay (like a circle filling
+ * up) to let the user know it's coming. Otherwise the restart is confusing."  So while a hold that
+ * will restart the machine is counting - the right flipper with no game on, or BACK in a game - a
+ * ring fills in the middle of the screen over the game's own picture, "HOLD FOR BOOT MENU" under
+ * it, and once the hold has fired "RESTARTING TO BOOT MENU" until the game is gone.
+ *
+ * HOW.  This object is preloaded into the game, so the game's eglSwapBuffers is this one: just
+ * before the game's frame goes out a quad is drawn over it with a program of our own, every piece
+ * of GL state touched saved first and put back after, and the frame goes on to the real
+ * eglSwapBuffers (RTLD_NEXT: libEGL, or the mode runtime's when a mode card re-points the slot -
+ * it calls on to this one).  GL is looked up by name at the first frame, from the libraries the
+ * game already has loaded: nothing new is linked.  Nothing is drawn unless a hold has been counting
+ * RING_SHOW_MS, a second (half the hold if that is shorter), and then starts empty and fills over the rest - a
+ * flipper tap in attract or a BACK press in the service menu never flashes it - and a program that does not compile
+ * turns the ring off for good, the frames untouched.  PADMENU_RING=0 turns it off. */
+typedef unsigned int GLuint_;
+typedef int GLint_;
+#define R_GL_BLEND 0x0BE2
+#define R_GL_CULL_FACE 0x0B44
+#define R_GL_DEPTH_TEST 0x0B71
+#define R_GL_SCISSOR_TEST 0x0C11
+#define R_GL_STENCIL_TEST 0x0B90
+#define R_GL_VIEWPORT 0x0BA2
+#define R_GL_COLOR_WRITEMASK 0x0C23
+#define R_GL_BLEND_SRC_RGB 0x80C9
+#define R_GL_BLEND_DST_RGB 0x80C8
+#define R_GL_BLEND_SRC_ALPHA 0x80CB
+#define R_GL_BLEND_DST_ALPHA 0x80CA
+#define R_GL_BLEND_EQUATION_RGB 0x8009
+#define R_GL_BLEND_EQUATION_ALPHA 0x883D
+#define R_GL_FUNC_ADD 0x8006
+#define R_GL_CURRENT_PROGRAM 0x8B8D
+#define R_GL_ARRAY_BUFFER 0x8892
+#define R_GL_ARRAY_BUFFER_BINDING 0x8894
+#define R_GL_FRAMEBUFFER 0x8D40
+#define R_GL_FRAMEBUFFER_BINDING 0x8CA6
+#define R_GL_VERTEX_ATTRIB_ARRAY_ENABLED 0x8622
+#define R_GL_VERTEX_ATTRIB_ARRAY_SIZE 0x8623
+#define R_GL_VERTEX_ATTRIB_ARRAY_STRIDE 0x8624
+#define R_GL_VERTEX_ATTRIB_ARRAY_TYPE 0x8625
+#define R_GL_VERTEX_ATTRIB_ARRAY_NORMALIZED 0x886A
+#define R_GL_VERTEX_ATTRIB_ARRAY_POINTER 0x8645
+#define R_GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING 0x889F
+#define R_GL_FLOAT 0x1406
+#define R_GL_STREAM_DRAW 0x88E0
+#define R_GL_TRIANGLES 0x0004
+#define R_GL_SRC_ALPHA 0x0302
+#define R_GL_ONE_MINUS_SRC_ALPHA 0x0303
+#define R_GL_VERTEX_SHADER 0x8B31
+#define R_GL_FRAGMENT_SHADER 0x8B30
+#define R_GL_COMPILE_STATUS 0x8B81
+#define R_GL_LINK_STATUS 0x8B82
+#define R_EGL_WIDTH 0x3057
+#define R_EGL_HEIGHT 0x3056
+#define RING_SHOW_MS 1000                 /* David: "shouldn't start to animate until being held for like a second" */
+
+static struct {
+    void (*GetIntegerv)(unsigned, GLint_ *);
+    unsigned char (*IsEnabled)(unsigned);
+    void (*Enable)(unsigned), (*Disable)(unsigned);
+    void (*GetBooleanv)(unsigned, unsigned char *);
+    void (*ColorMask)(unsigned char, unsigned char, unsigned char, unsigned char);
+    void (*BlendFuncSeparate)(unsigned, unsigned, unsigned, unsigned);
+    void (*BlendEquationSeparate)(unsigned, unsigned);
+    void (*Viewport)(GLint_, GLint_, GLint_, GLint_);
+    void (*UseProgram)(GLuint_);
+    void (*BindBuffer)(unsigned, GLuint_);
+    void (*GenBuffers)(GLint_, GLuint_ *);
+    void (*BufferData)(unsigned, long, const void *, unsigned);
+    void (*BindFramebuffer)(unsigned, GLuint_);
+    void (*GetVertexAttribiv)(GLuint_, unsigned, GLint_ *);
+    void (*GetVertexAttribPointerv)(GLuint_, unsigned, void **);
+    void (*VertexAttribPointer)(GLuint_, GLint_, unsigned, unsigned char, GLint_, const void *);
+    void (*EnableVertexAttribArray)(GLuint_), (*DisableVertexAttribArray)(GLuint_);
+    void (*DrawArrays)(unsigned, GLint_, GLint_);
+    GLuint_ (*CreateShader)(unsigned);
+    void (*ShaderSource)(GLuint_, GLint_, const char *const *, const GLint_ *);
+    void (*CompileShader)(GLuint_);
+    void (*GetShaderiv)(GLuint_, unsigned, GLint_ *);
+    GLuint_ (*CreateProgram)(void);
+    void (*AttachShader)(GLuint_, GLuint_);
+    void (*BindAttribLocation)(GLuint_, GLuint_, const char *);
+    void (*LinkProgram)(GLuint_);
+    void (*GetProgramiv)(GLuint_, unsigned, GLint_ *);
+    GLint_ (*GetUniformLocation)(GLuint_, const char *);
+    void (*Uniform4f)(GLint_, float, float, float, float);
+    void (*Uniform1f)(GLint_, float);
+    unsigned (*QuerySurface)(void *, void *, GLint_, GLint_ *);
+} gl;
+static int ring_state = -1;                /* -1 not tried, 0 off for good, 1 ready */
+static GLuint_ ring_prog, ring_buf;     /* our program, and our own vertex buffer (PAD's emulator bridge takes
+                                          * vertices from a buffer only; the GPU either way) */
+static GLint_ u_c, u_p, u_col;
+
+static int ring_load(void)
+{
+#define RL(f, n) if (!(*(void **)&gl.f = dlsym(RTLD_DEFAULT, n))) { tr("hold ring: no %s - off", n); return 0; }
+    RL(GetIntegerv, "glGetIntegerv") RL(IsEnabled, "glIsEnabled") RL(Enable, "glEnable") RL(Disable, "glDisable")
+    RL(BlendFuncSeparate, "glBlendFuncSeparate") RL(Viewport, "glViewport") RL(UseProgram, "glUseProgram")
+    RL(BindBuffer, "glBindBuffer") RL(GenBuffers, "glGenBuffers") RL(BufferData, "glBufferData")
+    RL(BindFramebuffer, "glBindFramebuffer")
+    RL(VertexAttribPointer, "glVertexAttribPointer") RL(EnableVertexAttribArray, "glEnableVertexAttribArray")
+    RL(DisableVertexAttribArray, "glDisableVertexAttribArray") RL(DrawArrays, "glDrawArrays")
+    RL(CreateShader, "glCreateShader") RL(ShaderSource, "glShaderSource") RL(CompileShader, "glCompileShader")
+    RL(GetShaderiv, "glGetShaderiv") RL(CreateProgram, "glCreateProgram") RL(AttachShader, "glAttachShader")
+    RL(BindAttribLocation, "glBindAttribLocation") RL(LinkProgram, "glLinkProgram") RL(GetProgramiv, "glGetProgramiv")
+    RL(GetUniformLocation, "glGetUniformLocation") RL(Uniform4f, "glUniform4f") RL(Uniform1f, "glUniform1f")
+#undef RL
+    /* the machine's libGLESv2 has every one; PAD's emulator bridge only what the game itself calls, so these few are
+     * put back when there and left alone when not (the game never sets what it cannot call) */
+#define RO(f, n) *(void **)&gl.f = dlsym(RTLD_DEFAULT, n);
+    RO(GetBooleanv, "glGetBooleanv") RO(ColorMask, "glColorMask") RO(BlendEquationSeparate, "glBlendEquationSeparate")
+    RO(GetVertexAttribiv, "glGetVertexAttribiv") RO(GetVertexAttribPointerv, "glGetVertexAttribPointerv")
+    RO(QuerySurface, "eglQuerySurface")                                   /* else the viewport's size */
+#undef RO
+    if (!gl.GetBooleanv)
+        gl.ColorMask = NULL;
+    if (!gl.GetVertexAttribPointerv)
+        gl.GetVertexAttribiv = NULL;
+    return 1;
+}
+
+static const char RING_VS[] =
+    "attribute vec2 a_pos;\nvoid main() { gl_Position = vec4(a_pos, 0.0, 1.0); }\n";
+/* u_c: centre x, y and radius in pixels, w 1 = a plain colour (the words); u_p: how far, 0..1 */
+static const char RING_FS[] =
+    "#ifdef GL_FRAGMENT_PRECISION_HIGH\nprecision highp float;\n#else\nprecision mediump float;\n#endif\n"
+    "uniform vec4 u_c; uniform float u_p; uniform vec4 u_col;\n"
+    "void main() {\n"
+    "  if (u_c.w > 0.5) { gl_FragColor = u_col; return; }\n"
+    "  vec2 d = gl_FragCoord.xy - u_c.xy; float r = length(d) / u_c.z;\n"
+    "  if (r > 1.0) discard;\n"
+    "  float f = atan(d.x, d.y) / 6.2831853; if (f < 0.0) f += 1.0;\n"      /* 0 at the top, clockwise */
+    "  float px = 1.0 / u_c.z;\n"
+    "  float band = smoothstep(0.66 - px, 0.66 + px, r) * (1.0 - smoothstep(0.90 - px, 0.90 + px, r));\n"
+    "  vec4 track = f <= u_p ? u_col : vec4(1.0, 1.0, 1.0, 0.28);\n"
+    "  vec4 c = mix(vec4(0.0, 0.0, 0.0, 0.62), vec4(track.rgb, max(track.a, 0.62)), band);\n"
+    "  c.a *= 1.0 - smoothstep(1.0 - 2.0 * px, 1.0, r);\n"
+    "  gl_FragColor = c;\n"
+    "}\n";
+
+static GLuint_ ring_shader(unsigned kind, const char *src)
+{
+    GLint_ ok = 0;
+    GLuint_ s = gl.CreateShader(kind);
+    gl.ShaderSource(s, 1, &src, NULL);
+    gl.CompileShader(s);
+    gl.GetShaderiv(s, R_GL_COMPILE_STATUS, &ok);
+    return ok ? s : 0;
+}
+
+static int ring_build(void)
+{
+    GLint_ ok = 0;
+    GLuint_ vs, fs;
+    if (!ring_load())
+        return 0;
+    vs = ring_shader(R_GL_VERTEX_SHADER, RING_VS);
+    fs = ring_shader(R_GL_FRAGMENT_SHADER, RING_FS);
+    if (!vs || !fs) {
+        tr("hold ring: a shader did not compile - off");
+        return 0;
+    }
+    ring_prog = gl.CreateProgram();
+    gl.AttachShader(ring_prog, vs);
+    gl.AttachShader(ring_prog, fs);
+    gl.BindAttribLocation(ring_prog, 0, "a_pos");
+    gl.LinkProgram(ring_prog);
+    gl.GetProgramiv(ring_prog, R_GL_LINK_STATUS, &ok);
+    if (!ok) {
+        tr("hold ring: the program did not link - off");
+        return 0;
+    }
+    u_c = gl.GetUniformLocation(ring_prog, "u_c");
+    u_p = gl.GetUniformLocation(ring_prog, "u_p");
+    u_col = gl.GetUniformLocation(ring_prog, "u_col");
+    gl.GenBuffers(1, &ring_buf);
+    tr("hold ring: ready");
+    return 1;
+}
+
+/* the words: 5x7 capitals, a row a byte (bit 4 the left column), only the letters said */
+static const struct { char c; unsigned char row[7]; } RING_FONT[] = {
+    { 'A', { 14, 17, 17, 31, 17, 17, 17 } }, { 'B', { 30, 17, 17, 30, 17, 17, 30 } },
+    { 'D', { 30, 17, 17, 17, 17, 17, 30 } }, { 'E', { 31, 16, 16, 30, 16, 16, 31 } },
+    { 'F', { 31, 16, 16, 30, 16, 16, 16 } }, { 'G', { 14, 17, 16, 23, 17, 17, 15 } },
+    { 'H', { 17, 17, 17, 31, 17, 17, 17 } }, { 'I', { 14, 4, 4, 4, 4, 4, 14 } },
+    { 'L', { 16, 16, 16, 16, 16, 16, 31 } }, { 'M', { 17, 27, 21, 21, 17, 17, 17 } },
+    { 'N', { 17, 17, 25, 21, 19, 17, 17 } }, { 'O', { 14, 17, 17, 17, 17, 17, 14 } },
+    { 'R', { 30, 17, 17, 30, 20, 18, 17 } }, { 'S', { 15, 16, 16, 14, 1, 1, 30 } },
+    { 'T', { 31, 4, 4, 4, 4, 4, 4 } }, { 'U', { 17, 17, 17, 17, 17, 17, 14 } },
+};
+static float ring_v[24 * 35 * 12];
+
+/* the words centred at (cx, top) in pixels, cell px a dot: the triangles, in clip space */
+static int ring_words(const char *s, float cx, float top, float cell, float w, float h)
+{
+    int n = 0, len = (int)strlen(s), i, r, b;
+    float x0 = cx - (len * 6 - 1) * cell / 2;
+    for (i = 0; i < len && i < 24; i++) {
+        const unsigned char *rows = NULL;
+        size_t k;
+        for (k = 0; k < sizeof RING_FONT / sizeof RING_FONT[0]; k++)
+            if (RING_FONT[k].c == s[i])
+                rows = RING_FONT[k].row;
+        if (!rows)
+            continue;
+        for (r = 0; r < 7; r++)
+            for (b = 0; b < 5; b++)
+                if (rows[r] & (16 >> b)) {
+                    float xa = (x0 + (i * 6 + b) * cell) / w * 2 - 1, xb = xa + cell / w * 2;
+                    float ya = 1 - (top + r * cell) / h * 2, yb = ya - cell / h * 2;
+                    float q[12] = { xa, ya, xb, ya, xa, yb, xb, ya, xb, yb, xa, yb };
+                    memcpy(ring_v + n * 2, q, sizeof q);
+                    n += 6;
+                }
+    }
+    return n;
+}
+
+/* how far the hold that is counting has got: 0..1, 2 once it has fired, -1 nothing to show */
+static double ring_part(long long held, long hold)       /* after the wait, empty to full over the rest */
+{
+    long wait = hold / 2 < RING_SHOW_MS ? hold / 2 : RING_SHOW_MS;
+    return held < wait ? -1 : (double)(held - wait) / (hold - wait);
+}
+
+static double ring_how_far(long long t)
+{
+    double p = -1, q;
+    long long s = held_since;              /* BACK, in a game */
+    if (fired)
+        return 2;
+    if (s >= 0 && hold_ms > 0 && t - last_sample < GAP_MS && (p = ring_part(t - s, hold_ms)) >= 0)
+        ring_who = "BACK";
+    if (flip_was == 1 && t - flip_last < GAP_MS) {
+        ring_who = "the right flipper";
+        if (flip_fired)
+            return 2;
+        s = flip_since;
+        if (s >= 0 && flip_hold_cur > 0 && (q = ring_part(t - s, flip_hold_cur)) > p)
+            p = q;
+        else if (p >= 0)
+            ring_who = "BACK";
+    }
+    return p < 0 ? -1 : p > 1 ? 1 : p;
+}
+
+static void ring_draw(void *dpy, void *surf, double p)
+{
+    GLint_ prog, abuf, fb, vp[4], en = 0, size = 4, stride = 0, type = R_GL_FLOAT, norm = 0, vbuf = 0;
+    GLint_ bsr, bdr, bsa, bda, ber = R_GL_FUNC_ADD, bea = R_GL_FUNC_ADD, w = 0, h = 0, n;
+    unsigned char cm[4] = { 1, 1, 1, 1 }, blend, cull, depth, sc, st;
+    void *ptr = NULL;
+    float cx, cy, rad, cell, tw, x0, x1, y0, y1;
+    const char *words;
+    static const float quad[12] = { -1, -1, 1, -1, -1, 1, 1, -1, 1, 1, -1, 1 };
+    gl.GetIntegerv(R_GL_CURRENT_PROGRAM, &prog);
+    gl.GetIntegerv(R_GL_ARRAY_BUFFER_BINDING, &abuf);
+    gl.GetIntegerv(R_GL_FRAMEBUFFER_BINDING, &fb);
+    gl.GetIntegerv(R_GL_VIEWPORT, vp);
+    if (gl.ColorMask)
+        gl.GetBooleanv(R_GL_COLOR_WRITEMASK, cm);
+    gl.GetIntegerv(R_GL_BLEND_SRC_RGB, &bsr); gl.GetIntegerv(R_GL_BLEND_DST_RGB, &bdr);
+    gl.GetIntegerv(R_GL_BLEND_SRC_ALPHA, &bsa); gl.GetIntegerv(R_GL_BLEND_DST_ALPHA, &bda);
+    if (gl.BlendEquationSeparate) {
+        gl.GetIntegerv(R_GL_BLEND_EQUATION_RGB, &ber);
+        gl.GetIntegerv(R_GL_BLEND_EQUATION_ALPHA, &bea);
+    }
+    blend = gl.IsEnabled(R_GL_BLEND); cull = gl.IsEnabled(R_GL_CULL_FACE); depth = gl.IsEnabled(R_GL_DEPTH_TEST);
+    sc = gl.IsEnabled(R_GL_SCISSOR_TEST); st = gl.IsEnabled(R_GL_STENCIL_TEST);
+    if (gl.GetVertexAttribiv) {
+        gl.GetVertexAttribiv(0, R_GL_VERTEX_ATTRIB_ARRAY_ENABLED, &en);
+        gl.GetVertexAttribiv(0, R_GL_VERTEX_ATTRIB_ARRAY_SIZE, &size);
+        gl.GetVertexAttribiv(0, R_GL_VERTEX_ATTRIB_ARRAY_STRIDE, &stride);
+        gl.GetVertexAttribiv(0, R_GL_VERTEX_ATTRIB_ARRAY_TYPE, &type);
+        gl.GetVertexAttribiv(0, R_GL_VERTEX_ATTRIB_ARRAY_NORMALIZED, &norm);
+        gl.GetVertexAttribiv(0, R_GL_VERTEX_ATTRIB_ARRAY_BUFFER_BINDING, &vbuf);
+        gl.GetVertexAttribPointerv(0, R_GL_VERTEX_ATTRIB_ARRAY_POINTER, &ptr);
+    }
+
+    gl.BindFramebuffer(R_GL_FRAMEBUFFER, 0);
+    if (!gl.QuerySurface || !gl.QuerySurface(dpy, surf, R_EGL_WIDTH, &w) || !gl.QuerySurface(dpy, surf, R_EGL_HEIGHT, &h)
+            || w <= 0 || h <= 0) {
+        w = vp[2];
+        h = vp[3];
+    }
+    if (w > 0 && h > 0) {
+        gl.Viewport(0, 0, w, h);
+        if (gl.ColorMask)
+            gl.ColorMask(1, 1, 1, 1);
+        gl.Disable(R_GL_CULL_FACE); gl.Disable(R_GL_DEPTH_TEST); gl.Disable(R_GL_SCISSOR_TEST); gl.Disable(R_GL_STENCIL_TEST);
+        gl.Enable(R_GL_BLEND);
+        gl.BlendFuncSeparate(R_GL_SRC_ALPHA, R_GL_ONE_MINUS_SRC_ALPHA, R_GL_SRC_ALPHA, R_GL_ONE_MINUS_SRC_ALPHA);
+        if (gl.BlendEquationSeparate)
+            gl.BlendEquationSeparate(R_GL_FUNC_ADD, R_GL_FUNC_ADD);
+        gl.UseProgram(ring_prog);
+        gl.BindBuffer(R_GL_ARRAY_BUFFER, ring_buf);
+        gl.EnableVertexAttribArray(0);
+        rad = h * 0.13f;
+        cx = w / 2.0f;
+        cy = h / 2.0f;
+        cell = h / 150.0f;
+        if (cell < 2)
+            cell = 2;
+        words = p > 1 ? "RESTARTING TO BOOT MENU" : "HOLD FOR BOOT MENU";
+        /* a dark panel behind the ring and the words, so they read over any picture */
+        tw = (strlen(words) * 6 - 1) * cell;
+        if (tw < 2 * rad)
+            tw = 2 * rad;
+        x0 = (cx - tw / 2 - 4 * cell) / w * 2 - 1;
+        x1 = (cx + tw / 2 + 4 * cell) / w * 2 - 1;
+        y0 = 1 - (h / 2.0f - rad - 4 * cell) / h * 2;
+        y1 = 1 - (h / 2.0f + rad + 14 * cell) / h * 2;
+        {
+            const float panel[12] = { x0, y0, x1, y0, x0, y1, x1, y0, x1, y1, x0, y1 };
+            gl.Uniform4f(u_c, 0, 0, 0, 1);
+            gl.Uniform4f(u_col, 0.04f, 0.05f, 0.07f, 0.80f);
+            gl.BufferData(R_GL_ARRAY_BUFFER, sizeof panel, panel, R_GL_STREAM_DRAW);
+            gl.VertexAttribPointer(0, 2, R_GL_FLOAT, 0, 0, (const void *)0);
+            gl.DrawArrays(R_GL_TRIANGLES, 0, 6);
+        }
+        /* the ring: one quad over the screen, the shader keeps the disc */
+        gl.Uniform4f(u_c, cx, cy, rad, 0);
+        gl.Uniform1f(u_p, p > 1 ? 1.0f : (float)p);
+        gl.Uniform4f(u_col, 1.0f, 0.77f, 0.18f, 1.0f);           /* the menu's own amber, ffc42d */
+        gl.BufferData(R_GL_ARRAY_BUFFER, sizeof quad, quad, R_GL_STREAM_DRAW);
+        gl.VertexAttribPointer(0, 2, R_GL_FLOAT, 0, 0, (const void *)0);
+        gl.DrawArrays(R_GL_TRIANGLES, 0, 6);
+        /* the words under it, on a shadow */
+        n = ring_words(words, cx + cell * 0.6f,
+                       h - cy + rad + cell * 3.6f, cell, (float)w, (float)h);
+        gl.Uniform4f(u_c, 0, 0, 0, 1);
+        gl.Uniform4f(u_col, 0, 0, 0, 0.85f);
+        gl.BufferData(R_GL_ARRAY_BUFFER, (long)n * 2 * sizeof(float), ring_v, R_GL_STREAM_DRAW);
+        gl.DrawArrays(R_GL_TRIANGLES, 0, n);
+        n = ring_words(words, cx, h - cy + rad + cell * 3,
+                       cell, (float)w, (float)h);
+        gl.Uniform4f(u_col, 1, 1, 1, 1);
+        gl.BufferData(R_GL_ARRAY_BUFFER, (long)n * 2 * sizeof(float), ring_v, R_GL_STREAM_DRAW);
+        gl.DrawArrays(R_GL_TRIANGLES, 0, n);
+    }
+
+    if (gl.GetVertexAttribiv) {
+        gl.BindBuffer(R_GL_ARRAY_BUFFER, (GLuint_)vbuf);   /* its pointer, on its own buffer */
+        gl.VertexAttribPointer(0, size, (unsigned)type, (unsigned char)norm, stride, ptr);
+        if (!en)
+            gl.DisableVertexAttribArray(0);
+    }
+    gl.BindBuffer(R_GL_ARRAY_BUFFER, (GLuint_)abuf);
+    gl.UseProgram((GLuint_)prog);
+    gl.BlendFuncSeparate((unsigned)bsr, (unsigned)bdr, (unsigned)bsa, (unsigned)bda);
+    if (gl.BlendEquationSeparate)
+        gl.BlendEquationSeparate((unsigned)ber, (unsigned)bea);
+    (blend ? gl.Enable : gl.Disable)(R_GL_BLEND);
+    (cull ? gl.Enable : gl.Disable)(R_GL_CULL_FACE);
+    (depth ? gl.Enable : gl.Disable)(R_GL_DEPTH_TEST);
+    (sc ? gl.Enable : gl.Disable)(R_GL_SCISSOR_TEST);
+    (st ? gl.Enable : gl.Disable)(R_GL_STENCIL_TEST);
+    if (gl.ColorMask)
+        gl.ColorMask(cm[0], cm[1], cm[2], cm[3]);
+    gl.Viewport(vp[0], vp[1], vp[2], vp[3]);
+    gl.BindFramebuffer(R_GL_FRAMEBUFFER, (GLuint_)fb);
+}
+
+unsigned eglSwapBuffers(void *dpy, void *surf)
+{
+    static unsigned (*next)(void *, void *);
+    static int said;
+    static long long shown_at;
+    double p;
+    if (!next && !(next = (unsigned (*)(void *, void *))dlsym(RTLD_NEXT, "eglSwapBuffers")))
+        return 0;
+    if (ring_state != 0 && (p = ring_how_far(now_ms())) >= 0) {
+        if (ring_state < 0) {
+            tr("hold ring: first shown, for %s", ring_who);
+            const char *e = getenv("PADMENU_RING");
+            ring_state = (e && !strcmp(e, "0")) ? 0 : ring_build();
+        }
+        if (ring_state == 1) {
+            if (said != (p > 1 ? 2 : 1))
+                tr("hold ring: %s (%s)", p > 1 ? "restarting" : "filling", ring_who);
+            if (!said)
+                shown_at = now_ms();
+            said = p > 1 ? 2 : 1;
+            ring_draw(dpy, surf, p);
+        }
+    } else {
+        if (said)
+            tr("hold ring: gone after %lld ms", now_ms() - shown_at);
+        said = 0;
+    }
+    return next(dpy, surf);
 }
 #else
 static void nb_forget(int fd) { (void)fd; }

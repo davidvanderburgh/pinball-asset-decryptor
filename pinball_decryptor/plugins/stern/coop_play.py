@@ -1445,6 +1445,8 @@ def _characters(got):
         out["ceremony"] = str(got["ceremony"])
     if got.get("ceremony_sound"):                       # PAD-1317: the awards ceremony's own music
         out["ceremony_sound"] = str(got["ceremony_sound"])
+    if got.get("select_sound"):                         # PAD-1611: the music looped while the character select is up
+        out["select_sound"] = str(got["select_sound"])
     if got.get("bonus"):                                # PAD-1123: the teammate's character on their End of Ball Bonus
         out["bonus"] = True
     if theme:
@@ -1460,7 +1462,7 @@ def save_characters(project, characters):
     chars = _characters(characters)
     data = staged_changes.load(project)
     raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
-    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "bonus")):
+    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "select_sound", "bonus")):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)
@@ -2132,6 +2134,12 @@ def save_ceremony_sound(project, source=None):
     """Copy *source* (a sound file, or a video whose sound is taken) into the project as the music the co-op awards
     ceremony plays, or with None forget it (the ceremony plays with the game's own sounds); returns the characters as
     stored. Raises :class:`CoopError` when the file is not one the app takes."""
+    return _save_sound(project, source, "ceremony_sound", CEREMONY_SOUND_FILE)
+
+
+def _save_sound(project, source, key, stem):
+    """Copy *source* (a sound file, or a video whose sound is taken) into the project's co-op folder as *stem* plus its
+    extension and name it under characters[*key*], or with None forget it; returns the characters as stored."""
     import os
     import shutil
     chars = load_characters(project)
@@ -2142,16 +2150,16 @@ def save_ceremony_sound(project, source=None):
             raise CoopError("That is not a sound file the app can take (%s)." % ", ".join(SOUND_EXTS + VIDEO_EXTS))
     if os.path.isdir(folder):
         for f in os.listdir(folder):                    # one of it: another extension's goes
-            if os.path.splitext(f)[0] == CEREMONY_SOUND_FILE and (
-                    source is None or f != CEREMONY_SOUND_FILE + os.path.splitext(source)[1].lower()):
+            if os.path.splitext(f)[0] == stem and (
+                    source is None or f != stem + os.path.splitext(source)[1].lower()):
                 os.remove(os.path.join(folder, f))
     if source is None:
-        chars.pop("ceremony_sound", None)
+        chars.pop(key, None)
         return save_characters(project, chars)
     os.makedirs(folder, exist_ok=True)
     ext = os.path.splitext(source)[1].lower()
-    shutil.copyfile(source, os.path.join(folder, CEREMONY_SOUND_FILE + ext))
-    chars["ceremony_sound"] = "%s/%s%s" % (PICTURE_DIR, CEREMONY_SOUND_FILE, ext)
+    shutil.copyfile(source, os.path.join(folder, stem + ext))
+    chars[key] = "%s/%s%s" % (PICTURE_DIR, stem, ext)
     return save_characters(project, chars)
 
 
@@ -2159,6 +2167,39 @@ def ceremony_audio(src, out, ffmpeg):
     """*src*'s sound (a sound file, or a video's own) as a 44.1 kHz 16-bit stereo WAV at *out*, no longer than
     :data:`CEREMONY_SOUND_MAX_SECONDS`; ``""`` when it has none. Raises :class:`CoopError` when ffmpeg cannot read it."""
     return intro_audio(src, out, ffmpeg, max_seconds=CEREMONY_SOUND_MAX_SECONDS)
+
+
+# ---- PAD-1611: the character select's own music ----------------------------------------------------------------------
+# DoomWalrus666: "on the Modes - Characters menu in PAD I could select an audio/music track that plays while the
+# character select menu is active. In game, when character select comes up, the assigned music should loop until a
+# character is chosen, and then return to stock game music." A sound file of the owner's (or a video's own sound), made
+# by a Write into a sound of the card's own on the co-op intro's carrier (sound_modes "the co-op character select's
+# music"); sounds.cfg names it (``cselm``) and the runtime plays it while a teammate's pick is open, again each time it
+# ends, the game's own sounds faded under it; once a character is taken it stops and the game's music is asked for
+# again (pad_mode_runtime.c "PAD-1611").
+#: the project's file (its extension the source's)
+SELECT_SOUND_FILE = "select_music"
+#: the longest select music a card takes (it loops, so a short one is fine; the pick's longest limit is 90 s)
+SELECT_SOUND_MAX_SECONDS = 60
+
+
+def select_sound_path(project, characters=None):
+    """The absolute path of the project's character select music (``""`` when it has none, or it is gone)."""
+    chars = _characters(characters) if characters is not None else load_characters(project)
+    return picture_path(project, {"picture": chars.get("select_sound") or ""})
+
+
+def save_select_sound(project, source=None):
+    """Copy *source* (a sound file, or a video whose sound is taken) into the project as the music looped while a
+    teammate picks a character, or with None forget it (the pick plays with the game's own sounds); returns the
+    characters as stored. Raises :class:`CoopError` when the file is not one the app takes."""
+    return _save_sound(project, source, "select_sound", SELECT_SOUND_FILE)
+
+
+def select_audio(src, out, ffmpeg):
+    """*src*'s sound (a sound file, or a video's own) as a 44.1 kHz 16-bit stereo WAV at *out*, no longer than
+    :data:`SELECT_SOUND_MAX_SECONDS`; ``""`` when it has none. Raises :class:`CoopError` when ffmpeg cannot read it."""
+    return intro_audio(src, out, ffmpeg, max_seconds=SELECT_SOUND_MAX_SECONDS)
 
 
 #: PAD-1192: the longest any one co-op clip's or sound's ffmpeg run may take. Each is at most INTRO_MAX_SECONDS of
@@ -3467,7 +3508,8 @@ def export_settings(project, path):
             pictures.append((src, c[field]))
     for key, stem, path_of in (("intro", INTRO_FILE, intro_path),          # PAD-1114: the co-op games' intro video
                                ("ceremony", CEREMONY_FILE, ceremony_path),    # PAD-1219: the awards' background
-                               ("ceremony_sound", CEREMONY_SOUND_FILE, ceremony_sound_path)):   # PAD-1317: music
+                               ("ceremony_sound", CEREMONY_SOUND_FILE, ceremony_sound_path),   # PAD-1317: music
+                               ("select_sound", SELECT_SOUND_FILE, select_sound_path)):   # PAD-1611: the pick's
         got = path_of(project, chars)
         chars.pop(key, None)
         if got:
@@ -3625,7 +3667,8 @@ def import_settings(project, path):
             pictures += 1
     for key, stem, exts in (("intro", INTRO_FILE, VIDEO_EXTS), ("ceremony", CEREMONY_FILE, VIDEO_EXTS),
                             # PAD-1114 / PAD-1219: the videos; PAD-1317: the ceremony's music
-                            ("ceremony_sound", CEREMONY_SOUND_FILE, SOUND_EXTS + VIDEO_EXTS)):
+                            ("ceremony_sound", CEREMONY_SOUND_FILE, SOUND_EXTS + VIDEO_EXTS),
+                            ("select_sound", SELECT_SOUND_FILE, SOUND_EXTS + VIDEO_EXTS)):   # PAD-1611
         rel = chars.pop(key, "") or ""
         blob = read(rel) if read and rel else None
         ext = os.path.splitext(rel)[1].lower()
@@ -3672,7 +3715,7 @@ def import_settings(project, path):
                 awards[str(k)] = a
         if awards:
             raw["awards"] = awards
-    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "bonus")):
+    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "select_sound", "bonus")):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)

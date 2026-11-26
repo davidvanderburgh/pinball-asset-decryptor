@@ -179,7 +179,7 @@ def test_the_runtime_wiring():
     look = R._lift(src, "static void on_sound_lookup(pm_reg *r)")
     assert look.index("ccer_lookup(r)") < look.index("ci_lookup(r)")       # the same carrier key as the intro's
     assert 'str_eq(f[0], "ccer")' in src and "ccer_sound_arm();" in src
-    assert "|| ci.request || cpk.request || ccer.request) return;" in src
+    assert "|| ci.request || cpk.request || ccer.request || cselm.request) return;" in src
 
 
 def test_the_lookup_takes_the_musics_record():

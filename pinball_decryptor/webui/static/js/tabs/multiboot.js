@@ -377,6 +377,7 @@ function CardCard({ s, w, busy }) {
       disabled=${mode === "cancelling"} title=${mode === "build" ? w.build_tip : w.cancel_tip}
       onClick=${() => call("multiboot.build_flash")}>${mode === "build" ? (w.build_text || "Build / flash card…") : mode === "cancel" ? w.cancel_text : w.cancelling_text}<//>
     ${w.emulate === false ? null : html`<${Button} disabled=${busy} onClick=${() => call("multiboot.run_emulator")}>Run in emulator<//>`}
+    ${w.menu_network ? html`<${MbGrow} busy=${busy} />` : null}
     ${w.extract ? html`<${Button} kind="ghost" disabled=${!s.recover_live} title=${w.recover_tip} onClick=${() => call("multiboot.recover")}>Recover images…<//>` : null}`;
   const bad = s.card_state === "bad";
   const noun = String(w.out_noun || "card");
@@ -584,6 +585,23 @@ function MbNetwork() {
     <${MenuWifi} saved=${st} address=${st.address} off=${st.multiboot ? "" : "Tick the box above first."}
       onSaved=${load} />
   <//>`;
+}
+
+// Simon (2026-11-26): "Add a Grow button to the Multi-boot tab" - the Test card tab's Grow on the machine
+// (core/testcard_grow.py), which grows whichever PAD card the machine runs; the machine's address as the Network
+// tab has it, read again when the pointer comes to the button
+const MB_GROW_TIP = { head: "Grow the card on the machine", lines: [
+  "Makes the games partition of the multi-boot card the machine is running as big as its SD card allows, over the network: nothing is written to an SD card here.",
+  "The machine restarts once and enlarges it while it starts up (a few minutes). Its games, test files, remote access and settings are kept.",
+  "Only a PAD multi-boot card or test card is grown; a one-game card is refused." ] };
+
+function MbGrow({ busy }) {
+  const [addr, setAddr] = useState("");
+  const load = async () => { try { setAddr((await call("testcard.menu_wifi")).address || ""); } catch (e) { /* keep */ } };
+  useEffect(() => { load(); }, []);
+  const why = busy ? "" : addr ? "" : "Find the machine on the Network tab first";
+  return html`<span onMouseEnter=${load}><${Button} disabled=${busy || !addr} title=${why || MB_GROW_TIP}
+    onClick=${() => call("testcard.grow")}>Grow on the machine…<//></span>`;
 }
 
 // --------------------------------------------------------- Menu settings…

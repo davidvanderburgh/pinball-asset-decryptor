@@ -302,3 +302,18 @@ def test_the_app_and_the_page_offer_it():
     js = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "testcard.js"),
               encoding="utf-8").read()
     assert 'call("testcard.grow")' in js and "Grow on the machine…" in js
+
+
+def test_the_multiboot_tab_offers_it_too():
+    """Simon (2026-11-26): "Add a Grow button to the Multi-boot tab" - the same grow, beside Run in emulator, on a
+    Stern multi-boot panel only (the one with the menu network), greyed until the Network tab has found the machine."""
+    js = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "multiboot.js"),
+              encoding="utf-8").read()
+    assert "${w.menu_network ? html`<${MbGrow} busy=${busy} />` : null}" in js
+    grow = js[js.index("function MbGrow("):]
+    grow = grow[:grow.index("\n}\n")]
+    assert 'call("testcard.grow")' in grow and "Grow on the machine…" in grow
+    assert 'call("testcard.menu_wifi")' in grow and "disabled=${busy || !addr}" in grow
+    assert "Find the machine on the Network tab first" in grow
+    footer = js[js.index("function CardCard("):]
+    assert footer.index("multiboot.run_emulator") < footer.index("<${MbGrow}")

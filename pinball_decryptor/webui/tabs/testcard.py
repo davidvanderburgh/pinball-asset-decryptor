@@ -241,7 +241,7 @@ class TestCardTab(TabService):
             return False
         address = self._address()
         if not address:
-            raise RpcError("Find the machine on the Network tab first: the test card it runs is the one grown")
+            raise RpcError("Find the machine on the Network tab first: the card it runs is the one grown")
         fn = self.window.cb.get("on_grow_test_card")
         if fn is None:
             raise RpcError("Grow on the machine is not available here")

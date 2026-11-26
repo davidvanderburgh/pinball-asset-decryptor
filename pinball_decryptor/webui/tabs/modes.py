@@ -4285,8 +4285,17 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                     compat.messagebox.showinfo("Load modes", "Your modes could not be saved to "
                                                "a backup file, so nothing was loaded: %s" % e)
                     return None
-                self._say("saved every mode to %s before loading %s"
-                          % (backup, shown))
+                # PAD-1602: no second zip of the same modes, and only the newest few kept
+                from ...core import project_backups as PB
+                kept_as = PB.settle(backup, PB.keep_of(getattr(getattr(self.window, "app", None), "_settings", None)))
+                backup = kept_as["path"]
+                self._say("%s before loading %s" % (
+                    "your modes were already saved as they are in %s" % backup if kept_as["same"]
+                    else "saved every mode to %s" % backup, shown))
+                if kept_as["pruned"]:
+                    self._say("removed %d older backup%s from %s (%s)" % (
+                        len(kept_as["pruned"]), "" if len(kept_as["pruned"]) == 1 else "s",
+                        MP.BACKUP_DIR, ", ".join(kept_as["pruned"])))
         try:
             report = MP.import_modes(path, project, replace=replace, skip=skip)
         except (MP.ModeProjectError, OSError) as e:

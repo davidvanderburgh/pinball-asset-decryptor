@@ -906,11 +906,14 @@ def write_load_report(assets_dir, zip_path, report):
     return path
 
 
-def backup(assets_dir, loading, trees):
+def backup(assets_dir, loading, trees, keep=None):
     """PAD-402: save every scene's edits, replaced picture, color profile and text edit of the
     project, as Save every scene... does, to a new file in its Backups folder before *loading*
     is loaded: loading that file puts them back.  Returns its path, or None when there is
-    nothing to save."""
+    nothing to save.  PAD-1602: when the newest backup there holds the same, that one's path
+    is returned and no new file kept; only the newest *keep* (default
+    :data:`~pinball_decryptor.core.project_backups.KEEP_DEFAULT`) backups stay."""
+    from ...core import project_backups
     from .mode_project import backup_path
     path = backup_path(assets_dir, loading)
     try:
@@ -921,7 +924,8 @@ def backup(assets_dir, loading, trees):
         except OSError:
             pass
         return None
-    return path
+    return project_backups.settle(
+        path, project_backups.KEEP_DEFAULT if keep is None else keep)["path"]
 
 
 def _digest(data):

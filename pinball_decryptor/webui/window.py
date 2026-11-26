@@ -1109,16 +1109,30 @@ class WebWindow:
         """PAD-402: a load that changes the user's own edits. *items* ``[{"id", "what",
         "mine", "theirs"}]``, one row each to tick. Returns None (Cancel), else ``(choice,
         {ids the file's replaces}, back up first)``: choice "replace" (all), "skip" (none),
-        "pick" (the ticked ones) or another of *buttons*' ids."""
+        "pick" (the ticked ones) or another of *buttons*' ids. PAD-1602: with a backup line,
+        how many backups the project keeps is beside it, and a count picked there is saved."""
+        from ..core import project_backups
+        settings = getattr(self.app, "_settings", None)
+        keep = project_backups.keep_of(settings)
         answer = self.ctx.dialogs.ask({
             "kind": "conflicts", "title": title or "", "message": str(message or ""),
             "items": [{k: str(it.get(k) or "") for k in ("id", "what", "mine", "theirs")}
                       for it in items],
             "backup_label": backup_label or "", "backup": True,
+            **({"keep": keep, "keep_choices": sorted(set(project_backups.KEEP_CHOICES) | {keep})}
+               if backup_label else {}),
             **({"buttons": buttons} if buttons else {})})
         if not isinstance(answer, dict) or not answer.get("choice") \
                 or answer["choice"] == "cancel":
             return None
+        if backup_label and answer.get("keep") is not None and isinstance(settings, dict):
+            picked = project_backups.keep_of({project_backups.KEEP_KEY: answer.get("keep")})
+            if picked != keep:
+                settings[project_backups.KEEP_KEY] = picked
+                try:
+                    self.app._save_settings()
+                except Exception:                       # noqa: BLE001
+                    log.exception("save settings (backup keep)")
         ids = {str(it["id"]) for it in items}
         if answer["choice"] == "replace":
             take = ids

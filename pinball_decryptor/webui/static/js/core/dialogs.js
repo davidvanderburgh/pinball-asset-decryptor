@@ -7,7 +7,7 @@
 //    bus.publish("open_dialog", name=...), a tab with openDialog(name, props).
 //    The component gets {close, ...props}.
 
-import { html, useEffect, useRef, useState, Modal, Button, Icon, Field, Check, fmtBytes, cx, isTopScrim } from "./ui.js";
+import { html, useEffect, useRef, useState, Modal, Button, Icon, Field, Check, Select, fmtBytes, cx, isTopScrim } from "./ui.js";
 import { useNs, useEvent } from "./store.js";
 import { call, reply } from "./rpc.js";
 
@@ -154,19 +154,23 @@ function DetailsModal({ spec }) {
 // PAD-402 (DragonRR): a load that would change the user's own edits. Each conflict is a row
 // to tick (ticked = the file's replaces mine); the buttons answer for all of them at once or
 // for the ticked ones, and the backup tick says whether mine are saved to a file first.
-// Answers {choice, take: [ids ticked], backup} or "cancel".
+// Answers {choice, take: [ids ticked], backup} or "cancel".  PAD-1602: spec.keep (with
+// spec.keep_choices) is how many backups the project keeps, picked beside the tick and sent
+// back as answer.keep.
 function ConflictsModal({ spec }) {
   const items = spec.items || [];
   const [take, setTake] = useState(new Set());
   const [backup, setBackup] = useState(spec.backup !== false);
+  const [keep, setKeep] = useState(spec.keep || null);
   const scrim = useRef(null);
   const answer = (choice) => reply(spec.id, choice === "cancel" ? "cancel"
-    : { choice, take: choice === "replace" ? items.map((i) => i.id) : choice === "pick" ? [...take] : [], backup });
+    : { choice, take: choice === "replace" ? items.map((i) => i.id) : choice === "pick" ? [...take] : [], backup,
+        ...(keep ? { keep } : {}) });
   useEffect(() => {
     const onKey = (e) => { if (e.key === "Escape" && isTopScrim(scrim.current)) { e.preventDefault(); answer("cancel"); } };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [spec.id, take, backup]);
+  }, [spec.id, take, backup, keep]);
   const flip = (id, on) => { const next = new Set(take); if (on) next.add(id); else next.delete(id); setTake(next); };
   const cell = "padding:5px 10px;border-bottom:1px solid var(--line);vertical-align:top";
   const cols = spec.columns || ["Replace", "What", "Yours now", "In the file"];
@@ -184,7 +188,13 @@ function ConflictsModal({ spec }) {
         <tbody>${items.map((it) => html`<tr key=${it.id}>
           <td style=${cell}><${Check} checked=${take.has(it.id)} onChange=${(v) => flip(it.id, v)} /></td>
           <td style=${cell}>${it.what}</td><td style=${cell} class="muted">${it.mine}</td><td style=${cell}>${it.theirs}</td></tr>`)}</tbody></table></div>
-      ${spec.backup_label ? html`<${Check} checked=${backup} onChange=${setBackup} label=${spec.backup_label} />` : null}
+      ${spec.backup_label ? html`<div class="row" style="gap:10px;align-items:center">
+        <${Check} checked=${backup} onChange=${setBackup} label=${spec.backup_label} />
+        ${spec.keep ? html`<${Select} sm width=${92} value=${String(keep)} disabled=${!backup}
+          title=${"How many of these backups the project's Backups folder keeps: the oldest go when there are more. "
+            + "A backup the same as the newest one is not saved twice, and a file you renamed or put there yourself is never removed."}
+          options=${(spec.keep_choices || [spec.keep]).map((n) => ({ value: String(n), label: "keep " + n }))}
+          onChange=${(v) => setKeep(parseInt(v, 10))} />` : null}</div>` : null}
       ${spec.detail ? html`<div class="msg muted small">${spec.detail}</div>` : null}
     </div>
     <div class="ft">${buttons.map((b) => html`<${Button} kind=${b.style === "primary" ? "primary" : ""} onClick=${() => answer(b.id)}>${b.label}<//>`)}</div>

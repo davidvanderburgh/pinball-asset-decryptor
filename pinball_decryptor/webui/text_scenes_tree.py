@@ -19,6 +19,7 @@ import os
 import re
 import threading
 
+from ..core import project_backups
 from . import compat
 from . import look_switches
 from .rpc import rpc
@@ -3864,7 +3865,9 @@ class TreeEditMixin:
                     take = {it["id"] for it in items}
                 kept = n - len(take)
                 if (take or reset) and want_backup:
-                    saved_to = scene_share.backup(self.assets_dir, path, self._load_trees())
+                    saved_to = scene_share.backup(          # PAD-1602: keep count
+                        self.assets_dir, path, self._load_trees(),
+                        project_backups.keep_of(getattr(getattr(self.window, "app", None), "_settings", None)))
                 if reset:
                     reset_n = len(mine)
                     scene_edit.clear(self.assets_dir)

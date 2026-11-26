@@ -11,6 +11,7 @@ disturbing anything else, the Write's overlay is folded into the validator bypas
 and a row put back to stock writes the stock words back byte for byte.
 """
 
+from pinball_decryptor.core import sparse_card
 import hashlib
 import json
 import os
@@ -575,7 +576,7 @@ def test_putting_the_only_change_back_updates_the_build_back_to_stock(card, monk
     _manage(card)
     _refuse_like_the_guard(monkeypatch)
     card.state["copies"].clear()
-    monkeypatch.setattr(shutil, "copyfile", lambda *a, **k: pytest.fail("the card was copied"))
+    monkeypatch.setattr(sparse_card, "sparse_copy", lambda *a, **k: pytest.fail("the card was copied"))
     counts, lines = _build(card)
     assert counts[0] == (0, 0, 0, 0)
     stock = card.stock.read_bytes()

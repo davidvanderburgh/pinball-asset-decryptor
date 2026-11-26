@@ -47,6 +47,7 @@ from ..modes_tryit import TryItMixin
 from ..modes_jjp import JjpModesMixin         # PAD-1350: the tab on a JJP game
 from ..modes_spooky import SpookyModesMixin   # PAD-1417: the tab on a Spooky game
 from .base import TabService, rpc
+from ...core import pad_temp
 
 SAVE_DELAY_MS = 500
 
@@ -460,10 +461,15 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                  hand_tip=self.HAND_TIP)
         self.set(comp_on=False, comp_note="", comp_note_kind="", comp_shown=False,   # PAD-1041
                  comp_tip=self.COMP_TIP)
+        self.set(cvd_on=False, cvd_preset="red_green", cvd_note="", cvd_note_kind="", cvd_shown=False,   # PAD-1589
+                 cvd_tip=self.CVD_TIP, cvd_presets=self._cvd_presets(),
+                 spk_on=False, spk_note="", spk_note_kind="", spk_shown=False, spk_tip=self.SPK_TIP)
         from ...plugins.stern import mode_project as _MPk
         self.set(keeps_ic_head=_MPk.KEEPS_IC_HEAD, keeps_ic_note=_MPk.KEEPS_IC_NOTE)   # PAD-1204: their own group
         self.set(feed_on=False, feed_url="", feed_note="", feed_note_kind="", feed_shown=False,   # PAD-1204
-                 feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="", feed_contract=None)
+                 feed_tip=self.FEED_TIP, feed_url_tip=self.FEED_URL_TIP, feed_placeholder="", feed_contract=None,
+                 feed_live=False, feed_live_label="", feed_live_tip="", feed_live_note="",   # PAD-1575
+                 feed_overlay_tip="")
         self.set(project="", project_label="", title_text="", title_note="", no_port="",
                  profile=self._profile_payload(None), mode_shows=[], show_pick={}, rows=[], sel=None, game_rows=[],
                  game_mode=None, title_origin="",
@@ -780,6 +786,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         self._publish_coop(project)                          # PAD-1017
         self._publish_idle(project)                          # PAD-1022
         self._publish_handicap(project)                      # PAD-1033
+        self._publish_access(project)                        # PAD-1589
         self._publish_comp(project)                          # PAD-1041
         self._publish_feed(project)                          # PAD-1204
         self._publish_records_count(project)                 # PAD-1280
@@ -1851,8 +1858,46 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 note, kind = why, "err"
             else:
                 note = _SF.NOTE
+        live = bool(project) and _SF.live_on(project)                   # PAD-1575: also during the game
         self.set(feed_shown=shown or on, feed_on=on, feed_url=url, feed_note=note, feed_note_kind=kind,
-                 feed_placeholder=_SF.PLACEHOLDER, feed_contract=_SF.contract(url))   # the Play options tab shows it
+                 feed_placeholder=_SF.PLACEHOLDER, feed_contract=_SF.contract(url),   # the Network tab shows it
+                 feed_live=live, feed_live_label=_SF.LIVE_LABEL, feed_live_tip=_SF.LIVE_TIP,
+                 feed_live_note=_SF.LIVE_NOTE if on and live and kind != "err" else "",
+                 feed_overlay_tip=_SF.OVERLAY_TIP)
+
+    @rpc
+    def set_score_feed_live(self, on):
+        """PAD-1575: tick or untick "Also during the game": the events while a game is played posted too."""
+        from ...core import history_log
+        from ...plugins.stern import score_feed as _SF
+        project = self.project()
+        if not project:
+            return False
+        was = _SF.save_live(project, bool(on))
+        history_log.record(project, [h for h in (history_log.diff_scalar(
+            "modes  score feed during the game", "on" if was else "off", "on" if on else "off"),) if h])
+        self._say("score feed: %s" % ("the events while a game is played are posted too, from the next Write" if on
+                                      else "only each game's final scores are posted, from the next Write"))
+        self._publish_feed(project)
+        return True
+
+    @rpc
+    def save_feed_overlay(self):
+        """PAD-1575: copy the sample overlay (a small server and an OBS browser-source page) into a folder the owner
+        picks."""
+        import os
+        from ...plugins.stern import score_feed as _SF
+        folder = self.window.ask_folder("score_feed_overlay", "Pick a folder for the sample score overlay")
+        if not folder:
+            return False
+        dest = os.path.join(folder, "score_feed_overlay")
+        try:
+            _SF.save_overlay(dest)
+        except OSError as e:
+            self._say("score feed: the sample overlay could not be saved in %s: %s" % (dest, e))
+            return False
+        self._say("score feed: the sample overlay is in %s - README.md there says how to run it" % dest)
+        return True
 
     @rpc
     def set_score_feed(self, on, url=None):
@@ -1965,6 +2010,85 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         history_log.record(project, [hist] if hist else [])
         self._say("handicap per player: %s" % ("the card gets it at the next Write" if on else "not on the card"))
         self._publish_handicap(project)
+        return True
+
+    # PAD-1589: color-blind insert colors and spoken scores (plugins/stern/accessibility.py), on the Play options tab
+    CVD_TIP = (
+        "For players with color blindness. The game tells its shots apart by the colors of its RGB inserts, and red, "
+        "orange, yellow and green look alike to a player with red-green color blindness (yellow and orange, blue and "
+        "purple to one with blue-yellow). The preset moves every color the game lights onto one that stays apart for "
+        "that player, keeping red, white and every insert's brightness as they are. An insert with one fixed color "
+        "keeps it. See it first in the Modes tab's Light shows (Color-blind) or the emulator's playfield window. The "
+        "service menu gets a COLOR BLIND row (0 Off, 1 red-green, 2 blue-yellow) starting on this preset. Write puts "
+        "it on the card.")
+    SPK_TIP = (
+        "For low-vision players. At the end of each ball the machine says the player and their score (\"player two, "
+        "one million two hundred thousand five hundred\"), and holding the left flipper button for two seconds in "
+        "attract says each player's last score. The numbers are spoken in this computer's own voice when you Write. "
+        "The service menu gets a SPOKEN SCORES row, Off to start with: set it On to hear the scores.")
+
+    @staticmethod
+    def _cvd_presets():
+        from ...plugins.stern import accessibility as _AC
+        return [{"key": k, "name": _AC.PRESETS[k][1]} for k in _AC.PRESET_ORDER]
+
+    def _publish_access(self, project):
+        """PAD-1589: the Color-blind insert colors and Spoken scores ticks, and under each what it does on the card,
+        or in red why this game (or this computer) cannot have it."""
+        from ...plugins.stern import accessibility as _AC
+        from ...plugins.stern import handicap as _HC
+        prof = _HC.project_title(project) if project else None
+        preset = _AC.preset_of(project) if project else _AC.DEFAULT_PRESET
+        c_on = bool(project) and bool(_AC.load_cvd(project))
+        s_on = bool(project) and _AC.load_spoken(project)
+        c_why = _AC.title_refusal(prof, "cvd") if project else ""
+        s_why = _AC.title_refusal(prof, "spoken") if project else ""
+        c_note, c_kind = "", ""
+        if c_on:
+            c_note, c_kind = (c_why, "err") if c_why else (
+                "On the card: the game's RGB inserts in %s colors; COLOR BLIND in the service menu switches them."
+                % _AC.PRESETS[preset][1].lower(), "")
+        s_note, s_kind = "", ""
+        if s_on:
+            kind, how = _AC.voice()
+            s_note, s_kind = ((s_why, "err") if s_why else (how, "err") if not kind else (
+                "On the card, spoken in %s: SPOKEN SCORES in the service menu, Off to start with." % how, ""))
+        self.set(cvd_shown=bool(project) and (c_on or not c_why), cvd_on=c_on, cvd_preset=preset,
+                 cvd_note=c_note, cvd_note_kind=c_kind,
+                 spk_shown=bool(project) and (s_on or not s_why), spk_on=s_on, spk_note=s_note, spk_note_kind=s_kind)
+
+    @rpc
+    def set_colour_blind(self, on, preset=None):
+        """Tick or untick color-blind insert colors for this project, *preset* the one the card starts on
+        (PAD-1589)."""
+        from ...core import history_log
+        from ...plugins.stern import accessibility as _AC
+        project = self.project()
+        if not project:
+            return False
+        was = _AC.save_cvd(project, bool(on), preset)
+        now = _AC.preset_of(project)
+        hist = [h for h in (history_log.diff_scalar("play options  color-blind insert colors", "on" if was["on"]
+                                                    else "off", "on" if on else "off"),
+                            history_log.diff_scalar("play options  color-blind preset", was["preset"], now)) if h]
+        history_log.record(project, hist)
+        self._say("color-blind insert colors: %s" % ("the card gets them at the next Write" if on else "not on the card"))
+        self._publish_access(project)
+        return True
+
+    @rpc
+    def set_spoken_scores(self, on):
+        """Tick or untick spoken scores for this project (PAD-1589)."""
+        from ...core import history_log
+        from ...plugins.stern import accessibility as _AC
+        project = self.project()
+        if not project:
+            return False
+        was = _AC.save_spoken(project, bool(on))
+        hist = history_log.diff_scalar("play options  spoken scores", "on" if was else "off", "on" if on else "off")
+        history_log.record(project, [hist] if hist else [])
+        self._say("spoken scores: %s" % ("the card gets them at the next Write" if on else "not on the card"))
+        self._publish_access(project)
         return True
 
     def _no_modes_words(self):
@@ -2489,7 +2613,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
 
     def _tmpdir(self):
         if not self._tmp or not os.path.isdir(self._tmp):
-            self._tmp = tempfile.mkdtemp(prefix="pad-modes-")
+            self._tmp = pad_temp.mkdtemp(prefix="pad-modes-")
         return self._tmp
 
     def _update_preview(self, spec, folder):
@@ -4648,6 +4772,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         # PAD-668: the single-colour inserts' own colours and the Real LEDs / All RGB switch, shared with the
         # emulator's playfield window
         out["game"], out["lens"], out["look"] = game, IC.table(game), IC.look()
+        out["cvd"] = IC.cvd_preview()                   # PAD-1589: the color-blind preview, the window's too
         card, _via = self._title_card(self.project())
         # PAD-623: the project's card first, then any other card of this game the app was pointed at, then the
         # picture kept from an earlier read - a moved or deleted card still shows the playfield
@@ -4673,6 +4798,12 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         """PAD-668: one single-colour insert's own colour set ("#rrggbb") or put back to white (None), in the table
         the emulator's playfield window reads too. Returns the game's table."""
         return IC.set_colour(game, name, colour)
+
+    @rpc
+    def blocks_cvd_preview(self, preset):
+        """PAD-1589: the color-blind preview ("", "red_green", "blue_yellow"), shared with the emulator's playfield
+        window."""
+        return IC.set_cvd_preview(preset)
 
     @rpc
     def blocks_insert_look(self, look):

@@ -48,6 +48,10 @@ import sys
 import tempfile
 
 from PIL import Image, ImageDraw
+try:
+    from ...core.pad_temp import mkdtemp as _mkdtemp   # PAD-1596: who made it
+except ImportError:                       # run on its own, as a script
+    from tempfile import mkdtemp as _mkdtemp
 
 
 # Default DMD rendering parameters (matching rundmd-to-video style)
@@ -384,7 +388,7 @@ def convert_vid_to_mp4(vid_path, output_path, fps=DEFAULT_FPS,
         raise ValueError(f"VID file has no frames: {vid_path}")
 
     # Render frames to temp PNGs
-    temp_dir = tempfile.mkdtemp(prefix="spooky_vid_")
+    temp_dir = _mkdtemp(prefix="spooky_vid_")
     try:
         for i in range(frame_count):
             if subframes == 2:

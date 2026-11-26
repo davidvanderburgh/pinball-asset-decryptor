@@ -214,3 +214,13 @@ def test_unreadable_files_are_skipped_in_order(tmp_path, monkeypatch, threads):
     assert "d1/sub0/f04.wav" not in base and len(base) == 69
     assert any("Skipping (cannot read): d1/sub0/f04.wav" in t for t in logs)
     assert "d1/sub0/f04.wav" not in hashcache.load(root)
+
+
+def test_every_change_scan_hashes_on_the_baselines_thread_count():
+    """PAD-1579: the baseline, the Write tab's change walk and the Compare
+    tab read on the one measured thread count, not copies of their own."""
+    from pinball_decryptor.core import folder_compare
+    from pinball_decryptor.webui import write_scan
+    assert checksums.HASH_THREADS == 8
+    assert write_scan.HASH_THREADS == checksums.HASH_THREADS
+    assert folder_compare._WORKERS == checksums.HASH_THREADS

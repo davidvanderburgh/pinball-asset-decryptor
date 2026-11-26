@@ -206,13 +206,15 @@ def test_the_four_tabs_tick_their_own_kind():
 
 # ---- the tab -----------------------------------------------------------------------------------
 
-def test_the_tab_is_on_the_rail_for_stern_spike_2_only():
+def test_the_tab_is_on_the_rail_for_stern_spike_2_and_spike_3():
     from pinball_decryptor.webui.tabs import TABS
     assert ("testcard", "testcard", "Test Card", "Test card", "Build", "palette") in TABS
     win = open(os.path.join(ROOT, "pinball_decryptor", "webui", "window.py"), encoding="utf-8").read()
     assert '"Test Card": _testcard_available(mfr),' in win
     assert tc.available(_mfr()) is True
-    assert not tc.available(_mfr(era="spike3"))                 # Spike 3
+    # PAD-1586: Spike 3 too (its multi-boot; no mode runtime needed: nothing boots)
+    assert tc.available(_mfr(era="spike3", modes=False)) is True
+    assert not tc.available(_mfr(era="spike3", multiboot=False, modes=False))
     assert not tc.available(_mfr(modes=False))                  # JJP, BoF, DP, Spooky: no mode runtime
     assert not tc.available(None)
     from pinball_decryptor.webui.tabs.testcard import TestCardTab

@@ -43,6 +43,7 @@ from .. import compat
 from .. import emulate_rig as rig
 from ..emulate_log import EmulateLogMixin
 from .base import TabService, rpc
+from ...core import pad_temp
 
 log = logging.getLogger(__name__)
 
@@ -1397,7 +1398,7 @@ class EmulateTab(EmulateLogMixin, TabService):
                 self._log("[emulate] %s did not finish (exit %s)."
                           % (label, rc))
             return rc == 0
-        work = tempfile.mkdtemp(prefix="pad_engine_")
+        work = pad_temp.mkdtemp(prefix="pad_engine_")
         script = os.path.join(work, "setup.sh")
         out = os.path.join(work, "setup.log")
         with open(script, "w", encoding="utf-8") as f:

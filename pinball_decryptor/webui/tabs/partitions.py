@@ -22,6 +22,7 @@ import threading
 
 from .. import compat
 from .base import TabService, rpc
+from ...core import pad_temp
 
 #: Tk module constants (gui/main_window.py _PEX_*): the preview's file types
 #: and the byte cap for the image/font render read.
@@ -260,6 +261,16 @@ class PartitionsTab(TabService):
             labels = list(self._part_labels)
             self.partition_part_var.set(labels[0] if labels else "")
             self._clear_tree()
+            locked = getattr(card, "spike3_locked", "")
+            if locked:
+                # PAD-1586: a Spike 3 card with no key to unlock it
+                self.log("This Spike 3 card's partitions are encrypted: %s."
+                         % locked, "warning")
+                compat.messagebox.showwarning(
+                    "Encrypted card",
+                    "This is a Spike 3 card and its partitions are "
+                    "encrypted: %s." % locked)
+                return True
             self.log("No browsable ext filesystem on this image.", "warning")
             compat.messagebox.showwarning(
                 "Nothing to browse",
@@ -559,7 +570,7 @@ class PartitionsTab(TabService):
             return
         try:
             if not self._preview_dir:
-                self._preview_dir = tempfile.mkdtemp(prefix="pad_pex_")
+                self._preview_dir = pad_temp.mkdtemp(prefix="pad_pex_")
             out = os.path.join(self._preview_dir, "preview_%d.png" % seq)
             with open(out, "wb") as f:
                 f.write(png)
@@ -997,6 +1008,18 @@ class PartitionsTab(TabService):
     def replace(self, path):
         """Right-click → Replace with… (Tk ``_pex_replace_selected``)."""
         if self._busy or self._card is None or path in self._dirs:
+            return False
+        part = next((p for p in self._part_labels.values()
+                     if p.index == self._part_index), None)
+        if part is not None and getattr(part, "encrypted", False):
+            # PAD-1586: a Spike 3 card is browsed through its decryption;
+            # its files change through Replace + Write, which re-encrypt
+            compat.messagebox.showinfo(
+                "Encrypted partition",
+                "This is a Spike 3 card: its partitions are encrypted, so "
+                "they can be browsed and extracted here but not written. "
+                "Change the game's files with the Replace tabs and Write, "
+                "which build a new card with the edits encrypted in place.")
             return False
         try:
             cur_size = self._card.file_size(self._part_index, path)

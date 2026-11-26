@@ -11,6 +11,7 @@ for one no longer replaced.  The ext4 driver's copy is stubbed too (it needs
 WSL); what is checked is which files are handed to it.
 """
 
+from pinball_decryptor.core import sparse_card
 import hashlib
 import json
 import os
@@ -225,7 +226,7 @@ def test_a_second_build_updates_the_first_in_place(card, monkeypatch):
                                (V2, str(card.clips / "two.mp4")))
     card.state["counts"] = (1, 2, 0, 0)
     card.state["copies"].clear()
-    monkeypatch.setattr(shutil, "copyfile",
+    monkeypatch.setattr(sparse_card, "sparse_copy",
                         lambda *a, **k: pytest.fail("the card was copied"))
     counts, lines = _build(card)
     assert counts[0] == (1, 2, 0, 0)
@@ -250,7 +251,7 @@ def test_a_video_taken_back_gets_the_stock_file_back(card, monkeypatch):
     card.state["grow"] = None
     card.state["counts"] = (0, 0, 0, 0)
     card.state["copies"].clear()
-    monkeypatch.setattr(shutil, "copyfile",
+    monkeypatch.setattr(sparse_card, "sparse_copy",
                         lambda *a, **k: pytest.fail("the card was copied"))
     _, lines = _build(card)
     stock_v1 = CARD_TREE["turtles_pro"]["assets"]["lcd"]["1.asset"]
@@ -265,7 +266,7 @@ def test_a_changed_source_is_copied_again(card, monkeypatch):
     _first_build(card)
     (card.clips / "one.mp4").write_bytes(b"CLIP-ONE-TAKE-2" + b"1" * 40)
     card.state["copies"].clear()
-    monkeypatch.setattr(shutil, "copyfile",
+    monkeypatch.setattr(sparse_card, "sparse_copy",
                         lambda *a, **k: pytest.fail("the card was copied"))
     _build(card)
     assert card.state["copies"] == [
@@ -277,8 +278,8 @@ def test_a_changed_source_is_copied_again(card, monkeypatch):
 def test_update_false_always_builds_whole(card, monkeypatch):
     _first_build(card)
     copies = []
-    real = shutil.copyfile
-    monkeypatch.setattr(shutil, "copyfile",
+    real = sparse_card.sparse_copy
+    monkeypatch.setattr(sparse_card, "sparse_copy",
                         lambda s, d, *a, **k: (copies.append(d), real(s, d)))
     _, lines = _build(card, update=False)
     assert copies and not any("Updating" in m for m, _l in lines)
@@ -303,9 +304,9 @@ def test_a_file_the_last_build_moved_forces_a_whole_build(card):
     _first_build(card)
     card.state["build_reader"] = _Reader(MOVED_TREE)
     copies = []
-    real = shutil.copyfile
+    real = sparse_card.sparse_copy
     import unittest.mock as mock
-    with mock.patch.object(shutil, "copyfile",
+    with mock.patch.object(sparse_card, "sparse_copy",
                            lambda s, d, *a, **k: (copies.append(d),
                                                   real(s, d))):
         _, lines = _build(card)
@@ -323,9 +324,9 @@ def test_a_file_rewritten_whole_then_patched_in_place_is_refused(card):
     card.state["writes"] = [(_disk(r, "/" + V1, 3), b"fit")]
     card.state["grow"] = None
     copies = []
-    real = shutil.copyfile
+    real = sparse_card.sparse_copy
     import unittest.mock as mock
-    with mock.patch.object(shutil, "copyfile",
+    with mock.patch.object(sparse_card, "sparse_copy",
                            lambda s, d, *a, **k: (copies.append(d),
                                                   real(s, d))):
         _, lines = _build(card)
@@ -366,7 +367,7 @@ def test_a_copy_that_fails_marks_the_record_incomplete(card, monkeypatch):
                                (V2, str(card.clips / "two.mp4")))
     card.state["counts"] = (1, 2, 0, 0)
     card.state["fail_after"] = 0                # the driver lands nothing
-    monkeypatch.setattr(shutil, "copyfile",
+    monkeypatch.setattr(sparse_card, "sparse_copy",
                         lambda *a, **k: pytest.fail("the card was copied"))
     counts, lines = _build(card)
     assert counts[0] == (1, 1, 0, 0)            # the failed video is not claimed

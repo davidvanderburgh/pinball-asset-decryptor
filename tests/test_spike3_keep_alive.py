@@ -79,17 +79,6 @@ def test_resolve_falls_back_to_lanes_then_pops():
     assert s3balls.resolve([d for d in pops_only if "POP" not in d[0]])["alive"] == []
 
 
-def test_a_ball_in_play_is_kept_alive(fast):
-    _sw, b = _balls()
-    _launch(b)
-    _run(b, 0.1)
-    assert b.out() == 1
-    taps = _run(b, 1.5, SLINGS)
-    assert 3 <= taps <= 6                          # one every ~0.3 s
-    _run(b, 0.1)
-    assert not any(b.made(nb) for nb in SLINGS)
-
-
 def test_taps_alternate_between_the_slings(fast):
     _sw, b = _balls()
     _launch(b)

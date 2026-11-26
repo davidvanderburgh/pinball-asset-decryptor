@@ -158,11 +158,11 @@ function CabinetRow({ c, disabled }) {
         "The game shakes only while its own SHAKER MOTOR setting has the motor fitted (Jaws LE has it on as it comes)."] })}
     ${dof("dof_strips", "Strips", (c.suggested || {}).strips || 200, { head: "The cabinet light strips to DOF",
       lines: ["The first DOF event (E number) of the game's cabinet light strips: the expression lighting blades where the game has them, else its speaker lights, on both sides. Off (blank): not sent.",
-        "Each part of each side gets " + nColours + " E numbers in a row, one per colour (" + (c.strip_colours || []).join(", ") + "): the one nearest the game's colour is lit at its brightness, the rest are off.",
+        "Each part of each side gets " + nColours + " E numbers in a row, one per color (" + (c.strip_colours || []).join(", ") + "): the one nearest the game's color is lit at its brightness, the rest are off.",
         "DOF lines… gives the text to paste into your DOF config's strip columns for the table."] })}
     <${Select} sm value=${String(c.strip_parts || 1)} disabled=${disabled || !c.dof_strips}
       options=${[1, 2, 3, 4, 6, 8].map((n) => ({ value: String(n), label: n === 1 ? "whole side" : n + " parts a side" }))}
-      title=${{ head: "How finely each strip follows the game", lines: ["Whole side: each side's strip shows one colour. More parts: each side is cut into that many pieces, bottom to top, so a light running up or down the blades runs up or down your strips too.",
+      title=${{ head: "How finely each strip follows the game", lines: ["Whole side: each side's strip shows one color. More parts: each side is cut into that many pieces, bottom to top, so a light running up or down the blades runs up or down your strips too.",
         "More parts use more E numbers: " + nColours + " per part per side."] }}
       onChange=${(v) => call("vpx.set_cabinet", { strip_parts: parseInt(v, 10) || 1 })} />
     <${Button} size="sm" kind="ghost" disabled=${!c.dof_strips} onClick=${() => setLines(true)}
@@ -184,7 +184,7 @@ function StripLines({ c, onClose }) {
       <textarea class="mono small" readonly rows="4" style="width:100%">${sl[key] || ""}</textarea></div>`;
   return html`<${Modal} title="Cabinet light strips: DOF lines" icon="copy" onClose=${onClose}
     footer=${html`<${Button} kind="primary" onClick=${onClose}>Close<//>`}>
-    <p class="small">The strips use E${c.dof_strips} to E${last}: ${parts === 1 ? "each side one colour" : parts + " parts a side, bottom to top"}, ${n} colours each.
+    <p class="small">The strips use E${c.dof_strips} to E${last}: ${parts === 1 ? "each side one color" : parts + " parts a side, bottom to top"}, ${n} colors each.
       Paste each side's line into the column of that side's LED strip for the table, in the DOF Config Tool or your directoutputconfig.
       NOBOOL makes the game's brightness the strip's.</p>
     ${side("left", "Left strip")}

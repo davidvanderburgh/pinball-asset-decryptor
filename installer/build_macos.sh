@@ -147,7 +147,8 @@ pyinstaller \
     --add-data "$ROOT_DIR/pinball_decryptor/core/audio.py:pinball_decryptor/core" \
     --add-data "$ROOT_DIR/pinball_decryptor/core/checksums.py:pinball_decryptor/core" \
     --add-data "$ROOT_DIR/pinball_decryptor/core/colour_profile.py:pinball_decryptor/core" \
-    --add-data "$ROOT_DIR/pinball_decryptor/core/longpath.py:pinball_decryptor/core" \
+    --add-data "$ROOT_DIR/pinball_decryptor/core/ext4_used.py:pinball_decryptor/core" \
+    --add-data "$ROOT_DIR/pinball_decryptor/core/longpath.py:pinball_decryptor/core"     --add-data "$ROOT_DIR/pinball_decryptor/core/pad_temp.py:pinball_decryptor/core" \
     --add-data "$ROOT_DIR/pinball_decryptor/core/rawdevice.py:pinball_decryptor/core" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/adjustments.py:pinball_decryptor/plugins/stern" \
     --add-data "$ROOT_DIR/pinball_decryptor/plugins/stern/editions.py:pinball_decryptor/plugins/stern" \
@@ -179,6 +180,8 @@ pyinstaller \
     --hidden-import "Crypto.Util.Padding" \
     --hidden-import "paramiko" \
     --hidden-import "pinball_decryptor.core.remote_send" \
+    --hidden-import "pinball_decryptor.core.remote_send_jjp" \
+    --hidden-import "pinball_decryptor.core.ssh_jjp" \
     --hidden-import "pinball_decryptor.core.startup_watch" \
     --hidden-import "pinball_decryptor.core.pad_ssh_key" \
     --hidden-import "pinball_decryptor.core.remote_setup" \
@@ -194,6 +197,8 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.spooky" \
     --hidden-import "pinball_decryptor.plugins.bof" \
     --hidden-import "pinball_decryptor.plugins.jjp" \
+    --hidden-import "pinball_decryptor.plugins.jjp.remote_access" \
+    --hidden-import "pinball_decryptor.plugins.stern.ret_use" \
     --hidden-import "pinball_decryptor.plugins.cgc" \
     --hidden-import "pinball_decryptor.plugins.williams" \
     --hidden-import "pinball_decryptor.plugins.pinmame_classic" \
@@ -262,6 +267,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.progreloc" \
     --hidden-import "pinball_decryptor.plugins.stern.shader_profile" \
     --hidden-import "pinball_decryptor.plugins.stern.radium_grow" \
+    --hidden-import "pinball_decryptor.plugins.stern.ret_use" \
     --hidden-import "pinball_decryptor.plugins.stern.picture_sizes" \
     --hidden-import "pinball_decryptor.plugins.stern.video_sizes" \
     --hidden-import "pinball_decryptor.plugins.stern.fontrender" \
@@ -357,6 +363,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.portcoop" \
     --hidden-import "pinball_decryptor.plugins.stern.idle_pause" \
     --hidden-import "pinball_decryptor.plugins.stern.handicap" \
+    --hidden-import "pinball_decryptor.plugins.stern.accessibility" \
     --hidden-import "pinball_decryptor.plugins.stern.prolonged_comp" \
     --hidden-import "pinball_decryptor.plugins.stern.score_feed" \
     --hidden-import "pinball_decryptor.plugins.stern.cab_shows" \
@@ -397,6 +404,7 @@ pyinstaller \
     --hidden-import "pinball_decryptor.plugins.stern.game_check" \
     --hidden-import "pinball_decryptor.plugins.stern.final_wizard" \
     --hidden-import "pinball_decryptor.plugins.stern.memory_budget" \
+    --hidden-import "pinball_decryptor.plugins.stern.ret_use" \
     --collect-all "unicorn" \
     --collect-all "capstone" \
     --collect-all "numpy" \

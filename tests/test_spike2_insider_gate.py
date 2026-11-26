@@ -61,12 +61,15 @@ def test_the_runtime_names_the_gate_and_arms_it_before_anything_else():
     assert re.search(r"if \(!port_gate\(\)\) return;\s*\n\s*addcab_arm\(\);[^\n]*\n\s*if \(soundlog_arm\(\)\) return;[^\n]*\n"
                      r"\s*mset_arm\(\);[^\n]*\n"
                      r"\s*clipv_arm\(\);[^\n]*\n\s*sndm_arm\(\);[^\n]*\n"
-                     r"\s*pic_arm\(\);[^\n]*\n\s*scnv_arm\(\);[^\n]*\n[^\n]*\n\s*idle_arm\(\);[^\n]*\n\s*hand_arm\(\);[^\n]*\n\s*comp_arm\(\);[^\n]*\n\s*cabs_arm\(\);[^\n]*\n"
+                     r"\s*pic_arm\(\);[^\n]*\n\s*scnv_arm\(\);[^\n]*\n[^\n]*\n\s*idle_arm\(\);[^\n]*\n\s*hand_arm\(\);[^\n]*\n"
+                     r"\s*acc_arm\(\);[^\n]*\n"          # PAD-1589: nor do color-blind inserts or spoken scores
+                     r"\s*comp_arm\(\);[^\n]*\n\s*cabs_arm\(\);[^\n]*\n"
                      r"\s*feed_arm\(\);[^\n]*\n"
                      r"\s*if \(\(\(clipv_only \|\| sndm_only \|\| pic_only \|\| scnv_only \|\| idle_only \|\| hand_cfg_only\(\) \|\| comp_cfg_only\(\)"
-                     r" \|\| \(cabs_only && n_cabs\)\)\s*\|\| feed_cfg_only\(\)\)"
+                     r" \|\| \(cabs_only && n_cabs\)\)\s*\|\| feed_cfg_only\(\) \|\| acc_cfg_only\(\)\)"
                      r"\s*&& !attract_wanted\(\) && !coop_wanted\(\) && !rec_wanted\(\)\) \{.*?"
-                     r"if \(\(hand\.on \|\| n_cabs\) && !hook\(fn\(\"tick\"\), on_hand_tick\)\) \{[^{}]*\}\s*return;"
+                     r"if \(\(hand\.on \|\| n_cabs \|\| acc\.on\) && !hook\(fn\(\"tick\"\), on_hand_tick\)\) \{[^{}]*\}"
+                     r"\s*if \(acc\.on && spk_live\) \{[^{}]*\}\s*return;"
                      r"\s*\}\s*\n\s*if \(!insider_arm\(\)\) return;",
                      src, re.S)
     assert 'hook(fn("agent_header"), on_agent_header)' in src

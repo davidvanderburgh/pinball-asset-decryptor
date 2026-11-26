@@ -4218,7 +4218,14 @@ def testcard_colour_arg(form):
 def testcard_commands(form, out, media_dir, cwd=None, test_specs=None, p3_mib=0):
     """'Build test card…': the selector, the test pictures (``prepare`` with
     nothing else to render: no art, no clips, no sounds), then ``testcard``.
-    The first image on the list is only where the boot and rootfs come from."""
+    The first image on the list is only where the boot and rootfs come from.
+
+    A Spike 3 form (``platform="s3"``, PAD-1586) builds with ``mks3multi.py testcard``
+    instead: as root (the card's games partition is opened through dm-crypt with the
+    user's own key), the Spike 3 menu program, no room for network updates (the card
+    is the size of the card it is made from)."""
+    if backend_for(form).key == "s3":
+        return _s3_testcard_commands(form, out, media_dir, cwd, test_specs)
     primary = wsl(form.images[0].path)
     prep = [SELECTMEDIA, "prepare", "--primary", primary, "--art", "0=none", "--anim", "0=none",
             "--music", "0=none", "--sound-move", "none", "--sound-confirm", "none",
@@ -4233,6 +4240,24 @@ def testcard_commands(form, out, media_dir, cwd=None, test_specs=None, p3_mib=0)
     return install_selector_commands(form, cwd) + [
         ("prepare", step_command("prepare", prep, form, cwd)),
         (TESTCARD_LABEL, step_command(TESTCARD_LABEL, tc, form, cwd))]
+
+
+def _s3_testcard_commands(form, out, media_dir, cwd=None, test_specs=None):
+    """:func:`testcard_commands` for a Stern Spike 3 card (PAD-1586): the Spike 3 menu
+    program, the test pictures (the same ``prepare`` - the menu is one codeselect), then
+    ``mks3multi.py testcard`` as root with the user's key."""
+    be = backend_for(form)
+    primary = wsl(form.images[0].path)
+    prep = [SELECTMEDIA, "prepare", "--primary", primary, "--art", "0=none", "--anim", "0=none",
+            "--music", "0=none", "--sound-move", "none", "--sound-confirm", "none",
+            "--cards", "1", "--out", wsl(media_dir), "--screen", "1920x1080"] + list(test_specs or []) + [
+            "--volume", str(int(form.volume))]
+    tc = [be.tool, "testcard", "--primary", primary, "--out", wsl(out),
+          "--selector-dir", platform_selector_dir(form.selector_dir, be),
+          "--media-dir", wsl(media_dir), "--force"] + testcard_colour_arg(form) + s3_key_args(be)
+    return install_selector_commands(form, cwd) + [
+        ("prepare", step_command("prepare", prep, form, cwd)),
+        (TESTCARD_LABEL, root_command(tc, cwd))]
 
 
 #: The label of the size check's second step: ``update --dry-run`` on the

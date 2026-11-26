@@ -2425,7 +2425,7 @@ def padv_check(path, name):
         if len(hd) != 32 or hd[:8] != PADV_MAGIC:
             raise Refused("media %s: not a test video (.padv)" % name)
         w, h, fps1000, n, _a, _b = struct.unpack("<6I", hd[8:])
-        if not (0 < w <= 1360 and 0 < h <= 768) or not 0 < n <= 216000 or not 1000 <= fps1000 <= 120000:
+        if not (0 < w <= PNG_MAX[0] and 0 < h <= PNG_MAX[1]) or not 0 < n <= 216000 or not 1000 <= fps1000 <= 120000:
             raise Refused("media %s: %dx%d, %d frames at %.3f fps: not one the menu plays"
                           % (name, w, h, n, fps1000 / 1000.0))
         idx = f.read(4 * (n + 1))
@@ -8822,7 +8822,7 @@ def _mkext(path, kib, files, links=()):
     subprocess.run(["mke2fs", "-q", "-F", "-t", "ext4", "-b", "1024", path, str(kib)], check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     cmds, made = [], set()
-    stage = tempfile.mkdtemp(prefix="synth.")
+    stage = tempfile.mkdtemp(prefix="mkmulticard.synth.")
     for k, (cardpath, data) in enumerate(files.items()):
         parts = cardpath.strip("/").split("/")
         for d in range(1, len(parts)):
@@ -9576,7 +9576,7 @@ def selftest(d, selector_file=None):
     ok &= verify_card(out2, verify_plan(out2, [A, C, B]), sel, mode="full")
     print("== a loop of the same file mounted by someone else is refused by name")
     _t, st7b, cnt7b = Geometry.from_file(out2).part(7)
-    foreign = tempfile.mkdtemp(prefix="foreign_mnt_")
+    foreign = tempfile.mkdtemp(prefix="mkmulticard.foreign_mnt_")
     loop = _run(["losetup", "--find", "--show", "-o", str(st7b * SECTOR), "--sizelimit", str(cnt7b * SECTOR),
                  out2]).strip()
     try:

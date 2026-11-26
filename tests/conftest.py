@@ -112,6 +112,36 @@ HAS_BASH = _bash_usable()
 HAS_DOCKER = shutil.which("docker") is not None
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _private_temp_dir(tmp_path_factory):
+    """The temp folder is the session's own, inside pytest's (which keeps
+    the last few runs and drops the rest).
+
+    PAD-1596: code the tests drive makes its scratch with
+    ``tempfile.mkdtemp`` / ``gettempdir()``, and what a test did not clean
+    up stayed in the developer's real ``%TEMP%`` - 452 ``spike2_grow_*``
+    build folders of untitled test builds were found there, which the app's
+    own space keeper then counted as a user's leftovers.  Child processes
+    get it too (``TEMP`` / ``TMP`` / ``TMPDIR``)."""
+    import tempfile
+    d = tmp_path_factory.getbasetemp() / "systemp"
+    d.mkdir(exist_ok=True)
+    keys = ("TEMP", "TMP", "TMPDIR")
+    was = tempfile.tempdir, {k: os.environ.get(k) for k in keys}
+    tempfile.tempdir = str(d)
+    for k in keys:
+        os.environ[k] = str(d)
+    try:
+        yield str(d)
+    finally:
+        tempfile.tempdir = was[0]
+        for k, v in was[1].items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
+
+
 @pytest.fixture(autouse=True)
 def _isolate_rig_dirs(tmp_path_factory, monkeypatch):
     """Point both emulator rigs at an empty directory, for every test.
@@ -169,6 +199,16 @@ def _no_linux_root(monkeypatch):
     meant one.  A test of that launch pins ``_LINUX_ROOT`` itself."""
     from pinball_decryptor.webui import emulate_core
     monkeypatch.setattr(emulate_core, "_LINUX_ROOT", [None, True])
+
+
+@pytest.fixture(autouse=True)
+def _isolate_card_record(tmp_path_factory, monkeypatch):
+    """Every test gets its own empty record of what was written to which card
+    (rawdevice.CardRecord, PAD-1584), so no test reads or writes the
+    developer's own, and one test's card is not remembered in the next."""
+    monkeypatch.setenv("PAD_CARD_RECORD", str(
+        tmp_path_factory.mktemp("cards") / "card_writes.json"))
+    monkeypatch.delenv("PAD_WRITE_EVERY_CHUNK", raising=False)
 
 
 @pytest.fixture(autouse=True)
@@ -325,6 +365,9 @@ def _isolate_title_cache_session(tmp_path_factory):
     # PAD-1307: a test that starts a rig must never turn off timesyncd in the
     # developer's own distros (core/timesync.py runs real wsl.exe calls).
     os.environ["PAD_KEEP_TIMESYNC"] = "1"
+    # PAD-1595: a successful install prunes the payload download cache, so no
+    # test may ever see the developer's real one.
+    os.environ["PAD_PAYLOAD_DIR"] = str(tmp_path_factory.mktemp("payloads"))
 
 
 

@@ -89,13 +89,15 @@ EXTRA_CFGS = tuple(("mode%d.cfg" % i, 0o100644) for i in range(1, 64))
 #: PAD-1041: comp.cfg, Prolonged Competition on the start menu (pad_mode_runtime.c) - a whole install too.
 #: PAD-1280: records.cfg, the owner's records on the game's high scores (pad_mode_runtime.c "records of the
 #: owner's own") - a whole install too.
+#: PAD-1589: access.cfg, colour-blind insert colours and spoken scores (pad_mode_runtime.c "accessibility") - a whole
+#: install too.
 #: PAD-1204: scorefeed.cfg, each game's final scores posted to the owner's server (pad_mode_runtime.c "the score
 #: feed") - a whole install too.
 #: PAD-1382: settings.cfg, the settings sharing the MORE SETTINGS rows (pad_mode_runtime.c "more settings") - never
 #: alone: it comes with the cfg of a setting that shares them.
 EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 0o100644),
                ("picture.cfg", 0o100644), ("attract.cfg", 0o100644), ("coop.cfg", 0o100644),
-               ("idle.cfg", 0o100644), ("handicap.cfg", 0o100644), ("cabshow.cfg", 0o100644),
+               ("idle.cfg", 0o100644), ("handicap.cfg", 0o100644), ("access.cfg", 0o100644), ("cabshow.cfg", 0o100644),
                ("addcab.cfg", 0o100644),
                *(("cabrec%d.bin" % _n, 0o100644) for _n in range(8)),
                ("comp.cfg", 0o100644), ("scorefeed.cfg", 0o100644),
@@ -113,7 +115,7 @@ EXTRA_FILES = (("stock.cfg", 0o100644), ("clips.cfg", 0o100644), ("sounds.cfg", 
 CLIPS_FILE = "clips.cfg"
 #: the extra files that are each enough for an install without a mode (PAD-446, PAD-494, PAD-537)
 STANDALONE_FILES = (CLIPS_FILE, "sounds.cfg", "picture.cfg", "attract.cfg", "coop.cfg", "idle.cfg", "handicap.cfg",
-                    "cabshow.cfg", "comp.cfg", "scorefeed.cfg", "records.cfg", "scenes.cfg")
+                    "access.cfg", "cabshow.cfg", "comp.cfg", "scorefeed.cfg", "records.cfg", "scenes.cfg")
 #: image sets: a scene's variant beside scenes.cfg (scene_variants.file_name), any number of them; one an earlier
 #: install left and this one does not bring is removed too
 SCENE_PREFIX, SCENE_SUFFIX = "scn_", ".radium"
@@ -252,7 +254,7 @@ def install(card, so_path, cfg_path, port_path=None, workdir=None, extra_cfgs=()
                          % (1 + len(EXTRA_CFGS)))
     if not cfg_path and not assets and not set(STANDALONE_FILES) & {os.path.basename(x) for x in extras}:
         raise mk.Refused("no mode file, no code mode's assets, no clips.cfg, no sounds.cfg, no "
-                         "picture.cfg, no attract.cfg, no coop.cfg, no idle.cfg, no handicap.cfg, no comp.cfg, no "
+                         "picture.cfg, no attract.cfg, no coop.cfg, no idle.cfg, no handicap.cfg, no access.cfg, no comp.cfg, no "
                          "cabshow.cfg, no scorefeed.cfg and no records.cfg - "
                          "nothing has been written")
     if extra_cfgs and not cfg_path:
@@ -424,7 +426,8 @@ def main(argv=None):
                         "sounds.cfg, the music modes (PAD-494), picture.cfg, the picture "
                         "settings (PAD-537), attract.cfg, the attract items (PAD-782), coop.cfg, "
                         "co-op play (PAD-1017), idle.cfg, inactivity pausing the timers (PAD-1022), "
-                        "handicap.cfg, a handicap for each player (PAD-1033), cabshow.cfg, the card's "
+                        "handicap.cfg, a handicap for each player (PAD-1033), access.cfg, colour-blind inserts and "
+                        "spoken scores (PAD-1589), cabshow.cfg, the card's "
                         "expression light shows (PAD-1040), comp.cfg, Prolonged "
                         "Competition on the start menu (PAD-1041), scorefeed.cfg, each game's final "
                         "scores posted to the owner's server (PAD-1204), or records.cfg, the owner's "

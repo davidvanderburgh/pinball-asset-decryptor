@@ -643,6 +643,11 @@ if [ "$PROG" = /games/game ] && [ "$(readlink "$R/games/game")" = pad/padmode/pa
 fi
 [ -n "$PRELOAD" ] && PRELOAD="env LD_PRELOAD=$PRELOAD"
 [ -n "$PRELOAD" ] && [ "$DEVMODE" != kernel ] && PRELOAD="$PRELOAD PAD_S3_SPI_IN=/run/padspi"
+# PAD-1560: PAD_S3_I2C_TRACE=1 logs every amp-bus write to game.err ([s3dev] i2c)
+[ -n "$PRELOAD" ] && [ "${PAD_S3_I2C_TRACE:-0}" = 1 ] && PRELOAD="$PRELOAD PAD_S3_I2C_TRACE=1"
+# PAD-1560: the speakers follow the game's volume (s3dev.so reads the amp);
+# PAD_GAME_VOLUME=0 plays full level, as on Spike 2
+[ -n "$PRELOAD" ] && [ "${PAD_GAME_VOLUME:-1}" = 0 ] && PRELOAD="$PRELOAD PAD_GAME_VOLUME=0"
 # SOUND, only when asked (PAD_S3_AUDIO=1): rig runs are muted. s3alsa.so
 # writes the game's PCM, non-blocking, into $SD/audio/audio.fifo (bound at
 # /run/padaudio) and the format into audio.fmt; Spike 2's playaudio.sh plays

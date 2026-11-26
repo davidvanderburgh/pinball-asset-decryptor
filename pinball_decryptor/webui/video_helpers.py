@@ -24,6 +24,8 @@ import sys
 import tempfile
 import threading
 
+from ..core import preview_encoder as _preview_encoder
+
 # ---------------------------------------------------------------------------
 # Convert column values (MainWindow._VIDEO_CONV_*)
 # ---------------------------------------------------------------------------
@@ -493,20 +495,23 @@ def browser_proxy(path, fmt="mp4"):
         w, h = disp_size(info)
         tmp = out + ".part." + fmt
         if fmt == "webm":
+            enc = "libvpx"
             vargs = ["-c:v", "libvpx", "-deadline", "realtime",
                      "-cpu-used", "8", "-b:v", "1500k", "-pix_fmt", "yuv420p"]
             aargs = ["-c:a", "libvorbis", "-q:a", "4"]
             tail = ["-f", "webm"]
         else:
-            vargs = ["-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
-                     "-pix_fmt", "yuv420p", "-profile:v", "main"]
+            # PAD-1578: a preview never goes on a machine, so the PC's GPU
+            # encoder makes it when one works (x264 otherwise).
+            enc, vargs = _preview_encoder.h264_args(ffmpeg)
             aargs = ["-c:a", "aac", "-b:a", "160k"]
             tail = ["-movflags", "+faststart", "-f", "mp4"]
         creation = getattr(_video, "_CREATE_FLAGS", 0)
         backend = _video.backend_for(path)
-        try:
+
+        def _encode(vargs, hw):
             if backend is None:
-                cmd = [ffmpeg, "-y", "-v", "error", "-i", path,
+                cmd = [ffmpeg, "-y", "-v", "error"] + hw + ["-i", path,
                        "-vf", "scale=%d:%d:force_original_aspect_ratio="
                               "decrease,pad=ceil(iw/2)*2:ceil(ih/2)*2"
                        % (w, h)] + vargs + aargs + tail + [tmp]
@@ -519,6 +524,24 @@ def browser_proxy(path, fmt="mp4"):
             else:
                 _backend_proxy(ffmpeg, path, info, w, h, vargs, aargs, tail,
                                tmp, creation)
+
+        try:
+            with _preview_encoder.making():
+                # A backend clip arrives as raw frames: nothing for a GPU to
+                # decode.
+                hw = (_preview_encoder.decode_args(ffmpeg, info)
+                      if backend is None else [])
+                try:
+                    _encode(vargs, hw)
+                except RuntimeError:
+                    if enc in ("x264", "libvpx") and not hw:
+                        raise
+                    # The GPU let this clip down: the CPU makes it (x264 for
+                    # an MP4), and the GPU part is dropped for the run if it
+                    # no longer works.
+                    _preview_encoder.failed(ffmpeg, enc, hw[1] if hw else "")
+                    _encode(vargs if enc == "libvpx"
+                            else list(_preview_encoder.X264), [])
             os.replace(tmp, out)
         except subprocess.TimeoutExpired:
             raise RuntimeError("ffmpeg took too long")

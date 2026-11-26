@@ -15,6 +15,7 @@ the widget plumbing is gone.
 import os
 import re
 
+from ..core.checksums import HASH_THREADS as _CHECKSUM_HASH_THREADS
 from ..core.checksums import (NON_ASSET_DIRS, TRACKING_SIDECARS,
                               is_other_extract, md5_file)
 from ..core.staged_originals import ORIG_DIR
@@ -221,8 +222,8 @@ def walk_changes(assets_path, saved, *, hide_imported_cache, current,
     return changed
 
 
-#: how many files a change walk hashes at once
-HASH_THREADS = 4
+#: how many files a change walk hashes at once (the baseline's count)
+HASH_THREADS = _CHECKSUM_HASH_THREADS
 
 
 def _listings(assets_path):

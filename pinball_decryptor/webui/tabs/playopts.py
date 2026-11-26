@@ -40,7 +40,7 @@ class PlayOptionsTab(TabService):
         modes = self._modes()
         project = modes.project() if modes is not None else ""
         if modes is not None:
-            for name in ("_publish_handicap", "_publish_comp", "_publish_idle"):
+            for name in ("_publish_handicap", "_publish_comp", "_publish_idle", "_publish_access"):
                 try:
                     getattr(modes, name)(project)
                 except Exception:                           # noqa: BLE001 - that option just stays as it was

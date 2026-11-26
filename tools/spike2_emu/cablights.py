@@ -167,6 +167,52 @@ _NAMED = re.compile(r"-\s*(%s)\s*(?:\(\s*X\s*\d+\s*\))?\s*$"
                     % "|".join(sorted(NAMED_COLOURS, key=len, reverse=True)), re.I)
 
 
+#: PAD-1589: the color-blind presets' hue maps (pinball_decryptor/plugins/stern/accessibility.py PRESETS, tenths of a
+#: degree, closed round the wheel) - this window cannot import the app's package; tests/test_pad1589_accessibility.py
+#: holds the copies together
+CVD_MAP = {
+    "red_green": ((0, -50), (250, 1050), (500, 1550), (1200, 1900), (1800, 2100), (2400, 2600), (2750, 3350),
+                  (3000, 3400), (3600, 3550)),
+    "blue_yellow": ((0, 0), (250, 250), (500, 400), (1200, 1350), (1800, 2000), (2400, 2300), (2750, 2900),
+                    (3000, 3050), (3600, 3600)),
+}
+
+
+def _tdiv(a, b):
+    q = abs(a) // abs(b)
+    return q if (a >= 0) == (b > 0) else -q
+
+
+def cvd_remap(rgb, preset):
+    """PAD-1589: ``(r, g, b)`` as the color-blind *preset* shows it (accessibility.remap, byte for byte): the hue
+    moved, the brightest and dimmest parts kept."""
+    pts = CVD_MAP.get(preset)
+    r, g, b = (int(c) & 255 for c in rgb)
+    mx, mn = max(r, g, b), min(r, g, b)
+    d = mx - mn
+    if not pts or not d:
+        return r, g, b
+    if mx == r:
+        h = _tdiv(600 * (g - b), d)
+    elif mx == g:
+        h = _tdiv(600 * (b - r), d) + 1200
+    else:
+        h = _tdiv(600 * (r - g), d) + 2400
+    h %= 3600
+    o = h
+    for (a, oa), (z, oz) in zip(pts, pts[1:]):
+        if a <= h < z:
+            dd = (oz - oa) % 3600
+            if dd > 1800:
+                dd -= 3600
+            o = oa + _tdiv(dd * (h - a), z - a)
+            break
+    o %= 3600
+    sec, f = o // 600, o % 600
+    rise, fall = mn + d * f // 600, mx - d * f // 600
+    return ((mx, rise, mn), (fall, mx, mn), (mn, mx, rise), (mn, fall, mx), (rise, mn, mx), (mx, mn, fall))[sec]
+
+
 def named_colour(name):
     """(r, g, b) a one-colour lamp's name gives it ("TOP GI-BLU (x10)" ->
     blue), or None - the colour it glows in when the user set none (PAD-1144).

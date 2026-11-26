@@ -35,6 +35,7 @@ import tempfile
 from PIL import Image, ImageDraw
 
 from ..spooky.p3_video import find_ffmpeg
+from ...core import pad_temp
 
 
 # Suppress the cmd window Windows pops up for ffmpeg child processes
@@ -151,7 +152,7 @@ def render_pngs_to_mp4(png_paths, out_path, fps=DEFAULT_FPS):
         raise RuntimeError(
             "ffmpeg not found.  Install ffmpeg to assemble the "
             "browse MP4.")
-    tmp = tempfile.mkdtemp(prefix="williams_mp4_")
+    tmp = pad_temp.mkdtemp(prefix="williams_mp4_")
     try:
         for i, src in enumerate(png_paths):
             dst = os.path.join(tmp, f"frame_{i:06d}.png")
@@ -208,7 +209,7 @@ def render_group_to_mp4(data, offsets, out_path,
         raise RuntimeError(
             "ffmpeg not found.  Install ffmpeg to render Williams DMD "
             "animations to MP4.")
-    tmp = tempfile.mkdtemp(prefix="williams_dmd_")
+    tmp = pad_temp.mkdtemp(prefix="williams_dmd_")
     try:
         for i, off in enumerate(offsets):
             low = data[off:off + PLANE_BYTES]

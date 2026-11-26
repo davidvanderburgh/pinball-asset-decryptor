@@ -218,7 +218,7 @@ def probe(host, port=PORT, timeout=8):
     """Log in to *host* with this computer's key: ``{'lets_in', 'game', 'host_key', 'note'}``.  Nothing is
     remembered or changed."""
     import paramiko
-    from . import pad_ssh_key
+    from . import pad_ssh_key, remote_send
     res = dict(lets_in=False, game="", host_key=None, note="")
     try:
         sock = socket.create_connection((str(host), int(port)), timeout=timeout)
@@ -238,7 +238,7 @@ def probe(host, port=PORT, timeout=8):
         res["lets_in"] = True
         ch = t.open_session(timeout=timeout)
         ch.settimeout(timeout)
-        ch.exec_command("readlink /games/game")
+        ch.exec_command(remote_send.GAME_LINK)  # PAD-1587: a JJP machine names its game too
         out = b""
         while True:
             got = ch.recv(4096)

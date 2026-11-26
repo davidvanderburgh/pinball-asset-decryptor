@@ -1,4 +1,4 @@
-"""Read-only browser over a Stern Spike 2 card image (or raw device).
+"""Read-only browser over a Stern Spike 2 or Spike 3 card image (or raw device).
 
 Backs the GUI's Partition Explorer: open a ``.raw``/``.img`` card, list its MBR
 partitions, walk the ext4 filesystem(s), preview small text files, and extract
@@ -90,6 +90,9 @@ class Partition:
     kind: str           # 'ext' | 'fat' | 'extended' | 'other'
     browsable: bool     # ext4 the reader could open
     label: str          # human label for the tab
+    # PAD-1586: a Spike 3 card's LUKS2 partition, browsed through its
+    # decrypted view (read-only: nothing here writes through the encryption)
+    encrypted: bool = False
 
 
 @dataclass
@@ -134,6 +137,10 @@ class CardImage:
             self._source_path = (
                 None if rawdevice.is_device_path(source) else source)
         self._readers = {}                 # partition index -> Ext4Reader
+        # PAD-1586: a Spike 3 card (LUKS2 over ext4) unlocks with the card's
+        # key; *spike3_locked* says why its partitions could not be opened.
+        self.spike3 = False
+        self.spike3_locked = ""
         # Every read seeks the ONE shared handle, so two at once interleave
         # their seeks and the loser gets nonsense — a bogus FileNotFoundError
         # or a short struct unpack for a file that is plainly there.  The GUI
@@ -151,6 +158,9 @@ class CardImage:
 
     # ---- partitions ---------------------------------------------------------
     def _scan_partitions(self):
+        spike3_parts = self._scan_spike3()
+        if spike3_parts is not None:
+            return spike3_parts
         self._f.seek(0)
         mbr = self._f.read(512)
         parts = []
@@ -175,6 +185,76 @@ class CardImage:
                 kind, browsable, label = "other", False, "0x%02X" % ptype
             parts.append(Partition(index, ptype, lba, sectors, offset, size,
                                    kind, browsable, label))
+        return parts
+
+    # Roles of a Spike 3 card's encrypted partitions, in the words the tab
+    # shows (spike3._ROLE_BY_INDEX: disk order 2, 3, 5, 6).
+    _SPIKE3_ROLE_WORDS = {"rootfs": "system", "data": "data",
+                          "connectivity": "connectivity", "games": "games"}
+
+    def _scan_spike3(self):
+        """The partitions of a Stern Spike 3 card, or ``None`` for any other
+        card.  Its p2/p3/p5/p6 are LUKS2 over ext4: each is unlocked with
+        the card's key (``Spike3KeySource.discover``: the key beside the
+        image or the user's own) and browsed through the decrypted view the
+        Spike 3 extract reads.  Logical partitions are always listed (the
+        games partition is p6).  Without a key they are listed locked,
+        with the reason in :attr:`spike3_locked`."""
+        from . import spike3
+        from .spike3_keys import Spike3KeySource
+        try:
+            s3 = spike3.parse_partitions(self._f)
+        except Exception:
+            return None
+        if not spike3.is_spike3_card_parts(s3):
+            return None
+        self.spike3 = True
+        ks = None
+        try:
+            ks = Spike3KeySource.discover(
+                image_path=self._source_path,
+                image_id=(os.path.basename(self._source_path).split(".", 1)[0]
+                          if self._source_path else None))
+        except Exception as e:                       # noqa: BLE001
+            self.spike3_locked = "the key file could not be read (%s)" % e
+        if ks is None or not ks.has_any():
+            self.spike3_locked = self.spike3_locked or (
+                "no Spike 3 key for this card (add it on the Extract tab)")
+            ks = None
+        parts = []
+        for rec in s3:
+            index = rec["index"] - 1             # this class's 0-based slots
+            lba, sectors = rec["start_lba"], rec["sectors"]
+            offset, size = lba * 512, sectors * 512
+            ptype = rec["ptype"]
+            if rec.get("luks"):
+                role = spike3._ROLE_BY_INDEX.get(rec["index"], "")
+                if role == "" and rec is spike3.partition_for_role(s3, "games"):
+                    role = "games"
+                words = self._SPIKE3_ROLE_WORDS.get(role, "encrypted")
+                browsable = False
+                label = "Encrypted %s (locked)" % words
+                if ks is not None:
+                    try:
+                        self._readers[index] = spike3.open_partition_ext4(
+                            self._f, rec, ks, role=role or None)
+                        browsable = True
+                        label = "Encrypted %s (ext4)" % words
+                    except Exception as e:           # noqa: BLE001
+                        label = "Encrypted %s (key did not open it)" % words
+                        self.spike3_locked = self.spike3_locked or str(e)
+                parts.append(Partition(index, ptype, lba, sectors, offset,
+                                       size, "ext", browsable, label,
+                                       encrypted=True))
+                continue
+            if ptype in _FAT_TYPES:
+                kind, label = "fat", "FAT (signed boot)"
+            elif ptype in _EXTENDED_TYPES:
+                kind, label = "extended", "Extended"
+            else:
+                kind, label = "other", "0x%02X" % ptype
+            parts.append(Partition(index, ptype, lba, sectors, offset, size,
+                                   kind, False, label))
         return parts
 
     def partitions(self):
@@ -399,6 +479,7 @@ class CardImage:
         the platform can't mount ext4.
 
         Returns ``(n_bytes, sidx_refreshed)``."""
+        self._refuse_encrypted(part_index)
         new_size = os.path.getsize(src_path)
         if allow_resize and new_size != self.file_size(part_index, path):
             return self._resize_file(part_index, path, src_path, new_size, log)
@@ -482,6 +563,7 @@ class CardImage:
         directly as *new* (bytes) — used by callers that generate the bytes in
         memory (e.g. the adjustment-default patcher).  Same exact-size rule and
         ``.sidx`` refresh.  Returns ``(n_bytes, sidx_refreshed)``."""
+        self._refuse_encrypted(part_index)
         if not self._source_path:
             raise ValueError(
                 "replace requires a card image file (not a raw stream)")
@@ -752,6 +834,17 @@ class CardImage:
                 "this game's built-in %d (on a fresh card or after a factory "
                 "reset)." % (want, spot["value"]), "info")
         return out
+
+    def _refuse_encrypted(self, part_index):
+        """A Spike 3 partition is browsed through its decryption only: the
+        card is changed by Write (spike3_write), which re-encrypts what it
+        touches, never by a byte patch here."""
+        part = next((p for p in self._parts if p.index == part_index), None)
+        if part is not None and part.encrypted:
+            raise ValueError(
+                "this partition is encrypted (a Spike 3 card): it can be "
+                "browsed and its files extracted, but a file is changed on "
+                "the card with the Replace tabs and Write")
 
     # ---- lifecycle ----------------------------------------------------------
     def close(self):

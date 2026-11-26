@@ -88,6 +88,23 @@ def set_colour(game, name, colour):
     return table(game)
 
 
+def cvd_preview():
+    """PAD-1589: the color-blind preview the Light shows view and the emulator's playfield window draw the RGB
+    inserts in (accessibility.PRESETS' key), ``""`` for none."""
+    from .accessibility import PRESETS
+    p = _load().get("cvd_preview")
+    return p if p in PRESETS else ""
+
+
+def set_cvd_preview(preset):
+    """Set (or, with anything not a preset, clear) the color-blind preview; returns it."""
+    from .accessibility import PRESETS
+    st = _load()
+    st["cvd_preview"] = preset if preset in PRESETS else ""
+    _save(st)
+    return st["cvd_preview"]
+
+
 def look():
     """The Real LEDs / All RGB switch: "real" until it is first switched."""
     v = _load().get("insert_look")

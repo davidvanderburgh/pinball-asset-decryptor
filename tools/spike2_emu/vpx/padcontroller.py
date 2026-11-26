@@ -489,6 +489,7 @@ class VpxMap:
         self.solenoids = {}                 # number -> (node, index)
         self.lamp_groups = {}               # number -> [(node, index), ...]
         self.raw_lamp_rewrite = {}          # legacy number -> one LED read as its raw level
+        self.led_lamps = True               # every LED also as 1000 + node * 100 + index
         self.rgb_groups = set()             # numbers whose LEDs are an insert's R, G, B
         self.rgb_order = {}                 # number -> "BGR" etc. when not listed R, G, B (PAD-1097)
         self.fakes = {}                     # name -> dict (switch_fakes)
@@ -530,6 +531,12 @@ class VpxMap:
             if k != "_":
                 self.switch_rewrite[int(k)] = int(v)
         self.sol_max = int(m.get("solenoid_max", 68))
+        # every LED is also reported as its own number, 1000 + node * 100 +
+        # index, for a table that names LEDs directly (PAD-859). A SAM table
+        # whose LampTimer indexes its own lamp arrays (Walking Dead's are 220
+        # long) with every number ChangedLamps hands it stops on those with
+        # "Subscript out of range" (PAD-1560): its map says "led_lamps": false
+        self.led_lamps = bool(m.get("led_lamps", True))
         self.raw_lamp_rewrite = {}
         for k, v in m.get("raw_lamp_rewrite", {}).items():
             if k == "_":
@@ -2184,8 +2191,92 @@ class Bridge:
         for n, leds in m.dof_flashers.items():
             level = max(self._led_level(data, nd, ix) for nd, ix in leds)
             self._dof_set("S", n, level if level >= LAMP_ON else 0)
-        for n, v in self._cab_events(data):
+        ev = self._cab_events(data)
+        for n, v in ev:
             self._dof_set("E", n, v)
+        self._note_strips("PAD's own DOF", ev)
+        self._note_shaker("PAD's own DOF")
+
+    #: how often the controller log says what the strips sent DOF (PAD-1603)
+    STRIP_LOG_S = 30.0
+
+    def _note_strips(self, route, events, now=None):
+        """The light strips in the controller log (PAD-1603): the first time
+        they light, and every STRIP_LOG_S what they showed and how many
+        changes went to DOF, or that the game kept them dark. Mike St P's
+        report after a minute of Jaws named the strips' E numbers and nothing
+        of what was sent on them, so it could not say whether PAD or the DOF
+        config left his side LEDs dark."""
+        base, parts = self.cab.get("dof_strips"), self.cab.get("strip_parts", 1)
+        if not base or not getattr(self, "cab_strips", None):
+            return
+        now = time.monotonic() if now is None else now
+        top = base + 2 * parts * len(padcabinet.STRIP_COLOURS)
+        st = {n: v for n, v in events if base <= n < top}
+        sl = getattr(self, "_strip_log", None)
+        if sl is None:
+            sl = self._strip_log = {"t": now, "prev": {}, "sent": 0, "polls": 0, "lit": 0,
+                                    "shown": [], "first": True}
+        sl["sent"] += sum(1 for n, v in st.items() if sl["prev"].get(n) != v)
+        sl["prev"] = st
+        sl["polls"] += 1
+        lit = padcabinet.strip_lit(base, parts, sorted(st.items()))
+        if lit:
+            sl["lit"] += 1
+            for _n, w, _v in lit:
+                if w not in sl["shown"]:
+                    sl["shown"].append(w)
+            if sl["first"]:
+                sl["first"] = False
+                log("DOF strips: first lit, %s, to %s" % (
+                    ", ".join("E%d = %d (%s)" % (n, v, w) for n, w, v in lit), route))
+        if now - sl["t"] < self.STRIP_LOG_S:
+            return
+        secs = now - sl["t"]
+        if sl["lit"]:
+            log("DOF strips, last %.0f s, to %s: %d changes sent, lit in %d of %d polls, showed %s; now %s"
+                % (secs, route, sl["sent"], sl["lit"], sl["polls"], ", ".join(sl["shown"]),
+                   ", ".join("E%d = %d (%s)" % (n, v, w) for n, w, v in lit) or "dark"))
+        else:
+            log("DOF strips, last %.0f s, to %s: the game lit none of its %s, so E%d-E%d stayed 0"
+                % (secs, route, "blades" if self.cab_strips["source"] == "blades" else "speaker lights",
+                   base, top - 1))
+        sl.update(t=now, sent=0, polls=0, lit=0, shown=[])
+
+    def _note_shaker(self, route, now=None):
+        """The shaker motor in the controller log (PAD-1608): the first time
+        the game runs it, and every STRIP_LOG_S how often and how long it ran
+        and where that went - DOF as the Shaker box's E number, or nowhere
+        with the box off. Mike St P asked for the shaker on Pro games, which
+        run it exactly as the LE's do (the same calls, SHAKER MOTOR 4 as they
+        come); his report could not show whether the game had shaken at all."""
+        key = getattr(self, "cab_shaker", None)
+        if not key:
+            return
+        now = time.monotonic() if now is None else now
+        on = bool(self.sol_state.get(self._sol_num(key)))
+        n = (getattr(self, "cab", None) or {}).get("dof_shaker")
+        sent = (("sent as E%d to %s" % (n, route)) if n else
+                "not sent: the Shaker box on the Visual Pinball tab's Cabinet row is off (192 suggested)")
+        sh = getattr(self, "_shake_log", None)
+        if sh is None:
+            sh = self._shake_log = {"t": now, "on": False, "since": now, "runs": 0, "ms": 0.0, "first": True}
+        if on and not sh["on"]:
+            sh["runs"] += 1
+            sh["since"] = now
+            if sh["first"]:
+                sh["first"] = False
+                log("DOF shaker: the game ran its shaker motor (node %d coil %d), %s" % (key[0], key[1], sent))
+        elif sh["on"] and not on:
+            sh["ms"] += (now - sh["since"]) * 1000.0
+        sh["on"] = on
+        if now - sh["t"] < self.STRIP_LOG_S:
+            return
+        ms = sh["ms"] + ((now - sh["since"]) * 1000.0 if on else 0.0)
+        if sh["runs"]:
+            log("DOF shaker, last %.0f s: the game ran it %d time%s, %.1f s in all, %s"
+                % (now - sh["t"], sh["runs"], "" if sh["runs"] == 1 else "s", ms / 1000.0, sent))
+        sh.update(t=now, runs=0, ms=0.0, since=now)
 
     def _cab_events(self, data):
         """[(E number, value)] of the cabinet's own DOF events: the buttons'
@@ -2211,7 +2302,10 @@ class Bridge:
         its own (PAD-1480): an original table PAD drives (vpxshadow) keeps the
         DOF its controller.vbs started inside B2S.Server, and Mike St P's Jaws
         shaker never reached it."""
-        for n, v in self._cab_events(data):
+        ev = self._cab_events(data)
+        self._note_strips("the DOF in B2S.Server", ev)
+        self._note_shaker("the DOF in B2S.Server")
+        for n, v in ev:
             if self._b2s_dof.get(n) != v:
                 if not self._b2s_dof:
                     log("DOF: the cabinet's E events (start E%s, lockdown E%s, shaker E%s, strips %s) go to"
@@ -2220,6 +2314,23 @@ class Bridge:
                                                     self._strips_words()))
                 self._b2s_dof[n] = v
                 self.b2s.data(n, v)
+
+    #: ~10 s of polls: by then a table has started DOF or handed B2S.Server over
+    E_ROUTE_POLLS = 1250
+
+    def _tell_no_e_route(self):
+        """PAD-1571: say so, once, when the cabinet's E events are set but
+        nothing carries them: no DOF of PAD's own and no B2S.Server handed
+        over. Mike St P's Jaws (PAD).vpx, patched before v1.552.2 (PAD-1480),
+        never handed its B2S.Server over: the table's own DOF worked, the
+        shaker and the light strips stayed dark, and the log said nothing."""
+        cab = getattr(self, "cab", None) or {}
+        if not any(cab.get(k) for k in ("dof_start", "dof_lockdown", "dof_shaker", "dof_strips")):
+            return
+        log("DOF: the cabinet's E events (start E%s, lockdown E%s, shaker E%s, strips %s) go nowhere:"
+            " PAD hosts no DOF for this table and it handed no B2S.Server over (a table patched before"
+            " v1.552.2: Patch it again)" % (cab.get("dof_start") or "-", cab.get("dof_lockdown") or "-",
+                                           cab.get("dof_shaker") or "-", self._strips_words()))
 
     def b2s_attach(self, obj, direct=False):
         """PADSPIKE2.vbs's B2S.Server, once it runs (PAD-1304). A second
@@ -2610,6 +2721,8 @@ class Bridge:
             self.cab_strips = padcabinet.cabinet_strips(tables_dir)
         except Exception:                                   # noqa: BLE001
             self.cab_strips = None
+        self._strip_log = None              # PAD-1603: a fresh strip log a run
+        self._shake_log = None              # PAD-1608: and a fresh shaker log
         bulbs = self.cab["gi_bulbs"].get(self.title, [])
         log("cabinet lights: %s; DOF start E%s, lockdown E%s, shaker E%s (%s), strips %s; BACKBOX GI bulbs: %s"
             % (", ".join("%s %s" % (k, v) for k, v in sorted(self.cab_leds.items())) or "none named",
@@ -3496,6 +3609,8 @@ class Bridge:
                 self._poll_b2s(data)
                 if not (self.dof and self.dof.up):
                     self._poll_b2s_dof(data)
+            elif not (self.dof and self.dof.up) and self.polls == self.E_ROUTE_POLLS:
+                self._tell_no_e_route()
 
     def _poll_once_s1(self):
         """The Spike 1 rig's block (s1bridge), or the Spooky board's in the
@@ -3536,7 +3651,7 @@ class Bridge:
                                                   else rm.lamp_rgb(lamps, *leds[0]))))
                 else:
                     self._lamp_set(n, 1)
-            for node in range(rm.MAX_NODES):
+            for node in range(rm.MAX_NODES if self.map.led_lamps else 0):
                 for idx in range(rm.MAX_INDEX):
                     n = lamp_number(node, idx)
                     if n in self.map.lamp_groups:
@@ -3614,7 +3729,7 @@ class Bridge:
                 self._lamp_set(n, rgb_value(*rgb_levels(levels, getattr(self.map, "rgb_order", {}).get(n))))
             else:
                 self._lamp_set(n, 1)
-        for node in range(16):
+        for node in range(16 if self.map.led_lamps else 0):
             base = 20 + node * 96
             for idx in range(96):
                 n = lamp_number(node, idx)

@@ -31,6 +31,7 @@ import os
 
 from . import dmd_render
 from . import wpc_decode
+from ...core import pad_temp
 
 
 # How many image indices to try beyond the last known valid one
@@ -391,7 +392,7 @@ def _render_scene_sequence_mp4(group, group_idx, anim_dir,
     """
     import shutil as _sh
     import tempfile
-    tmp = tempfile.mkdtemp(prefix="williams_seq_")
+    tmp = pad_temp.mkdtemp(prefix="williams_seq_")
     try:
         def lit_count(triple):
             _, low, high = triple
@@ -436,7 +437,7 @@ def _render_animation_mp4(frames, sub, anim_dir,
     """
     import shutil as _sh
     import tempfile
-    tmp = tempfile.mkdtemp(prefix="williams_anim_")
+    tmp = pad_temp.mkdtemp(prefix="williams_anim_")
     try:
         planes = _planes_for_animation(frames)
         if not planes:

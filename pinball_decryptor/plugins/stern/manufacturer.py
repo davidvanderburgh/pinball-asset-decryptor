@@ -199,6 +199,17 @@ _SPIKE3_CAPS = Capabilities(
     # PAD-1263: several Spike 3 card images on one card with a boot menu
     # (the Multi-boot tab's "s3" platform, tools/spike3_emu/mks3multi.py)
     multiboot=True,
+    # PAD-1586: the Mod Pack tab (export / import), its Move Your Mods
+    # section (transfer, one-click port, What's new) and the Partition
+    # Explorer.  A Spike 3 project is laid out as Spike 2's (the same
+    # .staged_changes.json, text/strings.tsv, audio/idxNNNN.wav and
+    # checksum baseline), so the folder-to-folder code is shared; the port
+    # extracts and writes with the era's own pipelines.  The explorer
+    # unlocks the card's LUKS2 partitions with its key and browses them
+    # read-only (explorer.CardImage._scan_spike3).
+    modpack=True,
+    mod_transfer=True,
+    partition_explorer=True,
 )
 
 # Capture-only capabilities for the Whitestar era (no write/replace/Direct-SD
@@ -1133,11 +1144,6 @@ class SternManufacturer(Manufacturer):
         kept after), the same port a Write or Try it would use."""
         from . import port_derive, title_reader
         from .mode_project import list_modes, title_label
-        try:
-            game, version, elf = title_reader.game_program(raw)
-        except Exception as e:                       # noqa: BLE001
-            return "the game program could not be read (%s)" % e
-        label = title_label(game, version)
         n = 0
         if project:
             try:
@@ -1146,6 +1152,14 @@ class SternManufacturer(Manufacturer):
                 n = 0
         yours = ("this project's %d mode%s" % (n, "" if n == 1 else "s")
                  if n else "modes")
+        from .mode_project import card_arch
+        if card_arch(raw) == "a64":
+            return self._spike3_mode_news(raw, yours)
+        try:
+            game, version, elf = title_reader.game_program(raw)
+        except Exception as e:                       # noqa: BLE001
+            return "the game program could not be read (%s)" % e
+        label = title_label(game, version)
         pr = port_derive.ensure_port(elf, game, version, progress=progress,
                                      cancel=cancel)
         if not pr.path:
@@ -1162,6 +1176,26 @@ class SternManufacturer(Manufacturer):
                 "this PC. Press Try it once on the Modes tab before a Write, "
                 "so they have run in the emulator before they go on a card."
                 % (yours[0].upper() + yours[1:], label))
+
+    @staticmethod
+    def _spike3_mode_news(raw, yours):
+        """:meth:`mode_news` for a Spike 3 card (PAD-1586): its game program
+        is the 64-bit ARM one, so the answer is whether a Spike 3 port is
+        there for its build (ports/spike3, or one worked out on this PC);
+        the card's title and version come from its own index, read through
+        the card's encryption."""
+        from .mode_project import (probe_card_title, profile_for_card,
+                                   title_label)
+        game, version = probe_card_title(raw)
+        if not game:
+            return ("the card's game could not be read (is its Spike 3 key "
+                    "on this PC?)")
+        label = title_label(game, version)
+        Yours = yours[0].upper() + yours[1:]
+        if profile_for_card(game, version, arch="a64") is None:
+            return ("%s can't run on %s yet: the app has no port for that "
+                    "Spike 3 build." % (Yours, label))
+        return "%s run on %s." % (Yours, label)
 
     def compare_folders(self, dir_a, dir_b, progress=None, cancel=None):
         # The decoded sounds pair by slot and past the codec's lead-in, the

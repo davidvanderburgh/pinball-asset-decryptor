@@ -102,6 +102,16 @@ def disks():
         ]
     except Exception:                                   # noqa: BLE001
         pass
+    # PAD-1599: the previous Linux, once the app's leftovers in it are gone
+    # and its disk file still owes the space (old_distro: the press found
+    # WSL busy).  ``old`` names it: no slack rule, it was trimmed already.
+    try:
+        from . import old_distro
+        out += [{"name": "%s (what the app left there)" % o["name"],
+                 "vhdx": o["vhdx"], "mount": None, "old": o["name"]}
+                for o in old_distro.owed()]
+    except Exception:                                   # noqa: BLE001
+        pass
     seen, keep = set(), []
     for d in out:
         try:
@@ -123,10 +133,12 @@ def due(now=None, st=None, disk_list=None):
         return False
     now = time.time() if now is None else now
     st = space_keeper.load_state() if st is None else st
+    dl = disks() if disk_list is None else disk_list
+    if any(d.get("old") for d in dl):
+        return True                     # owed since a press (PAD-1599)
     if now - float(st.get("giveback_checked") or 0) \
             < space_keeper.GIVEBACK_EVERY_SECS:
         return False
-    dl = disks() if disk_list is None else disk_list
     return any(d["size"] >= _slack_bytes() for d in dl)
 
 
@@ -345,8 +357,9 @@ def run(force=False, dry_run=False, now=None, disk_list=None, release=None,
     if not force and not due(now, disk_list=dl):
         return {"skipped": "not due"}
     slack = _slack_bytes()
-    big = [d for d in dl if d["size"] >= slack]
-    if not big:
+    owed = [d for d in dl if d.get("old")]
+    big = [d for d in dl if not d.get("old") and d["size"] >= slack]
+    if not big and not owed:
         space_keeper.record_giveback(checked=now)
         return {"skipped": "no disk is big enough to hold %s spare" % _gb(slack)}
 
@@ -383,6 +396,10 @@ def run(force=False, dry_run=False, now=None, disk_list=None, release=None,
              % (d["name"], _gb(d["size"]), _gb(u), _gb(d["size"] - u)))
         if d["size"] - u >= slack:
             todo.append(d)
+    for d in owed:
+        _say("%s: %s file, its leftovers removed - giving it back"
+             % (d["name"], _gb(d["size"])))
+        todo.append(d)
     if not todo:
         space_keeper.record_giveback(checked=now)
         _say("nothing holds %s more than it uses" % _gb(slack))
@@ -423,6 +440,9 @@ def run(force=False, dry_run=False, now=None, disk_list=None, release=None,
                 after = before
             if err is not None:
                 _say("%s: not compacted (%s)" % (d["name"], err))
+            elif d.get("old"):
+                from . import old_distro
+                old_distro.done(d["old"], before, after)
             _say("%s: %s -> %s" % (d["name"], _gb(before), _gb(after)))
             done.append({"name": d["name"], "before": before, "after": after})
     freed = sum(max(0, x["before"] - x["after"]) for x in done)
@@ -500,10 +520,36 @@ def helper_main(argv):
         _wait_pid(pid, APP_EXIT_WAIT_S)
         # the app's last wsl.exe calls (the emulators' stop) settle first
         time.sleep(5)
-        run()
+        _off_main_thread(run)
     except Exception as e:                              # noqa: BLE001
         _say("failed: %s" % e)
     return 0
+
+
+def _off_main_thread(fn):
+    """Run *fn* on a thread of its own and wait for it.
+
+    PAD-1599: on the MAIN thread ``runtime.status()`` never asks wsl.exe (the
+    guard that keeps a UI from freezing), so ``runtime.wsl_distro()`` answered
+    None and every lookup fell back to the machine's DEFAULT distro: the
+    helper listed the user's own Ubuntu as "the app's Linux", ran its busy
+    scan and fstrim there, and compacted it (David's record: "Ubuntu
+    217 -> 206 GB") while PAD-Runtime counted as another distro running.
+    The helper has no UI to freeze, so it asks from a worker thread."""
+    import threading
+    box = {}
+
+    def _go():
+        try:
+            box["out"] = fn()
+        except BaseException as e:                      # noqa: BLE001
+            box["err"] = e
+    t = threading.Thread(target=_go, name="pad-disk-giveback")
+    t.start()
+    t.join()
+    if "err" in box:
+        raise box["err"]
+    return box.get("out")
 
 
 __all__ = ["run", "due", "disks", "start_after_close", "helper_main",

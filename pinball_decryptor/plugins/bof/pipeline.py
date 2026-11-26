@@ -1325,9 +1325,9 @@ class ModifyPipeline(_BasePipeline):
         # is local.  Either way, we copy to a Windows-side temp file
         # for the packer.
         local_tmp_in = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".x86_64").name
+            prefix="pad_bof_", delete=False, suffix=".x86_64").name
         local_tmp_out = tempfile.NamedTemporaryFile(
-            delete=False, suffix=".x86_64").name
+            prefix="pad_bof_", delete=False, suffix=".x86_64").name
         try:
             self._check_cancel()
             # cp via executor — fastest path on macOS, acceptable on WSL.

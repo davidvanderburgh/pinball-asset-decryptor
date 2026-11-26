@@ -321,6 +321,11 @@ class Modes:
     #: PAD-1317: the co-op awards ceremony's music (a WAV, coop_play.ceremony_audio), on the intro's carrier (a build
     #: sets it; never saved)
     ceremony: str = ""
+    #: PAD-1589: the spoken scores' number words, ``[(word number, WAV)]`` (accessibility.WORDS), on a carrier of their
+    #: own: its slot and the build's carrier ``{"request", "slot"}`` (a build sets them; never saved)
+    speak: list = field(default_factory=list)
+    speak_rel: str = ""
+    speak_plan: dict = field(default_factory=dict)
 
     @property
     def coop(self):
@@ -332,7 +337,7 @@ class Modes:
     def any(self):
         """Whether a build has anything of these to carry: a music mode, a sound in turn or a
         sound for the flipper buttons in attract (PAD-945: or a sound on a shot in a game mode)."""
-        return bool(self.count or self.turns or self.attract or self.jukebox or self.shots or self.coop)
+        return bool(self.count or self.turns or self.attract or self.jukebox or self.shots or self.coop or self.speak)
 
     @property
     def count(self):
@@ -378,13 +383,14 @@ class Modes:
                    if self.shot_rel else [])
                 + ([(self.intro_rel, INTRO_MODE, self.intro)] if self.intro_rel and self.intro else [])
                 + ([(self.intro_rel, INTRO_MODE + int(n), f) for n, f in self.picks] if self.intro_rel else [])
-                + ([(self.intro_rel, CEREMONY_MODE, self.ceremony)] if self.intro_rel and self.ceremony else []))
+                + ([(self.intro_rel, CEREMONY_MODE, self.ceremony)] if self.intro_rel and self.ceremony else [])
+                + ([(self.speak_rel, speak_mode(k), f) for k, f in self.speak] if self.speak_rel else []))
 
     def level(self, rel, mode):
         """Mode *mode*'s file's loudness offset in dB for slot *rel* (0: matched to the slot's
         sound), or ``None`` for a project saved before mode files had their own. A file in turn
         has a loudness of its own too (PAD-638: ``turn_levels``), 0 unless one was set."""
-        if is_juke(mode) or is_shot(mode) or is_intro(mode):
+        if is_juke(mode) or is_shot(mode) or is_intro(mode) or is_speak(mode):
             return 0
         if is_mode_turn(mode):
             m, k = mode_turn_of(mode)
@@ -462,6 +468,33 @@ def is_intro(mode):
     return INTRO_MODE <= int(mode) <= CEREMONY_MODE
 
 
+#: PAD-1589: the spoken scores' word k (accessibility.WORDS, 0..SPEAK_MAX - 1) is built under SPEAK_BASE + k: above the
+#: co-op sounds, below the jukebox (built as a file in turn, matched to the carrier's loudness, never cut)
+SPEAK_BASE = 4100
+SPEAK_MAX = 64
+
+
+def speak_mode(k):
+    """PAD-1589: the pseudo mode spoken word *k* is built under."""
+    return SPEAK_BASE + int(k)
+
+
+def is_speak(mode):
+    """PAD-1589: one of the spoken scores' words."""
+    return SPEAK_BASE <= int(mode) < SPEAK_BASE + SPEAK_MAX
+
+
+def speak_of(mode):
+    """PAD-1589: the word number a sound built under *mode* says."""
+    return int(mode) - SPEAK_BASE
+
+
+def _speak_what(mode):
+    from .accessibility import WORDS
+    k = speak_of(mode)
+    return "the spoken word \"%s\"" % (WORDS[k] if 0 <= k < len(WORDS) else k)
+
+
 def is_ceremony(mode):
     """PAD-1317: the co-op awards ceremony's music."""
     return int(mode) == CEREMONY_MODE
@@ -520,6 +553,8 @@ def turn_of(mode):
     """File k of a slot's sounds in turn, from its pseudo mode (PAD-638: of a music mode's too)."""
     if is_intro(mode):
         return 1
+    if is_speak(mode):
+        return 1
     if is_juke(mode):
         return int(mode) - JUKE_BASE
     if is_shot(mode):
@@ -533,6 +568,8 @@ def who(mode):
     """The log lines' heading for a file built under *mode*."""
     if is_intro(mode):
         return "Co-op awards" if is_ceremony(mode) else "Co-op characters" if picked_of(mode) else "Co-op intro"
+    if is_speak(mode):
+        return "Spoken scores"
     if is_juke(mode):
         return "Jukebox"
     if is_shot(mode):
@@ -547,6 +584,8 @@ def what(rel, mode, name=""):
     base = os.path.basename(str(rel).replace("\\", "/"))
     if is_intro(mode):
         return _coop_what(mode)
+    if is_speak(mode):
+        return _speak_what(mode)
     if is_juke(mode):
         return "song %d" % turn_of(mode)
     if is_shot(mode):
@@ -568,6 +607,8 @@ def tag(rel, mode):
     base = os.path.basename(str(rel).replace("\\", "/"))
     if is_intro(mode):
         return _coop_what(mode)
+    if is_speak(mode):
+        return _speak_what(mode)
     if is_juke(mode):
         return "jukebox song %d" % turn_of(mode)
     if is_shot(mode):
@@ -590,6 +631,8 @@ def when(mode):
     if is_intro(mode):
         return ("when a teammate picks co-op character %d" % picked_of(mode) if picked_of(mode)
                 else "as a co-op or team game's intro plays")
+    if is_speak(mode):
+        return "when the machine says a score"
     if is_juke(mode):
         return "when the jukebox draws it for a song mode"
     if is_shot(mode):
@@ -1272,7 +1315,7 @@ def cut(wav, frames):
 
 # ---- the runtime's table ------------------------------------------------------------------------
 def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(), randoms=(),
-             attract=None, jukebox=None, shots=None, intro=None):
+             attract=None, jukebox=None, shots=None, intro=None, speak=None):
     """``sounds.cfg``: *live* the setting's value address, *count* the modes (0: no MUSIC MODE,
     the card has sounds in turn only), *sounds* ``[(mode, sound id, descriptor bytes)]`` (a
     *only* when the card carries no modes, *turns* ``[(k, slot key, file k's key)]`` the sounds in
@@ -1355,6 +1398,9 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
         host, ms = intro["ceremony"]
         lines.append("ccer\t%d\t%s\t%s\t%d" % (int(intro["request"]), bytes(intro["key"]).hex(), bytes(host).hex(),
                                                 int(ms)))
+    for k, host, ms in (speak or {}).get("words") or ():     # PAD-1589: a spoken score's word
+        lines.append("sword\t%d\t%d\t%s\t%s\t%d" % (int(k), int(speak["request"]), bytes(speak["key"]).hex(),
+                                                     bytes(host).hex(), int(ms)))
     lines += list(record)
     return "\n".join(lines) + "\n"
 
@@ -1422,8 +1468,8 @@ def card_record(modes, used):
         if not u.get("lines"):
             continue
         m = int(u["mode"])
-        if is_intro(m):                             # PAD-1114: it comes from the intro video, kept by co-op's own
-            continue
+        if is_intro(m) or is_speak(m):              # PAD-1114: it comes from the intro video, kept by co-op's own
+            continue                                # (PAD-1589: the spoken words, made by every Write)
         if is_juke(m):
             k = turn_of(m)
             src = modes.jukebox[k - 1] if 0 < k <= len(modes.jukebox) else ""

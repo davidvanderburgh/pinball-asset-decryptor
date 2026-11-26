@@ -284,7 +284,7 @@ def test_it_never_waits_on_the_network_inside_the_game():
 def test_it_arms_before_the_score_gate_and_alone_keeps_insider_connected():
     src = RUNTIME.read_text(encoding="utf-8")
     assert src.index("feed_arm();") < src.index("if (!insider_arm()) return;")
-    assert "(cabs_only && n_cabs))\n         || feed_cfg_only())" in src
+    assert "(cabs_only && n_cabs))\n         || feed_cfg_only() || acc_cfg_only())" in src   # PAD-1589: and accessibility
     arm = R._lift(src, "static void feed_arm(void)")
     assert 'hook(bus->addr, on_feed_dispatch)' in arm and 'hook(fn("tick"), on_feed_tick)' in arm
     assert 'event_bus_id("game_over")' in arm
@@ -505,7 +505,7 @@ def test_the_play_options_tab_asks_the_modes_service_to_publish(monkeypatch):
     tab.window = type("W", (), {"service": lambda self, ns: Modes() if ns == "modes" else None})()
     tab.on_show()
     assert sorted(said) == sorted([("_publish_handicap", "P"), ("_publish_comp", "P"),
-                                   ("_publish_idle", "P")]) and state["project"] == "P"
+                                   ("_publish_idle", "P"), ("_publish_access", "P")]) and state["project"] == "P"
 
 
 def test_the_network_tab_asks_the_modes_service_for_the_score_feed(monkeypatch):

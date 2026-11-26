@@ -18,6 +18,12 @@ have clearly stopped being used:
     the Windows temp folder's PAD folders - once nothing inside has changed
     for :data:`STALE_SECS` (a day).  A run that is still going writes all
     the time; a day of silence is a run that ended without cleaning up.
+    PAD-1596: the temp folder's names are core/pad_temp.py's (every one the
+    app makes); a folder whose maker still runs is never taken, and one
+    whose maker has ended goes after :data:`RECENT_SECS` (an hour).
+  * A KEPT CACHE'S ENTRIES in the temp folder (Stern's card copies, clips
+    and compiled objects; the card menu previews) not used for 30 days (7
+    for the previews), and a half-written one whose writer has gone.
   * HALF-UNPACKED GAMES (``*.partial`` / ``*.part`` in an emulator's cache)
     on the same rule.
   * AN EMULATOR'S UNPACKED GAME not started for :data:`UNUSED_SECS` (30
@@ -35,7 +41,7 @@ NEVER: anything of an emulator whose game is running, anything a process has
 open or is working in, anything started in the last hour, settings and high
 scores (``nv*``), save states, the emulators' own Python, a folder the rig
 did not make (``Leftover:`` rows are offered in the window, never removed
-here), and Stern's deliberate build caches in the temp folder.
+here), and the app's deliberate caches in the temp folder as a whole.
 
 ROOM LEFT IS NOT ``df``.  WSL's disk is a file that grows on the Windows
 drive; its own ``df`` reports the virtual size (often 1 TB) and says nothing
@@ -55,7 +61,7 @@ import shutil
 import threading
 import time
 
-from . import host_temp, wsl_disk
+from . import host_temp, pad_temp, wsl_disk
 
 log = logging.getLogger(__name__)
 
@@ -79,7 +85,8 @@ GIVEBACK_EVERY_SECS = 7 * 24 * 3600
 #: a rig's live logs or settings (jjp_devices.json, jjp_ui.log).
 _MIN_LEFTOVER = 1 << 20
 
-#: Never removed from the temp folder: Stern keeps these on purpose.
+#: Never removed whole from the temp folder: the app keeps these on purpose
+#: (core/pad_temp.py ``kept``); a cache's own entries age out (``child_days``).
 _HOST_KEEP = frozenset(getattr(host_temp, "_SPIKE2_KEPT", {}))
 
 _lock = threading.Lock()
@@ -159,8 +166,9 @@ def set_auto(on):
 #   C <root> <bytes> <last> <path>   an emulator cache entry; <last> is the
 #                                    newest of its own date and its markers
 #   B <build> <entry>                a PB I/O-board build stacked on <entry>
-_SCAN = r"""
-df -B1 --output=avail,used /var/tmp | tail -1 | awk '{print "D\t" $1 "\t" $2}'
+#: The L and H lines alone: what runs and what is held.  PAD-1599 asks the
+#: same of the user's previous Linux (core/old_distro.py).
+SCAN_LIVE = r"""
 for r in /var/tmp/pad_*/; do
   r=${r%/}; n=${r##*/}
   case $n in pad_aaiw_*) continue ;; esac
@@ -179,6 +187,10 @@ done | grep -aE '^/(var/)?tmp/' | sort -u | sed 's/^/H\t/'
 cat /sys/block/loop*/loop/backing_file 2>/dev/null | sed 's/^/H\t/'
 awk '{print $5}' /proc/self/mountinfo | grep -aE '^/(var/)?tmp/' |
   sed 's/\\040/ /g; s/^/H\t/'
+"""
+_SCAN = r"""
+df -B1 --output=avail,used /var/tmp | tail -1 | awk '{print "D\t" $1 "\t" $2}'
+""" + SCAN_LIVE + r"""
 newest() { find "$1" -xdev -printf '%T@\n' 2>/dev/null | sort -rn | head -1 | cut -d. -f1; }
 find /tmp /var/tmp -maxdepth 1 \( -name 'cgc_stage_*' -o -name 'bof_*' \
     -o -name 'jjp_*' -o -name 'pad_aaiw_*' \) 2>/dev/null |
@@ -396,14 +408,60 @@ def _newest_mtime(path):
     return newest
 
 
+def _plan_cache(path, reg, now):
+    """A kept cache's entries nobody has used for ``child_days`` (a use
+    touches the entry), and a half-written ``<key>.tmp<pid>`` whose writer
+    has gone, after an hour, or any after a day (PAD-1596: Stern's card
+    copies were capped by count but never aged out)."""
+    out = []
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return out
+    for name in names:
+        p = os.path.join(path, name)
+        last = _newest_mtime(p)
+        if last is None:
+            continue
+        idle = now - last
+        writer = pad_temp.tmp_writer(name)
+        if writer is not None:
+            if idle < RECENT_SECS or (idle < STALE_SECS
+                                      and pad_temp.pid_alive(writer)):
+                continue
+            why, what = "leftover", "unfinished copy"
+        elif idle >= reg.child_days * 86400:
+            why, what = "unused", "not used for %d days" % reg.child_days
+        else:
+            continue
+        out.append({"path": p, "size": host_temp._entry_size(p), "why": why,
+                    "what": "%s: %s, %s" % (reg.maker, reg.detail, what),
+                    "extra": []})
+    return out
+
+
 def plan_host(entries, now):
+    """What to remove from the temp folder.  A folder whose maker still
+    runs is never taken (an open tab's, a build's); one whose maker has
+    ended goes once nothing in it has changed for an hour; one nobody
+    said the maker of after a day.  Empty leftovers go too: on David's PC
+    427 ``spike2_grow_*`` under the 1 MB the window lists sat for ever."""
     out = []
     for e in entries:
         name = os.path.basename(e["path"])
-        if name in _HOST_KEEP or e["size"] < _MIN_LEFTOVER:
+        reg = pad_temp.lookup(name)
+        if reg is None or name == pad_temp.OWNERS:
+            continue
+        if reg.kept or name in _HOST_KEEP:
+            if reg.child_days:
+                out += _plan_cache(e["path"], reg, now)
+            continue
+        owner = pad_temp.owner_state(name)
+        if owner == "alive":
             continue
         last = _newest_mtime(e["path"])
-        if last is None or now - last < STALE_SECS:
+        wait = RECENT_SECS if owner == "dead" else STALE_SECS
+        if last is None or now - last < wait:
             continue
         out.append({"path": e["path"], "size": e["size"], "why": "leftover",
                     "what": "%s: %s" % (e["manufacturer"], e["detail"]),
@@ -517,7 +575,8 @@ def _tidy(force, cards, now, dry_run, wsl):
         plan += [dict(p, where="wsl") for p in plan_wsl(scan, now, room)]
     try:
         plan += [dict(p, where="host")
-                 for p in plan_host(host_temp.scan(), now)]
+                 for p in plan_host(host_temp.scan(include_empty=True), now)]
+        pad_temp.prune_owners()
     except Exception as exc:                                # noqa: BLE001
         log.info("space keeper: temp folder scan failed (%s)", exc)
     if cards and scan is not None:      # listing cards runs wsl.exe

@@ -23,6 +23,7 @@ from ...core.pipeline_base import BasePipeline, PipelineError
 from ..williams import pinmame_capture as pc
 from ..williams.capture_pipeline import CapturePipeline as _WilliamsCapture
 from .formats import detect_game
+from ...core import pad_temp
 
 PHASES = (
     "Detect", "Probe libpinmame", "Capture (attract mode)",
@@ -330,7 +331,7 @@ class SamCapturePipeline(CapturePipeline):
                       "version of the same size.", "warning")
         # Not under the game's output folder: that is checksummed before
         # _run's cleanup, and the staged copy is no part of the capture.
-        self._stage_dir = stage_dir = tempfile.mkdtemp(prefix="pad_sam_")
+        self._stage_dir = stage_dir = pad_temp.mkdtemp(prefix="pad_sam_")
         self._log("  staging the game file for PinMAME...", "info")
         try:
             rom_zip = sam.stage(self.zip_path, m, stage_dir)

@@ -26,6 +26,7 @@ from .core.updater import (AUTO_DOWNLOAD_DEFAULT, AUTO_DOWNLOAD_KEY,
 from .webui import compat
 from .webui.compat import filedialog, messagebox
 from .webui.i18n import translator
+from .core import pad_temp
 
 log = logging.getLogger(__name__)
 
@@ -635,6 +636,11 @@ class App:
         if not os.environ.get("PAD_UI_NO_UPDATE_CHECK"):
             # captures and tests never delete the PC's real files
             self.root.after(2500, self._prune_old_versions, True)
+        if not os.environ.get("PAD_UI_NO_UPDATE_CHECK") or os.environ.get(
+                "PAD_PAYLOAD_DIR"):
+            # a payload folder named on purpose is a scratch one: a capture
+            # may tidy it (PAD-1595's own proof shot does)
+            self.root.after(3000, self._prune_payload_cache)
         self._schedule_autosave()
         # PAD-1514: a card image double-clicked in Explorer started this run
         pending = getattr(self.ctx, "open_image", None) if getattr(
@@ -3209,7 +3215,23 @@ class App:
             self._current_run_is_direct_ssd = False
             self.window.set_running(False, mode="write")
             raise
-        threading.Thread(target=self.pipeline.run, daemon=True).start()
+        run = self.pipeline.run
+        if not menu_only:
+            # PAD-1588: a card written whole loses the machine's settings, audits and high scores; a machine running
+            # this game that answers on the network is backed up first (only reads; it says so in the log)
+            from .core import machine_backups
+            if machine_backups.auto_on(self._settings) and machine_backups.known():
+                keep, mfr_key, pipe = machine_backups.keep_of(self._settings), mfr.key, self.pipeline
+
+                def run():
+                    try:
+                        game = machine_backups.game_of_card(image_path, mfr_key)
+                        if game:
+                            machine_backups.before_write(game, keep, log_cb)
+                    except Exception:                   # noqa: BLE001 - the write is never stopped by it
+                        pass
+                    pipe.run()
+        threading.Thread(target=run, daemon=True).start()
 
     def _on_build_send_request(self, address):
         """PAD-1397: the Write tab's Send to machine - build to the Write tab's destination as usual, then send the
@@ -3234,7 +3256,10 @@ class App:
         self.window._set_footer(run_label="Sending")
         self.window.reset_steps(mode="write")
         log_cb, phase_cb, progress_cb, done_cb = self._make_callbacks()
-        self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb)
+        from .core import machine_backups
+        keep = machine_backups.keep_of(self._settings) if machine_backups.auto_on(self._settings) else None
+        self.pipeline = remote_send.SendPipeline(image_path, address, log_cb, phase_cb, progress_cb, done_cb,
+                                                 backup_keep=keep)
         threading.Thread(target=self.pipeline.run, daemon=True, name="pad-send").start()
 
     def _start_read_card(self, device_path, image_path):
@@ -3735,19 +3760,28 @@ class App:
             return
         if not messagebox.askyesno(where, text + "\n\nLoad them into this project now?"):
             return
-        src = path
+        src, scratch = path, None
         if not is_zip:
-            import tempfile
-            src = os.path.join(tempfile.mkdtemp(prefix="pad-modes-"),
+            scratch = pad_temp.mkdtemp(prefix="pad-modes-")
+            src = os.path.join(scratch,
                                os.path.basename(os.path.normpath(path)) + ".zip")
-            try:
-                modpack.zip_modes_folder(about["folder"], src)
-            except OSError as e:
-                messagebox.showerror(where, "Could not read the modes in %s: %s"
-                                     % (path, e))
-                return
-        self.window.select_tab("modes")
-        modes.load_file(src)
+        try:
+            if scratch:
+                try:
+                    modpack.zip_modes_folder(about["folder"], src)
+                except OSError as e:
+                    messagebox.showerror(where, "Could not read the modes in %s: %s"
+                                         % (path, e))
+                    return
+            self.window.select_tab("modes")
+            modes.load_file(src)
+        finally:
+            # PAD-1596: the zip made of the folder was left in the temp folder
+            # for good, one more on every load (load_file is done with it)
+            if scratch:
+                import shutil
+                shutil.rmtree(scratch, ignore_errors=True)
+                pad_temp.forget_owner(scratch)
 
     # -- PAD-1408: a mod pack with the modes: a whole game ----------------
     def _pack_includes(self, assets_dir):
@@ -5012,6 +5046,10 @@ class App:
                 "Card image not found",
                 "This card image isn't there:\n%s" % "\n".join(gone))
             return None
+        other = self._port_other_generation(raws)
+        if other:
+            messagebox.showwarning("Card of another generation", other)
+            return None
         out_dir = ((out_var.get() if out_var is not None else "") or "").strip()
         if not out_dir:
             out_dir = filedialog.askdirectory(
@@ -5024,6 +5062,35 @@ class App:
             if out_var is not None:
                 out_var.set(os.path.normpath(out_dir))
         return raws, os.path.normpath(out_dir)
+
+    def _port_other_generation(self, raws):
+        """Why *raws* can't be ported onto in this session, or ``""``: a
+        Stern Spike 3 card picked while a Spike 2 project is open, or the
+        other way round (PAD-1586).  The port extracts and builds every
+        target with the open card's own pipelines, and a mod moves between
+        builds of one generation, so another generation's card is refused
+        here in words instead of failing half way through the chain."""
+        era = getattr(self._current_mfr, "_era", None)
+        if era not in ("spike2", "spike3"):
+            return ""
+        from .plugins.stern.mode_project import card_arch
+        want = "a64" if era == "spike3" else "arm"
+        try:
+            odd = [r for r in raws if card_arch(r) != want]
+        except Exception:                           # noqa: BLE001
+            return ""
+        if not odd:
+            return ""
+        this, that = (("Spike 3", "Spike 2") if era == "spike3"
+                      else ("Spike 2", "Spike 3"))
+        return ("This project is a Stern %s card's, and %s %s card "
+                "image%s:\n\n%s\n\nMods move between builds of one "
+                "generation: pick %s card images, or open a %s project to "
+                "port onto %s cards."
+                % (this, "this is a" if len(odd) == 1 else "these are",
+                   that, "" if len(odd) == 1 else "s",
+                   "\n".join(os.path.basename(r) for r in odd),
+                   this, that, that))
 
     def _start_whats_new(self):
         """What's new in this version? (PAD-1388): extract each new card into
@@ -6648,6 +6715,31 @@ class App:
                     pass                   # window gone
         threading.Thread(target=_run, daemon=True,
                          name="prune-old-versions").start()
+
+    def _prune_payload_cache(self):
+        """Delete emulator downloads this version no longer pins (PAD-1595):
+        a runtime re-cut used to leave its ~400 MB tarball behind for good.
+        Off the main thread; one log line says what went."""
+        from .core import payloads
+
+        def _run():
+            try:
+                lines = payloads.prune_summary(*payloads.prune_cache())
+            except Exception as e:                      # noqa: BLE001
+                lines = ["Couldn't tidy the emulator downloads: %s" % e]
+
+            def _report():
+                for line in lines:
+                    self.window.append_log(
+                        line, "warning" if line.startswith("Couldn't")
+                        else "info")
+            if lines:
+                try:
+                    self.root.after(0, _report)
+                except RuntimeError:
+                    pass                   # window gone
+        threading.Thread(target=_run, daemon=True,
+                         name="prune-payload-cache").start()
 
     def _schedule_autosave(self):
         """(Re-)arm the ⚙ "Save automatically" timer (PAD-541).

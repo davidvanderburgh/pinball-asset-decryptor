@@ -20,6 +20,10 @@ import struct
 import shutil
 import subprocess
 import sys
+try:
+    from .pad_temp import mkdtemp as _mkdtemp   # PAD-1596: who made it
+except ImportError:                       # run on its own, as a script
+    from tempfile import mkdtemp as _mkdtemp
 
 # Prevent console windows from flashing on Windows
 _CREATE_FLAGS = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
@@ -227,7 +231,7 @@ def ensure_bundled_ffmpeg_on_path():
     # ``ffmpeg`` and prepend that dir, so the plain name resolves.
     import tempfile
     global _ffmpeg_shim_dir, _ffmpeg_shim_src
-    link_dir = tempfile.mkdtemp(prefix="pad-ffmpeg-")
+    link_dir = _mkdtemp(prefix="pad-ffmpeg-")
     link = os.path.join(link_dir, plain)
     try:
         os.symlink(exe, link)

@@ -52,6 +52,33 @@ static struct pcm *play_card;
 static int play_fd = -1;
 static unsigned long long play_next_try, play_written, play_dropped;
 
+/* PAD-1560: the game's volume, set on the speaker amp (s3dev.so's
+ * pad_s3_amp_gain_q16, Q16, 65536 = full level). Weak: without s3dev.so (the
+ * old kernel-device path) the speakers play at full level as before. Only
+ * the speakers get it; PAD_S3_AUDIO_OUT stays the game's own full-level PCM. */
+extern int pad_s3_amp_gain_q16 __attribute__((weak));
+
+static const void *at_game_volume(const struct pcm *c, const void *buf, unsigned long bytes)
+{
+    static short *tmp;
+    static unsigned long cap;
+    const short *in = buf;
+    unsigned long i, n = bytes / 2;
+    int q = &pad_s3_amp_gain_q16 ? pad_s3_amp_gain_q16 : 65536;
+    if (q >= 65536 || c->p.format != 2)            /* S16_LE only: what the player reads */
+        return buf;
+    if (cap < n) {
+        short *t = realloc(tmp, n * sizeof *tmp);
+        if (!t)
+            return buf;
+        tmp = t;
+        cap = n;
+    }
+    for (i = 0; i < n; i++)
+        tmp[i] = (short)(((long long)in[i] * q + 32768) >> 16);   /* nearest */
+    return tmp;
+}
+
 static void play_write(struct pcm *c, const void *buf, unsigned long bytes)
 {
     const char *path = getenv("PAD_S3_AUDIO_PLAY");
@@ -82,7 +109,7 @@ static void play_write(struct pcm *c, const void *buf, unsigned long bytes)
         sigemptyset(&pipe_set);
         sigaddset(&pipe_set, SIGPIPE);
         sigprocmask(SIG_BLOCK, &pipe_set, &old);
-        n = write(play_fd, buf, bytes);
+        n = write(play_fd, at_game_volume(c, buf, bytes), bytes);
         if (n < 0 && errno == EPIPE)
             sigtimedwait(&pipe_set, NULL, &zero);
         sigprocmask(SIG_SETMASK, &old, NULL);

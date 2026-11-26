@@ -196,10 +196,16 @@ def slot_dir_filter(assets_dir, keep=()):
 
 
 #: how many files the baseline and the change scans hash at once.  MD5 runs
-#: outside the GIL, so a few threads overlap the reads with the hashing (one
-#: core hashed 1.8 GB in 2.6 s, PAD-610); more than this and a spinning disk
-#: or a network share just thrashes.
-HASH_THREADS = 4
+#: outside the GIL, so the threads overlap the reads with the hashing.
+#: Measured cold (PAD-1579, 16-core PC under load): 8 threads against 4 took
+#: a 4 GB extract of big files on the NVMe from 3.5 s to 2.4 s, 20,000 small
+#: files from 7.8 s to 6.4 s and the WSL store (read from Windows) from
+#: 3.2 s to 2.9 s, while three 0.5-1.5 GB video folders on a spinning disk
+#: read the same within 3% (16 threads started to lose there).  A faster hash
+#: (xxh3, BLAKE3) gained no more than these threads do: four threads of MD5
+#: already hash 3.5 GB/s, past what the disks deliver, and the scans compare
+#: with the MD5s .checksums.md5 holds anyway.
+HASH_THREADS = 8
 
 #: one read per MiB: the 64 KiB reads of old cost a Python round trip each
 #: (sixteen per MiB) and showed up as the hashing's own overhead on the

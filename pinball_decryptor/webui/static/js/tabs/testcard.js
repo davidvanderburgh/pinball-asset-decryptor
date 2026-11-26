@@ -87,6 +87,7 @@ function NetworkBits({ s }) {
 function sendWhy(s) {
   const n = s.network || {};
   if (!s.source_ok) return "Pick a Spike 2 card image first";
+  if (s.s3) return "Send to machine is for a Spike 2 test card: write a Spike 3 one to an SD card";
   if (!n.ssh) return "Tick Remote access first: the test card you send must let this computer in again";
   if (!s.address) return "Find the machine on the Network tab first";
   return "";
@@ -97,18 +98,21 @@ function Build({ s }) {
   return html`<div class="stack">
     <div class="row">
       <span class="k">Made from:</span>
-      <span class=${cx("small", s.source && !s.source_ok ? "bad" : "")} ...${tip("The test card takes the boot and system of this card image; any Stern Spike 2 card will do. Its game is not copied.")}>
+      <span class=${cx("small", s.source && !s.source_ok ? "bad" : "")} ...${tip(s.s3
+        ? "A Spike 3 test card is this card, laid out for the TEST CARD menu: its partitions are encrypted with your machine's key, so the card is made from one of yours. Its game stays on the card but never starts."
+        : "The test card takes the boot and system of this card image; any Stern Spike 2 card will do. Its game is not copied.")}>
         ${s.source ? s.source + (s.source_ok ? "" : " (not there any more)") : "no card image picked yet"}</span>
-      <${Button} drop disabled=${s.busy} onClick=${() => call("testcard.pick_source")}>Pick a Spike 2 card image…<//>
+      <${Button} drop disabled=${s.busy} onClick=${() => call("testcard.pick_source")}>Pick a Spike 2 or Spike 3 card image…<//>
     </div>
-    <${NetworkBits} s=${s} />
+    ${s.s3 ? html`<span class="small muted">A Spike 3 test card: pictures, videos and scenes. Its menu plays no sound (the cabinet amplifier is the game's to start), so sounds are left off, and remote access, Wi-Fi start-up and extra room are for Spike 2 test cards.</span>`
+      : html`<${NetworkBits} s=${s} />`}
     <div class="row">
       ${s.busy
         ? html`<${Button} kind="danger" onClick=${() => call("testcard.cancel")}>Cancel<//>`
         : html`<${Button} kind="primary" disabled=${!s.source_ok} onClick=${() => call("testcard.build")}>Build test card…<//>
           <${Button} disabled=${!!sendWhy(s)} onClick=${() => call("testcard.send")}
             title=${sendWhy(s) || ("Build the test card and send it to the machine at " + s.address + ": only the files that differ go, then it restarts into the test card menu. The machine must be running a PAD test card already.")}>Send to machine…<//>`}
-      <span class="small muted">${s.room_mib ? "Your videos plus " + (s.network.room_gb) + " GB of room, built in seconds. Write it to an SD card like any card image." : "Under 1 GB plus your videos, built in seconds. Write it to an SD card like any card image."}</span>
+      <span class="small muted">${s.s3 ? "The size of the card it is made from (64 GB): the copy takes a while. Write it to an SD card like any card image." : s.room_mib ? "Your videos plus " + (s.network.room_gb) + " GB of room, built in seconds. Write it to an SD card like any card image." : "Under 1 GB plus your videos, built in seconds. Write it to an SD card like any card image."}</span>
     </div>
     ${s.busy ? html`<div class="stack"><${Progress} pct=${s.pct} busy=${s.pct == null} /><span class="small">${s.step}</span></div>` : null}
     ${msg[1] ? html`<${Note} kind=${msg[0] === "ok" ? "ok" : msg[0] === "warn" ? "warn" : msg[0] === "bad" ? "err" : ""}>${msg[1]}<//>` : null}
@@ -120,8 +124,13 @@ function Build({ s }) {
 export default function TestCardTab() {
   const s = useNs(NS) || {};
   const c = s.counts || {};
-  const sub = "A small card that boots any Stern Spike 2 machine straight into a TEST CARD menu, with no game: "
+  const sub = "A card that boots a Stern Spike 2 or Spike 3 machine straight into a TEST CARD menu, with no game: "
     + "DEFAULT PAD TEST CARD, IMAGES, VIDEOS, SCENES and SOUNDS, and Color correction to tune the screen.";
+  const keys = s.s3
+    ? { move: "On a Spike 3 machine the coin door's NEXT and PREVIOUS move between the entries, SELECT opens one, BACK goes back.",
+        list: "In a list, SELECT shows the one picked full screen; NEXT and PREVIOUS then step to the next and previous, and SELECT switches the color correction on and off." }
+    : { move: "Flippers move between the entries, START opens one, ACTION goes back.",
+        list: "In a list, START shows the one picked full screen; the flippers then step to the previous and next, and START switches the color correction on and off (on a sound: plays it again)." };
   return html`<div class="page">
     <${PageHead} title="Test card" sub=${sub} />
     <${Card} style="flex:none" title="On the card" sub=${(c.image || 0) + " images, " + (c.video || 0) + " videos, " + (c.scene || 0) + " scenes, " + (c.sound || 0) + " sounds"}>
@@ -132,8 +141,8 @@ export default function TestCardTab() {
     <//>
     <${Card} style="flex:none" title="On the machine">
       <div class="stack small">
-        <span>Flippers move between the entries, START opens one, ACTION goes back. An entry with nothing on it does nothing.</span>
-        <span>In a list, START shows the one picked full screen; the flippers then step to the previous and next, and START switches the color correction on and off (on a sound: plays it again).</span>
+        <span>${keys.move} An entry with nothing on it does nothing.</span>
+        <span>${keys.list}</span>
         <span>A video shows the frame rate the machine really reaches beside the one it was made at.</span>
         <span>Color correction changes brightness, contrast, saturation and each color's shades live; once the test card looks right, put the same numbers in the Color profile tab.</span>
       </div>

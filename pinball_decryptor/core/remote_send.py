@@ -705,7 +705,16 @@ pad_tools() {
   [ -n "$BD" ] && [ -n "$DP" ]
 }
 pad_say() {
-  pad_tools || return 0
+  if ! pad_tools; then
+    # PAD-1587: a JJP machine has no dprint; its own message screen (rungame.sh's "SECURITY KEY MISSING") is jimg
+    J=/jjpe/gen1/scripts/jimg; P=/jjpe/gen1/miscfiles/graphics/JJP_logo_message.png
+    [ -x "$J" ] && [ -f "$P" ] || return 0
+    for p in $(pids_named jimg); do kill $p 2>/dev/null; done
+    t=$(printf '%s' "$1" | cut -c1-16 | sed 's/^ *//; s/ *$//')
+    m=$(printf '%s' "$1" | cut -c17-64 | sed 's/  */ /g; s/^ //; s/ $//')
+    (trap '' HUP; DISPLAY=:0 exec "$J" 60000 "$P" "$t" "$m") </dev/null >/dev/null 2>&1 &
+    return 0
+  fi
   if [ -z "$(pids_named boot_display)" ]; then
     # detached from this session (the card's busybox has no setsid): hangup ignored, so it outlives the login
     (trap '' HUP; exec "$BD") </dev/null >/dev/null 2>&1 &
@@ -715,7 +724,7 @@ pad_say() {
 }
 pad_resume() {
   touch $W/done
-  for p in $(pids_named boot_display); do kill $p 2>/dev/null; done
+  for p in $(pids_named boot_display) $(pids_named jimg); do kill $p 2>/dev/null; done
   m=$(cat $W/monitor 2>/dev/null)
   if [ -z "$m" ]; then echo "PAD_SEND_NOT_RUNNING"; return 0; fi
   old=" $(cat $W/game 2>/dev/null) "
@@ -769,16 +778,41 @@ echo safe > $W/phase
 ls /tmp/game_restarts 2>/dev/null | tr '
 ' ' ' > $W/marks
 m=$(pids_named game_monitor)
+# PAD-1587: a JJP machine's loop is rungame.sh (jjp.service: xinit runs it; it starts the game again when it ends)
+[ -n "$m" ] || m=$(pids_named rungame.sh)
 g=$(pids_named game)
 echo "$m" > $W/monitor
 echo "$g" > $W/game
 [ -n "$m" ] && kill -STOP $m
+# PAD-1587: the hold is checked, not assumed: the loop is stopped (state T) before the game is ended
+for p in $m; do
+  i=0
+  while [ $i -lt 20 ]; do
+    read -r st < /proc/$p/stat 2>/dev/null || break
+    case "${st##*) }" in T*|t*) break ;; esac
+    kill -STOP $p 2>/dev/null; sleep 0.1; i=$((i+1))
+  done
+done
 [ -n "$g" ] && kill -9 $g
 sleep 1
+# PAD-1587: a game the loop started as the hold began (its restart and the hold crossed) is ended too, so no game
+# runs on files a Send changes; the loop is stopped now, so none comes after it
+for p in $(pids_named game); do
+  read -r st < /proc/$p/stat 2>/dev/null || continue
+  case "${st##*) }" in Z*) continue ;; esac
+  case " $g " in *" $p "*) ;; *) kill -9 $p 2>/dev/null; g="$g $p" ;; esac
+done
+echo "$g" > $W/game
 pad_say @TEXT@
 (trap '' HUP; exec /bin/sh $W/watch) </dev/null >/dev/null 2>&1 &
 echo "PAD_SEND_PAUSED $m"
 """
+
+#: the game a machine runs, as the /games/game link names it; a JJP machine (PAD-1587) has no /games: its
+#: setenv.sh names the game, said the same way (``/jjpe/<game>/game``) so machine_scan.game_of reads both
+GAME_LINK = ('readlink /games/game 2>/dev/null || { [ -f /jjpe/gen1/setenv.sh ] && '
+             '. /jjpe/gen1/setenv.sh >/dev/null 2>&1 && echo "/jjpe/$GAMENAME/game"; }')
+DESCRIBE_SCRIPT = GAME_LINK + '; cat /etc/hostname 2>/dev/null; df -k /games 2>/dev/null | tail -n 1'
 
 #: the delta's view of a machine file: its size, then the sha1 of each block (busybox dd + sha1sum, both cards)
 BLOCKS_SCRIPT = r"""
@@ -1618,8 +1652,7 @@ class SshMachine(Machine):
         self.sh("mv -f %s %s && sync" % (_q(tmp), _q(LEDGER)))
 
     def describe(self):
-        _rc, out = self.sh("readlink /games/game; cat /etc/hostname 2>/dev/null; "
-                           "df -k /games | tail -n 1", check=False)
+        _rc, out = self.sh(DESCRIBE_SCRIPT, check=False)
         return out
 
 
@@ -3319,10 +3352,19 @@ def check_test_card_target(target, machine):
         raise SendError(TESTCARD_ONLY)
 
 
+def _is_iso(path):
+    from .ssh_jjp import is_iso
+    return is_iso(path)
+
+
 def send_image(image, machine, log=None, progress=None, cancel=None):
     """Send *image* to *machine*: the quick Send when it is a build of the card the machine runs, else the full
     one.  Returns a summary line."""
     log = log or (lambda *a, **k: None)
+    from . import remote_send_jjp
+    if remote_send_jjp.is_build(image) or _is_iso(image):
+        # PAD-1587: a JJP install ISO: its Send record says what it changed, file by file
+        return remote_send_jjp.send_build(image, machine, log, progress, cancel)
     with open_target(image, log) as target:
         check_layout(target, machine.layout())
         check_test_card_target(target, machine)
@@ -3367,9 +3409,11 @@ _PHASE_OF = (("Comparing", 1), ("Updating", 2), ("Uploading", 2), ("Writing", 2)
 class SendPipeline(BasePipeline):
     """A Send as one of the app's runs: its log, its progress bar, its Cancel (the Write tab's)."""
 
-    def __init__(self, image, address, log_cb, phase_cb, progress_cb, done_cb, connect_fn=None):
+    def __init__(self, image, address, log_cb, phase_cb, progress_cb, done_cb, connect_fn=None, backup_keep=None):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image, self.address = image, address
+        # PAD-1588: the machine's settings backed up before anything is sent (None: the owner turned that off)
+        self.backup_keep = backup_keep
         self._connect = connect_fn or connect
         self._phase_now = -1
         self._rate = []
@@ -3401,6 +3445,9 @@ class SendPipeline(BasePipeline):
             raise PipelineError("Connect", str(e)) from None
         machine.log, machine.cancel = self._log, (lambda: self._cancelled)    # PAD-1436: a reconnect says so
         try:
+            if self.backup_keep:
+                from . import machine_backups
+                machine_backups.before_send(machine, self.backup_keep, self._log)
             if hasattr(machine, "widen"):
                 machine.widen(self._log)
             summary = send_image(self.image, machine, self._log, self._send_progress, lambda: self._cancelled)

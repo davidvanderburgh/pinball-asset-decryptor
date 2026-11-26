@@ -189,10 +189,27 @@ def fetch_manifest(asset, version, opener=None):
 # building the new folder
 # ----------------------------------------------------------------------
 
-def _take_local(src, dst, size, sha):
+#: files an update never writes again when the running install already has
+#: them as the new version lists them (PAD-1606): the new folder gets a hard
+#: link to the same file instead.  Antivirus programs flag the bundled DCS
+#: tools by mistake (PAD-1391) and pounce on a freshly written copy, so an
+#: update that rewrote them had users switching their scanner off.  App-
+#: relative, "/"-separated, as in the file list.  pinball_decryptor.iss
+#: (KeptAsInstalled) and update_slots.carry_over do the same for the
+#: installer's staged install.
+KEEP_AS_INSTALLED = (
+    "pinball_decryptor/plugins/williams/vendor/DCSExplorer.exe",
+    "pinball_decryptor/plugins/williams/vendor/DCSEncoder.exe",
+)
+_KEEP_LOWER = {p.lower() for p in KEEP_AS_INSTALLED}
+
+
+def _take_local(src, dst, size, sha, link=False):
     """Copy *src* to *dst* if it is the manifest's file (same size, same
     SHA-256), keeping its timestamps - a ``.pyc`` beside it stays valid.
-    The bytes written are the bytes hashed.  True when taken."""
+    The bytes written are the bytes hashed.  True when taken.  *link*: hard-
+    link *dst* to *src* rather than writing a copy (KEEP_AS_INSTALLED),
+    falling back to the copy where the volume cannot link."""
     try:
         st = os.stat(src)
         if st.st_size != size:
@@ -204,6 +221,12 @@ def _take_local(src, dst, size, sha):
     if len(data) != size or hashlib.sha256(data).hexdigest() != sha:
         return False
     os.makedirs(os.path.dirname(dst), exist_ok=True)
+    if link:
+        try:
+            os.link(src, dst)
+            return True
+        except OSError:
+            pass
     with open(dst, "wb") as f:
         f.write(data)
     os.utime(dst, ns=(st.st_atime_ns, st.st_mtime_ns))
@@ -342,7 +365,8 @@ def build_tree(manifest, app_dir, target, *, opener=None, cancel_cb=None,
         path, size, sha = row[0], row[1], row[2]
         rel = path.replace("/", os.sep)
         took = _take_local(os.path.join(app_dir, rel),
-                           os.path.join(target, rel), size, sha)
+                           os.path.join(target, rel), size, sha,
+                           link=path.lower() in _KEEP_LOWER)
         if took:
             _carry_pyc(app_dir, target, rel)
         with lock:

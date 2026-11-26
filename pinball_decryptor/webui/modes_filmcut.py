@@ -17,6 +17,7 @@ import tempfile
 import threading
 
 from ..plugins.stern import film_cut as FC
+from ..core import pad_temp
 
 CLIP_NAME = "clip.mp4"
 SOUND_NAME = "end.wav"
@@ -238,7 +239,7 @@ class FilmCutForm:
 def stage_folder():
     """A new, empty folder a dialog's cut is made in before it joins the mode (the
     system's temporary folder, so a crash never leaves a half cut in a project)."""
-    return tempfile.mkdtemp(prefix=STAGE_PREFIX)
+    return pad_temp.mkdtemp(prefix=STAGE_PREFIX)
 
 
 def commit_cut(result, mode_folder):

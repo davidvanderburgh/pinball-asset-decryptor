@@ -13,6 +13,20 @@
 #include "video.h"
 #include "log.h"
 
+/* PAD-1586: the buttons the footers name. A Spike 3 machine's menu reads only the coin door
+ * (stubs_s3.c: SELECT, NEXT = plus, PREVIOUS = minus, BACK), so a SEL_COIN_DOOR build names
+ * those; every other build keeps the flipper words, byte for byte. */
+#ifdef SEL_COIN_DOOR
+#define K_MOVE "PREVIOUS / NEXT"
+#define K_GO   "SELECT"
+#define K_BACK "BACK"
+#else
+#define K_MOVE "LEFT / RIGHT FLIPPER"
+#define K_GO   "START"
+#define K_BACK "ACTION"
+#endif
+
+
 #define TH(e, role) ((e)->th->rgb[TH_##role])
 
 /* how a held flipper repeats a step, once it has been held this long */
@@ -609,7 +623,7 @@ static void draw_list(struct state *st)
                      on ? TH(e, TITLE_HL) : TH(e, TITLE));
         }
     }
-    draw_footer(e, "LEFT / RIGHT FLIPPER: choose      START: open");
+    draw_footer(e, K_MOVE ": choose      " K_GO ": open");
 }
 
 static const char *row_label(const struct state *st, const struct row *r)
@@ -730,11 +744,11 @@ static void draw_colour(struct state *st)
     }
 
     if (st->editing)
-        draw_footer(e, "LEFT / RIGHT FLIPPER: less / more      START: done");
+        draw_footer(e, K_MOVE ": less / more      " K_GO ": done");
     else if (st->rows[st->sel].kind >= R_SAVE)
-        draw_footer(e, "LEFT / RIGHT FLIPPER: move      START: do it");
+        draw_footer(e, K_MOVE ": move      " K_GO ": do it");
     else
-        draw_footer(e, "LEFT / RIGHT FLIPPER: move      START: change");
+        draw_footer(e, K_MOVE ": move      " K_GO ": change");
 }
 
 /* THE TEST PICTURE UP, full screen, through the correction picked; then the
@@ -820,16 +834,16 @@ static void draw_test(struct state *st)
                  0xF0C040);
         if (e->testcard) {
             static char tk[200];
-            snprintf(tk, sizeof tk, "LEFT / RIGHT FLIPPER: previous / next      %s      ACTION: back",
-                     kind == TF_SOUND || st->t_err[0] ? (kind == TF_SOUND ? "START: play again" : "")
-                     : c->ncolour > 0 ? "START: corrected / not" : "");
+            snprintf(tk, sizeof tk, K_MOVE ": previous / next      %s      " K_BACK ": back",
+                     kind == TF_SOUND || st->t_err[0] ? (kind == TF_SOUND ? K_GO ": play again" : "")
+                     : c->ncolour > 0 ? K_GO ": corrected / not" : "");
             keys = tk;
         }
-        else if (test_is_back(st, k)) keys = "LEFT / RIGHT FLIPPER: previous / next      START: back";
-        else if (kind == TF_SOUND) keys = "LEFT / RIGHT FLIPPER: previous / next      START: play again";
-        else if (c->ncolour > 1) keys = "LEFT / RIGHT FLIPPER: previous / next      START: another game's colors";
-        else if (c->ncolour > 0) keys = "LEFT / RIGHT FLIPPER: previous / next      START: corrected / not";
-        else keys = "LEFT / RIGHT FLIPPER: previous / next";
+        else if (test_is_back(st, k)) keys = K_MOVE ": previous / next      " K_GO ": back";
+        else if (kind == TF_SOUND) keys = K_MOVE ": previous / next      " K_GO ": play again";
+        else if (c->ncolour > 1) keys = K_MOVE ": previous / next      " K_GO ": another game's colors";
+        else if (c->ncolour > 0) keys = K_MOVE ": previous / next      " K_GO ": corrected / not";
+        else keys = K_MOVE ": previous / next";
         snprintf(buf, sizeof buf, "%s%s%s", hint, *hint ? "      " : "", keys);
         text_fit(e, buf, 20 * s, 12 * s, W - (int)(60 * s), W / 2, y + (int)(78 * s), 0, 0xB8BCC4);
     }
@@ -892,7 +906,7 @@ static void draw_menu(struct state *st)
         text_fit(e, sub, 22 * s, 14 * s, rw - (int)(60 * s), W / 2, y + (int)(66 * s), 0,
                  on ? TH(e, SUBTITLE_HL) : TH(e, SUBTITLE));
     }
-    draw_footer(e, "LEFT / RIGHT FLIPPER: choose      START: open");
+    draw_footer(e, K_MOVE ": choose      " K_GO ": open");
 }
 
 /* ONE LIST: its items by name, PICK_ROWS at a time */
@@ -919,8 +933,8 @@ static void draw_pick(struct state *st)
                  on ? TH(e, TITLE_HL) : TH(e, TITLE));
     }
     draw_footer(e, st->t_group == G_SOUNDS
-                   ? "LEFT / RIGHT FLIPPER: choose      START: play      ACTION: back"
-                   : "LEFT / RIGHT FLIPPER: choose      START: show      ACTION: back");
+                   ? K_MOVE ": choose      " K_GO ": play      " K_BACK ": back"
+                   : K_MOVE ": choose      " K_GO ": show      " K_BACK ": back");
 }
 
 static void pick_scroll(struct state *st)
@@ -1143,6 +1157,11 @@ void settings_run(struct settings_env *e)
         while ((ev = input_poll(e->in, now)) != EV_NONE) {
             if (ev >= EV_RAW_BASE) continue;
             sel_say("key: %s", input_event_name(ev));
+#ifdef SEL_COIN_DOOR
+            /* PAD-1586: no ACTION button on a Spike 3 machine's coin door: BACK backs out of a
+             * test card's screens instead */
+            if (ev == EV_BACK && e->testcard) ev = EV_ACTION;
+#endif
             if (ev == EV_BACK) continue;        /* ignored, as in the menu */
             key(&st, ev, now);
             last = now;

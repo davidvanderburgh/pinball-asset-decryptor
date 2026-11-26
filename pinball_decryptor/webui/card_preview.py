@@ -46,6 +46,56 @@ def cache_root():
     return os.path.join(tempfile.gettempdir(), "pad_card_preview")
 
 
+#: PAD-1596: a card's folder of previews nobody has looked at for this long
+#: goes (a folder was added per card file and change, and none ever went);
+#: the space keeper ages them out by the same rule (core/pad_temp.py).
+KEEP_DAYS = 7
+
+
+def prune_cache(keep=(), max_age_days=KEEP_DAYS, now=None):
+    """Drop the card folders not used for *max_age_days*, except *keep*
+    (the one being shown); :func:`touch` marks a use.  Returns how many
+    went.  Never raises."""
+    import shutil
+    import time
+    root = cache_root()
+    cutoff = (time.time() if now is None else now) - max_age_days * 86400
+    gone = 0
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0
+    for name in names:
+        if name in keep:
+            continue
+        p = os.path.join(root, name)
+        try:
+            newest = os.path.getmtime(p)
+            if os.path.isdir(p):
+                for f in os.listdir(p):
+                    newest = max(newest, os.path.getmtime(os.path.join(p, f)))
+        except OSError:
+            continue
+        if newest < cutoff:
+            if os.path.isdir(p):
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+            gone += not os.path.lexists(p)
+    return gone
+
+
+def touch(folder):
+    """Mark *folder* (a card's previews) as used now."""
+    try:
+        os.utime(folder, None)
+    except OSError:
+        pass
+
+
 def card_key(path):
     """A stable name for *path*'s cache folder, or ``None`` for a raw
     device (the same ``\\\\.\\PHYSICALDRIVE2`` is another card a minute

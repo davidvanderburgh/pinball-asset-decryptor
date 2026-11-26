@@ -121,7 +121,7 @@ def test_the_write_logs_the_feed_under_its_own_name():
                encoding="utf-8").read()
     # PAD-1323: with the random clips' and the screen times' lines beside it
     assert 'line if line.startswith(("Score feed:", "Random clips:", "Screen times:", "Co-op play:", "Handicap",'
-    assert '"Prolonged Competition:", "Records on the high scores:"))   # PAD-1327' in src
+    assert '"Prolonged Competition:", "Records on the high scores:",   # PAD-1327' in src
     assert 'else "Modes: %s" % line' in src
 
 

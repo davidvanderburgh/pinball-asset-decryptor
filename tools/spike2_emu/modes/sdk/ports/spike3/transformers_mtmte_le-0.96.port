@@ -214,6 +214,98 @@ text example_start_shot     Pf target 3
 
 # not carried - the reference game's own content, for this title's own port: 1 callout, 67 lamp, 2 scene, 8 site, 17 text, 20 value
 
+# ---- lamps (PAD-1607): read off the 64-bit light table (40-byte records, a light's device at +26), the lamp records and the device table ----
+# 89 inserts on the playfield picture; shot ties not read (shot mask 0)
+lamp 658,659,660  0              MEGATRON TARGET LEFT  # lamp 190, I/O group 7 index 8, at 252,272
+lamp 661,662,663  0              MEGATRON TARGET RIGHT  # lamp 191, I/O group 7 index 11, at 307,279
+lamp 605,606,607  0              SOUNDWAVE  # lamp 192, I/O group 7 index 34, at 299,525
+lamp 618,619,620  0              GRIMLOCK TECH SPEC  # lamp 193, I/O group 7 index 55, at 117,567
+lamp 592,593,594  0              GRIMLOCK TARGET LEFT  # lamp 194, I/O group 7 index 42, at 71,519
+lamp 612,613,614  0              GRIMLOCK  # lamp 195, I/O group 7 index 47, at 105,540
+lamp 621          0              DINO JACKPOT  # lamp 196, I/O group 7 index 52, at 128,593
+lamp 595,596,597  0              CAPTIVE BALL  # lamp 197, I/O group 7 index 65, at 158,477
+lamp 598          0              PLAYFIELD X  # lamp 198, I/O group 7 index 64, at 167,501
+lamp 589,590,591  0              LT RAMP TECH SPEC  # lamp 199, I/O group 7 index 74, at 139,517
+lamp 583,584,585  0              GRIMLOCK TARGET RIGHT  # lamp 200, I/O group 7 index 71, at 99,488
+lamp 586,587,588  0              LEFT RAMP  # lamp 201, I/O group 7 index 68, at 130,489
+lamp 609,610,611  0              POP BUMPER  # lamp 202, I/O group 7 index 37, at 348,588
+lamp 673,674,675  0              RIGHT RAMP  # lamp 203, I/O group 8 index 11, at 329,312
+lamp 683,684,685  0              RIGHT ORBIT  # lamp 204, I/O group 8 index 23, at 368,329
+lamp 686,687,688  0              RIGHT ORBIT TECH SPEC  # lamp 205, I/O group 8 index 20, at 356,359
+lamp 689          0              STARSCREAM FRENZY  # lamp 206, I/O group 8 index 26, at 350,383
+lamp 680,681,682  0              RIGHT RAMP TARGET RIGHT  # lamp 207, I/O group 8 index 17, at 335,357
+lamp 676,677,678  0              RIGHT RAMP TECH SPEC  # lamp 208, I/O group 8 index 14, at 321,342
+lamp 670,671,672  0              MEGATRON  # lamp 209, I/O group 8 index 34, at 273,359
+lamp 655,656,657  0              CENTER ORBIT  # lamp 210, I/O group 8 index 40, at 229,306
+lamp 667,668,669  0              CENTER ORBIT TECH SPEC  # lamp 211, I/O group 8 index 37, at 229,338
+lamp 648,649,650  0              SPINNER TARGET LEFT  # lamp 212, I/O group 8 index 48, at 212,289
+lamp 638,639,640  0              OPTIMUS TARGET LEFT  # lamp 213, I/O group 8 index 53, at 135,287
+lamp 645,646,647  0              VUK  # lamp 214, I/O group 8 index 60, at 185,260
+lamp 630,631,632  0              DEAD END  # lamp 215, I/O group 8 index 67, at 185,414
+lamp 622,623,624  0              SIDE LOOP  # lamp 216, I/O group 8 index 75, at 150,331
+lamp 626,627,628  0              COMBINER PART COLLECT  # lamp 217, I/O group 8 index 71, at 199,373
+lamp 694          0              BOTTOM GI-WHT  # lamp 222, I/O group 7 index 0, at 0,0
+lamp 574          0              AUTOBOT RUN  # lamp 223, I/O group 7 index 30, at 187,657
+lamp 580          0              SOLAR NEEDLE  # lamp 224, I/O group 7 index 31, at 206,673
+lamp 577          0              3X  # lamp 225, I/O group 7 index 28, at 131,653
+lamp 576          0              2X  # lamp 226, I/O group 7 index 29, at 138,677
+lamp 578          0              RUSTED  # lamp 227, I/O group 7 index 24, at 280,653
+lamp 579          0              ENERGIZED  # lamp 228, I/O group 7 index 23, at 273,677
+lamp 582          0              GOLDEN LAGOON  # lamp 229, I/O group 7 index 21, at 222,700
+lamp 575          0              MICROBOTS  # lamp 230, I/O group 7 index 22, at 224,657
+lamp 564          0              LEFT OUTLANE  # lamp 231, I/O group 7 index 14, at 51,688
+lamp 565          0              AUTOBOT INLANE  # lamp 232, I/O group 7 index 15, at 81,655
+lamp 566          0              SHOOT AGAIN  # lamp 233, I/O group 7 index 46, at 207,862
+lamp 567          0              DECEPTICON INLANE  # lamp 234, I/O group 7 index 16, at 331,655
+lamp 568,569,570  0              COUNTDOWN TO EXTINCTION  # lamp 235, I/O group 7 index 17, at 360,688
+lamp 697          0              LEFT SLING FLASH  # lamp 236, I/O group 7 index 58, at 108,716
+lamp 698          0              RIGHT SLING FLASH  # lamp 237, I/O group 7 index 59, at 302,716
+lamp 581          0              PRIME TARGET  # lamp 238, I/O group 7 index 20, at 189,700
+lamp 573          0              TECH SPEC MANIA  # lamp 239, I/O group 7 index 25, at 230,630
+lamp 571          0              THE ULTIMATE DOOM  # lamp 240, I/O group 7 index 26, at 206,604
+lamp 572          0              RESCUE OPTIMUS  # lamp 241, I/O group 7 index 27, at 181,630
+lamp 617          0              WAR  # lamp 242, I/O group 7 index 53, at 107,591
+lamp 616          0              ISLAND  # lamp 243, I/O group 7 index 51, at 138,614
+lamp 615          0              SOS  # lamp 244, I/O group 7 index 50, at 142,575
+lamp 699          0              UPPER LEFT SLING FLASH  # lamp 245, I/O group 7 index 60, at 60,568
+lamp 700          0              GRIMLOCK FLASH  # lamp 246, I/O group 8 index 27, at 63,480
+lamp 599          0              AUTOBOT HURRY UP  # lamp 247, I/O group 7 index 77, at 147,541
+lamp 603          0              DEVASTATOR  # lamp 248, I/O group 7 index 79, at 231,561
+lamp 604          0              SUPERION  # lamp 249, I/O group 7 index 78, at 206,561
+lamp 600          0              BRUTICUS  # lamp 250, I/O group 7 index 63, at 198,538
+lamp 601          0              MENASOR  # lamp 251, I/O group 7 index 54, at 219,524
+lamp 602          0              DEFENSOR  # lamp 252, I/O group 7 index 45, at 238,538
+lamp 634          0              EXTRA BALL  # lamp 253, I/O group 8 index 65, at 233,441
+lamp 635          0              SPACE BRIDGE  # lamp 254, I/O group 8 index 64, at 255,453
+lamp 701          0              POP FLASH  # lamp 255, I/O group 7 index 32, at 311,575
+lamp 702          0              SOUNDWAVE FLASH  # lamp 256, I/O group 7 index 40, at 0,0
+lamp 608          0              CASSETTE COMBO  # lamp 257, I/O group 7 index 33, at 333,519
+lamp 708          0              MEGATRON  RT SPOT  # lamp 258, I/O group 7 index 41, at 371,421
+lamp 695          0              TOP GI-WHT  # lamp 259, I/O group 8 index 0, at 0,0
+lamp 664          0              DROP TARGET LEFT  # lamp 261, I/O group 8 index 8, at 252,313
+lamp 665          0              DROP TARGET CENTER  # lamp 262, I/O group 8 index 9, at 275,318
+lamp 666          0              DROP TARGET RIGHT  # lamp 263, I/O group 8 index 10, at 299,322
+lamp 679          0              ONE SHALL FALL  # lamp 264, I/O group 8 index 33, at 313,371
+lamp 637          0              MISSION START  # lamp 265, I/O group 8 index 78, at 266,392
+lamp 636          0              FINAL BLOW  # lamp 266, I/O group 8 index 79, at 263,413
+lamp 654          0              ENERGON 4  # lamp 267, I/O group 8 index 43, at 229,271
+lamp 653          0              ENERGON 3  # lamp 268, I/O group 8 index 44, at 228,258
+lamp 652          0              ENERGON 2  # lamp 269, I/O group 8 index 45, at 227,245
+lamp 651          0              ENERGON 1  # lamp 270, I/O group 8 index 46, at 226,232
+lamp 703          0              SPINNER FLASH  # lamp 271, I/O group 8 index 47, at 224,211
+lamp 705          0              OPTIMUS FLASH-RIGHT  # lamp 273, I/O group 8 index 51, at 189,297
+lamp 704          0              OPTIMUS FLASH-LEFT  # lamp 274, I/O group 8 index 52, at 167,310
+lamp 641,642,643  0              OPTIMUS  # lamp 275, I/O group 8 index 56, at 162,272
+lamp 706          0              OPTIMUS SPOT  # lamp 276, I/O group 8 index 28, at 106,332
+lamp 707          0              CAPTIVE BALL FLASH  # lamp 277, I/O group 8 index 29, at 149,422
+lamp 644          0              LOCK  # lamp 278, I/O group 8 index 59, at 179,226
+lamp 690          0              BILLBOARD TRANSFORMERS MULTIBALL  # lamp 279, I/O group 8 index 30, at 182,209
+lamp 691          0              BILLBOARD LOCK 2  # lamp 280, I/O group 8 index 31, at 182,209
+lamp 692          0              BILLBOARD LOCK 1  # lamp 281, I/O group 8 index 32, at 182,209
+lamp 633          0              COMBINER MULTIBALL START  # lamp 282, I/O group 8 index 66, at 211,428
+lamp 629          0              ADD A BALL  # lamp 283, I/O group 8 index 70, at 191,395
+lamp 625          0              SUPER JACKPOT  # lamp 284, I/O group 8 index 74, at 177,352
+
 # ---- checks ----
 # value sound_channel_voice_ptrs: 1 of the 5 lined-up instructions holding 144 on the reference hold 112 here
 # value lamp_slot_level: 1 of the 30 lined-up instructions holding 2 on the reference hold 0 here

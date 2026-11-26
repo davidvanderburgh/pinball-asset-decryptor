@@ -2052,7 +2052,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
         if s_on:
             kind, how = _AC.voice()
             s_note, s_kind = ((s_why, "err") if s_why else (how, "err") if not kind else (
-                "On the card, spoken in %s: SPOKEN SCORES in the service menu, Off to start with." % how, ""))
+                "On the card, spoken in %s: SPOKEN SCORES in the service menu, Off to start with.%s" % (
+                    how, "" if _AC.flipper_hold_ok(prof) else " On this game they are said at each ball's end only "
+                    "(not on the left flipper button in attract)."), ""))
         self.set(cvd_shown=bool(project) and (c_on or not c_why), cvd_on=c_on, cvd_preset=preset,
                  cvd_note=c_note, cvd_note_kind=c_kind,
                  spk_shown=bool(project) and (s_on or not s_why), spk_on=s_on, spk_note=s_note, spk_note_kind=s_kind)

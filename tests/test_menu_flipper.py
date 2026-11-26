@@ -118,3 +118,16 @@ def test_the_menu_and_the_watcher_read_the_same_keys():
     cs = open(os.path.join(SEL, "codeselect.c"), encoding="utf-8").read()
     assert "BOOT_MENU_HIDDEN" in cs and "input_held(in, EV_RIGHT)" in cs
     assert "padmenu_flip_test.sh" in open(os.path.join(SEL, "Makefile"), encoding="utf-8").read()
+
+
+def test_a_loaded_cards_flipper_change_is_a_change():
+    """Found 2026-11-26: a loaded card whose Boot menu or After a game changed said "No change pending" - the names
+    were not in MENU_FIELD_ORDER, which diff_forms filters by."""
+    import dataclasses
+    from pinball_decryptor.webui import multiboot_core as mbc
+    assert "boot menu" in mbc.MENU_FIELD_ORDER and "after a game" in mbc.MENU_FIELD_ORDER
+    before = mbc.MultibootForm(images=[], out="x.raw")
+    menu, _ = mbc.diff_forms(before, dataclasses.replace(before, boot_menu="flipper"))
+    assert "boot menu" in menu
+    menu, _ = mbc.diff_forms(before, dataclasses.replace(before, flip_guard=20))
+    assert "after a game" in menu

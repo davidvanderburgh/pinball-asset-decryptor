@@ -1,0 +1,49 @@
+[jjpmodes 120903.820] loaded into pid 3195065
+[jjpmodes 120903.840] PAD JJP mode SDK 3, modes from /tmp/padmodes/modes
+[jjpmodes 120903.840] title defaults from /tmp/padmodes/modes/title.cfg
+[jjpmodes 120903.840] mode 0 "PAD Mode" (1_example.mode): 1 start shot(s) x1, 3 scoring, 1000000 a shot, 20 s, complete 5 (+5000000), 1 lamp(s), game modes=hold (multiballs too)
+[jjpmodes 120903.840] 2_multiball.mode: balls: multiball 3 at the start (ball save 10 s), add a ball on 1 switch(es) up to 1, ball save 0 s
+[jjpmodes 120903.840] 2_multiball.mode: coils: start -, shot coil_knocker, complete -, hold - 1000 ms at 8/32 on every shot
+[jjpmodes 120903.840] mode 1 "PAD Multiball" (2_multiball.mode): 1 start shot(s) x1, 3 scoring, 2000000 a shot, 600 s, complete 0 (+0), 0 lamp(s), game modes=hold (multiballs too)
+[jjpmodes 120904.785] al_flip_display interposed (first frame)
+[jjpmodes 120906.941] Mode vtable: start 0x10 end 0x20 set_time 0x28 is_running 0x48 timer_paused 0x38 score 0x88 tick 0xa8 start_choreo 0xb0 total_choreo 0xb8
+[jjpmodes 120906.941] engine: Mode objects
+[jjpmodes 120906.941] game modes: 25 Mode classes, 20 live modes
+[jjpmodes 120906.942] hold: start gate on 25 Mode class(es) (start 0x10, restart 0x18) and 8 MultiballRule class(es) (start 0x88, restart 0x90)
+[jjpmodes 120907.722] loaded into pid 3195230
+[jjpmodes 120907.741] PAD JJP mode SDK 3, modes from /tmp/padmodes/modes
+[jjpmodes 120907.741] title defaults from /tmp/padmodes/modes/title.cfg
+[jjpmodes 120907.741] mode 0 "PAD Mode" (1_example.mode): 1 start shot(s) x1, 3 scoring, 1000000 a shot, 20 s, complete 5 (+5000000), 1 lamp(s), game modes=hold (multiballs too)
+[jjpmodes 120907.741] 2_multiball.mode: balls: multiball 3 at the start (ball save 10 s), add a ball on 1 switch(es) up to 1, ball save 0 s
+[jjpmodes 120907.741] 2_multiball.mode: coils: start -, shot coil_knocker, complete -, hold - 1000 ms at 8/32 on every shot
+[jjpmodes 120907.741] mode 1 "PAD Multiball" (2_multiball.mode): 1 start shot(s) x1, 3 scoring, 2000000 a shot, 600 s, complete 0 (+0), 0 lamp(s), game modes=hold (multiballs too)
+[jjpmodes 120908.462] al_flip_display interposed (first frame)
+[jjpmodes 120910.841] Mode vtable: start 0x10 end 0x20 set_time 0x28 is_running 0x48 timer_paused 0x38 score 0x88 tick 0xa8 start_choreo 0xb0 total_choreo 0xb8
+[jjpmodes 120910.841] engine: Mode objects
+[jjpmodes 120910.841] game modes: 25 Mode classes, 20 live modes
+[jjpmodes 120910.842] hold: start gate on 25 Mode class(es) (start 0x10, restart 0x18) and 8 MultiballRule class(es) (start 0x88, restart 0x90)
+[jjpmodes 120910.858] balls: the game's ball saver ok (request 0x6e6a40, add 0x6e70f0, kill 0x6e71c0)
+[jjpmodes 120910.858] coils: coil_knocker "Knocker": pulse up to 32 ms (the game's own 32)
+[jjpmodes 120910.858] start rules: switches only; no game hooks used
+[jjpmodes 120910.858] shot switch_target_tv "Standup (under TV)": dispatch 0x5c7450 (_Z13swd_target_tvj) wrapped
+[jjpmodes 120910.858] shot switch_ramp_center_made "Center Ramp Made": dispatch 0x5c6e90 (_Z20swd_ramp_center_madej) wrapped
+[jjpmodes 120910.858] shot switch_ramp_left_made "Left Ramp Made": dispatch 0x5c6d50 (_Z18swd_ramp_left_madej) wrapped
+[jjpmodes 120910.858] installed: 2 mode(s), 0 changed game mode file(s), 3 shot switch(es), ball-in-play state 5 (now 2)
+[jjpmodes 120910.951] lamps: a LampBuffer is composited while its byte +0x2c is set (read off render_all)
+[jjpmodes 120910.951] lamps: our LampBuffer 0x39c0d9d0 at priority 0x7fff
+[jjpmodes 120930.710] game state 2 -> 4
+[jjpmodes 120964.292] game state 4 -> 5
+[jjpmodes 120964.292] ball in play
+[jjpmodes 120964.292] balls in play: 1
+[jjpmodes 120971.473] "PAD Mode": start choreo
+[jjpmodes 120971.473] "PAD Mode" STARTED for 20 s
+[jjpmodes 120971.501] screen: allegro ok, game text ok
+[jjpmodes 120974.809] "PAD Mode" shot switch_target_tv: +1000000 (hits 1, mode total 1000000)
+[jjpmodes 120976.833] "PAD Mode" shot switch_ramp_center_made: +1000000 (hits 2, mode total 2000000)
+[jjpmodes 120978.849] "PAD Mode" shot switch_ramp_left_made: +1000000 (hits 3, mode total 3000000)
+[jjpmodes 120980.896] "PAD Mode" shot switch_target_tv: +1000000 (hits 4, mode total 4000000)
+[jjpmodes 120982.896] "PAD Mode" shot switch_ramp_center_made: +1000000 (hits 5, mode total 5000000)
+[jjpmodes 120982.896] "PAD Mode" COMPLETED (+5000000, mode total 10000000)
+[jjpmodes 120982.903] "PAD Mode": total choreo (mode total 10000000)
+[jjpmodes 120982.903] "PAD Mode" ENDED by completion
+[jjpmodes 120983.005] "PAD Mode" over: 5 hits, mode total 10000000

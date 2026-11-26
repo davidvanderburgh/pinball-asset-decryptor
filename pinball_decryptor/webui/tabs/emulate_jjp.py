@@ -10,7 +10,9 @@ sweep) are ``webui/emulate_jjp_core.py``'s functions, called, not copied.
 
 Exports ``jjp_emulate_iso_var`` (the run logic persists it per project) and
 answers ``emulate_shutdown`` (the app-quit fan-out).  ``launch_iso(path)`` is
-the Multi-boot tab's "Run in emulator" for a JJP multi-boot ISO.
+the Multi-boot tab's "Run in emulator" for a JJP multi-boot ISO, and the Modes
+tab's Try it (PAD-1605) with ``modes=(runtime, folder)``: the stock ISO run
+with the person's custom modes preloaded, for that start only.
 """
 
 import os
@@ -383,12 +385,23 @@ class EmulateJJPTab(RigTabMixin, TabService):
     def fix_state(self):
         return self._fix_state()
 
-    def launch_iso(self, path):
+    #: PAD-1605: (runtime .so, mode folder) for the start being handed over
+    #: by the Modes tab's Try it; read by _start_async, then cleared
+    _try_modes = None
+
+    def launch_iso(self, path, modes=None):
         """Start the rig on *path* - the Multi-boot tab's 'Run in emulator'
         (item 118), handed a multi-boot install ISO it just built.  Exactly
         the Start button's launch: the rig itself shows the boot menu when the
         image carries one.  Refused, in a log line, while a start or stop is
-        already in flight."""
+        already in flight.
+
+        *modes* (PAD-1605, the Modes tab's Try it) is ``(runtime, folder)``:
+        the JJP mode SDK runtime built for this ISO and the title's mode
+        folder, preloaded into the game the way an ISO PAD built carries them
+        (run_game.sh's JJP_MODS_SO / JJP_MODS_DIR).  For this start only: the
+        Start button afterwards runs the stock game.  A game already running is
+        stopped first, so a changed mode is tried at once."""
         path = (path or "").strip()
         if not path:
             return False
@@ -397,8 +410,20 @@ class EmulateJJPTab(RigTabMixin, TabService):
                       "then start %s." % os.path.basename(path))
             return False
         self.jjp_emulate_iso_var.set(path)
-        self._start_async()
+        self._try_modes = tuple(modes) if modes else None
+        try:
+            self._start_async()             # reads it before any worker starts
+        finally:
+            self._try_modes = None          # a refused start leaves nothing for the next one
         return True
+
+    @staticmethod
+    def _modes_env(modes):
+        """The rig's environment for *modes* ``(runtime, folder)``: Linux paths."""
+        if not modes:
+            return []
+        so, folder = modes
+        return ["JJP_MODS_SO=" + _rig.wsl_path(so), "JJP_MODS_DIR=" + _rig.wsl_path(folder)]
 
     # ------------------------------------------------------------------
     # start / stop
@@ -427,6 +452,8 @@ class EmulateJJPTab(RigTabMixin, TabService):
             # Not fatal here: the attach below may be exactly what is missing.
             self._log("JJP: security key not visible in WSL yet — attaching.")
 
+        modes = self._try_modes
+        stop_first = bool(modes) and self._last_up
         self._busy = True
         self._go_busy = True
         self._started_here = True
@@ -437,6 +464,16 @@ class EmulateJJPTab(RigTabMixin, TabService):
         def work():
             up = False
             try:
+                if stop_first:
+                    # PAD-1605: Try it again with a game up - the modes are read at its start
+                    self._log("JJP: stopping the running game to start it with your modes.")
+                    out = subprocess.run(
+                        jjp.rig_cmd_root("stop.sh"),
+                        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                        timeout=180, creationflags=_rig.CREATE_FLAGS)
+                    self._log("JJP: " + out.stdout.decode("utf-8", "replace").strip())
+                if modes:
+                    self._log("JJP: with your custom modes (Modes tab, Try it): %s" % modes[1])
                 if not self._attach_dongle():
                     # The key never became visible: stop here with the
                     # guidance instead of a redundant minute of restore + wait.
@@ -452,6 +489,7 @@ class EmulateJJPTab(RigTabMixin, TabService):
                         # PAD_AUDIO=1: a rig is silent unless asked (PAD-253)
                         env=["PAD_AUDIO=1",
                              "PAD_AUDIO_CTL=" + self._audio_ctl_file()]
+                        + self._modes_env(modes)
                         + rigslot.board_env() + rigslot.quiet_env()),
                     timeout=1800)
                 up = rc in (0, None) and not saw_wrong_key

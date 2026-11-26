@@ -22,6 +22,8 @@ the tab is this instead (``JjpModesMixin``, the ``jjp`` key of the ``modes`` sta
   or blocks (the Stern Blocks editor with JJP's palette, plugins/jjp/block_modes.py), which
   write that C++.  A changed mode's code is built in the app's Linux at once (one build at a
   time, ``mkjjpmodes.py code`` as root: it installs g++ the first time), its result in Check;
+* Try it (PAD-1605): the stock ISO started in the Emulate tab with these modes preloaded,
+  as on Spike 2 and Spooky - nothing built but the mode runtime, once per ISO (the stick's).
 * Write to USB stick (PAD-1375): the everyday way in - a ``hotfix`` folder the game's own
   Update USB hot fix runs (``mkjjpmodes.py stick``), no reinstall, scores kept; or a stick that
   turns the modes off, back on, or takes them out.  The steps at the machine are shown with it.
@@ -58,6 +60,9 @@ class JjpModesMixin:
     #: came in while it ran, so it runs once more
     _jjp_code = None
     _jjp_code_again = False
+    #: Try it (PAD-1605): {"lines", "done", "ok", "msg"} and the runtime build's lines
+    _jjp_try = None
+    _jjp_try_lines = None
 
     # ------------------------------------------------------------------ gate
     def _jjp_on(self):
@@ -110,7 +115,7 @@ class JjpModesMixin:
         if label != self._jjp_label:
             # PAD-1412: the game is the selected card's - a new card is a new title
             self._jjp_label, self._jjp_file = label, ""
-            self._jjp_build = self._jjp_stick = None
+            self._jjp_build = self._jjp_stick = self._jjp_try = None
         st = {"on": True, "titles": titles, "label": self._jjp_label, "max": CM.MAX_MODES,
               "card": card, "card_name": os.path.basename(card),
               "groups": [{"title": g, "keys": list(ks)} for g, ks in CM.FORM_GROUPS],
@@ -142,6 +147,7 @@ class JjpModesMixin:
                 st["sounds"] = self._jjp_sounds_state(port)
                 st["build"] = self._jjp_build_state()
                 st["stick"] = self._jjp_stick_state()
+                st["try"] = self._jjp_try_state()
         self.set(jjp=st)
 
     def _jjp_fields(self):
@@ -607,6 +613,112 @@ class JjpModesMixin:
         self.log("JJP modes: " + msg, "info" if ok else "error")
         self._jjp_publish(screens=self._jjp_screens_state(), layout=self._jjp_layout())
 
+    # ------------------------------------------------------------------ Try it (PAD-1605)
+    def _jjp_try_state(self):
+        t = dict(getattr(self, "_jjp_try", None) or {})
+        t["running"] = self._jjp_job == "try"
+        t["busy"] = self._jjp_proc is not None
+        t["iso"] = (self._jjp_build_state() or {}).get("iso") or ""
+        t["have"] = self.window.service("emulate_jjp") is not None
+        return t
+
+    @rpc
+    def jjp_try(self):
+        """These modes in the Emulate tab: the stock ISO (Build's) started there with the mode
+        runtime and the mode folder preloaded, for that start only, as on Spike 2 and Spooky.
+        The runtime is built for the ISO first when it has not been (the stick's, kept per ISO).
+        -> True when the start was handed over, False while the runtime is being built."""
+        label = self._jjp_need()
+        if self._jjp_proc is not None:
+            raise ValueError("a build, a stick or a screens run is going")
+        iso = (self._jjp_build_state() or {}).get("iso") or ""
+        if not iso or not os.path.isfile(iso):
+            raise ValueError("Pick the stock install ISO of %s under Build first: the game runs from it"
+                             % CM.display_name(label))
+        modes, problems = CM.check(label)
+        if problems:
+            raise ValueError("Fix the %d problem(s) the check found first" % len(problems))
+        if not modes:
+            raise ValueError("Make a mode first")
+        if (self._jjp_code or {}).get("running") or CM.code_stale(label):
+            self.jjp_build_code()
+            raise ValueError("A mode's C++ is being built: Try it again once Check says it is built")
+        if self.window.service("emulate_jjp") is None:
+            raise ValueError("the Emulate tab is not in this app")
+        runtime = CM.runtime_path(iso)
+        if os.path.isfile(runtime):
+            return self._jjp_try_hand_over(label, iso, runtime)
+        os.makedirs(os.path.dirname(runtime), exist_ok=True)
+        self._jjp_try_lines = []
+        self._jjp_try = {"lines": [], "done": False, "ok": False, "started": time.time(),
+                         "msg": "Building the mode runtime for %s (once for this ISO)..." % os.path.basename(iso)}
+        self._jjp_proc = True
+        self._jjp_job = "try"
+        self._jjp_publish(**{"try": self._jjp_try_state(), "build": self._jjp_build_state()})
+        threading.Thread(target=self._jjp_try_worker, args=(label, iso, runtime, self.jjp_runtime_argv(iso, runtime)),
+                         daemon=True, name="jjp-modes-try").start()
+        return False
+
+    def _jjp_try_hand_over(self, label, iso, runtime):
+        emu = self.window.service("emulate_jjp")
+        if emu is None or not hasattr(emu, "launch_iso"):
+            raise ValueError("the Emulate tab is not in this app")
+        self.window.select_tab("emulate_jjp")
+        ok = bool(emu.launch_iso(iso, modes=(runtime, CM.title_dir(label))))
+        self._jjp_try = {"done": True, "ok": ok, "lines": [],
+                         "msg": ("Started in the Emulate tab with your modes." if ok else
+                                 "The Emulate tab is starting or stopping a game: Try it again when it is done.")}
+        self._jjp_publish(**{"try": self._jjp_try_state()})
+        return ok
+
+    def _jjp_try_worker(self, label, iso, runtime, argv):
+        ok, msg = False, ""
+        try:
+            rc = self._jjp_stream(argv, self._jjp_try_lines, self._jjp_try_tick)
+            if getattr(self, "_jjp_cancelled", False):
+                msg = "Stopped."
+            elif rc != 0 or not os.path.isfile(runtime):
+                refused = [ln for ln in self._jjp_try_lines if ln.startswith("refused:")]
+                msg = (refused[-1][len("refused:"):].strip() if refused
+                       else "The mode runtime did not build (exit %d): %s"
+                       % (rc, self._jjp_try_lines[-1] if self._jjp_try_lines else "no output"))
+            else:
+                ok = True
+        except Exception as e:                              # noqa: BLE001
+            msg = "The mode runtime build could not start: %s" % e
+        self.ctx.loop.post(self._jjp_try_end, label, iso, runtime, ok, msg)
+
+    def _jjp_try_tick(self):
+        if getattr(self, "_jjp_try", None) is None:
+            return
+        self._jjp_try["lines"] = list(self._jjp_try_lines[-10:])
+        self._jjp_try["msg"] = self._jjp_try_lines[-1] if self._jjp_try_lines else ""
+        self._jjp_publish(**{"try": self._jjp_try_state()})
+
+    def _jjp_try_end(self, label, iso, runtime, ok, msg):
+        self._jjp_proc = None
+        self._jjp_job = ""
+        self._jjp_cancelled = False
+        if ok and label == self._jjp_label:
+            try:
+                self._jjp_try_hand_over(label, iso, runtime)
+            except Exception as e:                          # noqa: BLE001
+                ok, msg = False, str(e)
+        if not ok:
+            self._jjp_try = {"done": True, "ok": False, "msg": msg,
+                             "lines": list((self._jjp_try_lines or [])[-10:])}
+            self.log("JJP modes: " + msg, "error")
+        self._jjp_publish(**{"try": self._jjp_try_state(), "build": self._jjp_build_state(),
+                             "stick": self._jjp_stick_state()})
+
+    @rpc
+    def jjp_try_cancel(self):
+        p = self._jjp_proc
+        if self._jjp_job != "try" or p is None or p is True:
+            return
+        self._jjp_cancelled = True
+        threading.Thread(target=self._jjp_stop_linux, args=(p, CM.RUNTIME_PATTERN), daemon=True).start()
+
     @rpc
     def jjp_screens_cancel(self):
         p = self._jjp_proc
@@ -661,7 +773,7 @@ class JjpModesMixin:
         self._jjp_remember("iso", (path or "").strip())
         if path and not self._jjp_recall("out"):
             pass
-        self._jjp_publish(build=self._jjp_build_state())
+        self._jjp_publish(**{"build": self._jjp_build_state(), "try": self._jjp_try_state()})
 
     @rpc
     def jjp_iso_browse(self):

@@ -4571,6 +4571,16 @@ JJP_MODES_HELP = [
         "not have, a number that is not one, a mode with nothing to start it. The "
         "Build button waits until the check finds nothing.",
     ]),
+    ("Trying your modes", [
+        "**Try it** starts the game in the Emulate tab with your modes in it, from the stock "
+        "install ISO picked under Build, without building an ISO or writing a stick. Start a "
+        "game there and make a mode's start shots: it runs inside the game as it would on the "
+        "machine. The first time for an ISO, the mode runtime is built for it in the app's "
+        "Linux first (as administrator); after that Try it starts at once. Changed a mode? "
+        "Press Try it again: a running game is stopped and started again with the change. The "
+        "Emulate tab's own Start button runs the stock game, without your modes. The purple "
+        "key is needed, as for any JJP game in the emulator.",
+    ]),
     ("Putting it on the machine", [
         "**Write to USB stick** is the everyday way: it writes a hotfix folder to a "
         "FAT32 USB stick, and the game's own USB update screen installs your modes "

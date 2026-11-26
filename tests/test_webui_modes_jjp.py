@@ -622,3 +622,130 @@ def test_the_tips_tell_the_start_rules():
                   "Starts on a combo", "Combo seconds", "Start count resets", "Starts at most once a"):
         assert label in making, label
         assert label.split(" (")[0] in " ".join(CM.LABELS.values()), label     # the form's own words
+
+
+# ------------------------------------------------------------------ Try it (PAD-1605)
+def test_try_it_builds_the_runtime_once_then_starts_the_emulate_tab_with_the_modes(tmp_path, preview_on, monkeypatch):
+    """PAD-1605: as on Spike 2 and Spooky, the stock ISO in the Emulate tab with these modes."""
+    calls = _fake_runtime(tmp_path, monkeypatch)
+    iso = _stock_iso(tmp_path)
+    with web_app(tmp_path, mfr="jjp") as w:
+        j = _open_wonka(w)
+        w.call("modes.jjp_set_iso", str(iso))
+        emu = w.window.service("emulate_jjp")
+        seen = []
+        monkeypatch.setattr(emu, "launch_iso", lambda path, modes=None: seen.append((path, modes)) or True)
+        t = _jjp(w)["try"]
+        assert t["iso"] == str(iso) and t["have"] and not t["running"]
+        assert w.run(_svc(w).jjp_try) is False                   # the runtime is built first
+        assert _wait(w, lambda: (_jjp(w).get("try") or {}).get("done"))
+        t = _jjp(w)["try"]
+        assert t["ok"], t
+        runtime = CM.runtime_path(str(iso))
+        assert seen == [(str(iso), (runtime, j["folder"]))]
+        assert os.path.isfile(runtime) and len(calls) == 1
+        # the next Try it starts at once, the runtime kept
+        assert w.run(_svc(w).jjp_try) is True
+        assert len(seen) == 2 and len(calls) == 1
+
+
+def test_try_it_waits_for_a_clean_check_and_the_stock_iso(tmp_path, preview_on, monkeypatch):
+    with web_app(tmp_path, mfr="jjp") as w:
+        _open_wonka(w)
+        emu = w.window.service("emulate_jjp")
+        seen = []
+        monkeypatch.setattr(emu, "launch_iso", lambda path, modes=None: seen.append(path) or True)
+        w.call("modes.jjp_set_iso", str(tmp_path / "nosuch.iso"))
+        with pytest.raises(Exception, match="stock install ISO"):
+            w.run(_svc(w).jjp_try)
+        w.call("modes.jjp_set_iso", str(_stock_iso(tmp_path)))
+        w.call("modes.jjp_set", "start", "nosuch_switch")
+        with pytest.raises(Exception, match="problem"):
+            w.run(_svc(w).jjp_try)
+        assert seen == []
+
+
+def test_the_jjp_page_calls_try_its_rpcs():
+    from pinball_decryptor.webui.modes_jjp import JjpModesMixin
+    root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    src = open(os.path.join(root, "pinball_decryptor", "webui", "static", "js", "tabs", "modes_jjp.js"),
+               encoding="utf-8").read()
+    page = src[src.index("export function JjpModes"):src.index("// ------------------------------------------------------------------ Spooky (PAD-1417)")]
+    assert "<${JjpTryCard} j=${j} />" in page
+    card = src[src.index("function JjpTryCard"):src.index("function BuildCard")]
+    for n in ('R("try")', 'R("try_cancel")'):
+        assert n in card
+    assert callable(JjpModesMixin.jjp_try) and callable(JjpModesMixin.jjp_try_cancel)
+
+
+def _emu_jjp_rig(monkeypatch):
+    from pinball_decryptor.webui import emulate_jjp_core as core
+    from pinball_decryptor.core import timesync
+    monkeypatch.setattr(core, "rig_available", lambda: True)
+    monkeypatch.setattr(timesync, "quiet_clocks_async", lambda *a, **k: None)
+    seen = []
+
+    def cmd(*a, **k):
+        seen.append((a, k))
+        return ["true"]
+    monkeypatch.setattr(core, "rig_cmd_root", cmd)
+    return seen
+
+
+def _emu_ready(emu, monkeypatch):
+    monkeypatch.setattr(emu, "_refuse_off", lambda: False)
+    monkeypatch.setattr(emu, "_attach_dongle", lambda *a, **k: True)
+    monkeypatch.setattr(emu, "_run_streaming", lambda *a, **k: 1)
+
+
+def _watch_calls(seen, timeout=5.0):
+    end = time.time() + timeout
+    while time.time() < end and not any(a[0] == "watch.sh" for a, _k in seen):
+        time.sleep(0.02)
+    return [k for a, k in seen if a[0] == "watch.sh"]
+
+
+def test_the_emulate_tab_preloads_the_modes_for_that_start_only(tmp_path, monkeypatch):
+    seen = _emu_jjp_rig(monkeypatch)
+    with web_app(tmp_path, mfr="jjp") as w:
+        emu = w.window.service("emulate_jjp")
+        _emu_ready(emu, monkeypatch)
+        iso = _stock_iso(tmp_path)
+        so = tmp_path / "rt" / "Wonka.so"
+        folder = tmp_path / "modes" / "Wonka-v03.03"
+        assert emu.launch_iso(str(iso), modes=(str(so), str(folder)))
+        env = _watch_calls(seen)[0]["env"]
+        from pinball_decryptor.webui import rig
+        assert "JJP_MODS_SO=" + rig.wsl_path(str(so)) in env
+        assert "JJP_MODS_DIR=" + rig.wsl_path(str(folder)) in env
+        assert emu._try_modes is None
+        # the next plain Start is the stock game
+        seen.clear()
+        assert _wait(w, lambda: not emu._busy, 5)
+        assert emu.launch_iso(str(iso))
+        assert not any(e.startswith("JJP_MODS_") for e in _watch_calls(seen)[0]["env"])
+
+
+def test_try_it_stops_a_running_game_first(tmp_path, monkeypatch):
+    seen = _emu_jjp_rig(monkeypatch)
+    import subprocess
+    ran = []
+
+    class R:
+        stdout = b"stopped"
+    monkeypatch.setattr(subprocess, "run", lambda argv, **k: ran.append(argv) or R())
+    with web_app(tmp_path, mfr="jjp") as w:
+        emu = w.window.service("emulate_jjp")
+        _emu_ready(emu, monkeypatch)
+        emu._last_up = True
+        assert emu.launch_iso(str(_stock_iso(tmp_path)), modes=("a.so", "modes"))
+        _watch_calls(seen)
+        order = [a[0] for a, _k in seen]
+        assert order.index("stop.sh") < order.index("watch.sh")
+        # a plain Start with a game up is never a restart here (toggle stops it instead)
+        seen.clear()
+        assert _wait(w, lambda: not emu._busy, 5)
+        emu._last_up = True
+        emu.launch_iso(str(_stock_iso(tmp_path)))
+        _watch_calls(seen)
+        assert "stop.sh" not in [a[0] for a, _k in seen]

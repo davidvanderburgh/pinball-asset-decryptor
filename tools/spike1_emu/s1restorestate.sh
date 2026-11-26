@@ -16,6 +16,14 @@
 # game ELF).  When the live tree's sha1 differs, the slot's own copy is
 # REINSTALLED first - criu validates mapped files byte-for-byte and a rebuilt
 # qemu or a re-patched game ELF would otherwise kill the restore halfway.
+#
+# Packed slots (PAD-1601, see s1savestate.sh): the checkpoint is unpacked
+# into a staging dir under saves/ BEFORE the live guest is touched (a slot
+# that will not unpack leaves the game playing), restored from there, and the
+# staging dir goes once the guest is back.  The binaries come from the slot's
+# own bin/ when it has one (older raw slots), else from the title's shared
+# .bin/<sha1>.zst, checked against the sha1 before anything is replaced.
+# Raw slots saved before packing restore in place, as they always did.
 set -u
 REF=${1:-quicksave}
 HERE="$(cd "$(dirname "$0")" && pwd)"
@@ -31,7 +39,7 @@ case "$REF" in
 */*) DDIR="$S1_WORK/saves/$REF" ;;
 *)   DDIR="$S1_WORK/saves/$CLABEL/$REF" ;;
 esac
-[ -d "$DDIR" ] || { echo "[s1restore] no slot at $DDIR"; exit 1; }
+[ -f "$DDIR/restore.env" ] || { echo "[s1restore] no slot at $DDIR"; exit 1; }
 SGAME=$(sed -n 's/^game //p' "$DDIR/restore.env" | head -1)
 if [ -n "$SGAME" ] && [ "$SGAME" != "$CLABEL" ]; then
     echo "[s1restore] slot is for $SGAME but the rig is running $CLABEL -"
@@ -41,6 +49,22 @@ fi
 R=$(readlink -f "$S1_WORK/rootfs")
 NEWPTY=$(cat "$S1_WORK/ttyS4.slave" 2>/dev/null)
 ls /dev/s1i2c0 >/dev/null 2>&1 || { echo "[s1restore] the rig is not up (no CUSE devices) - start the emulator first"; exit 1; }
+
+# --- a packed slot: unpack it first, while the live game still plays -------
+# IDIR is where criu reads the checkpoint from: the slot itself when raw.
+IDIR=$DDIR; LOADDIR=""
+if [ -f "$DDIR/slot.tar.zst" ]; then
+    command -v zstd >/dev/null 2>&1 || { echo "[s1restore] this slot is packed and there is no zstd here to unpack it"; exit 1; }
+    LOADDIR="$S1_WORK/saves/.load.$$"
+    trap 'rm -rf "$LOADDIR"' EXIT
+    rm -rf "$LOADDIR"; mkdir -p "$LOADDIR"
+    if ! zstd -d -q -c "$DDIR/slot.tar.zst" | tar -C "$LOADDIR" -xf -; then
+        echo "[s1restore] the slot would not unpack (damaged?) - the game keeps playing"
+        exit 1
+    fi
+    IDIR=$LOADDIR
+fi
+STORE="$(dirname "$DDIR")/.bin"
 
 # --- park the restart loop, then clear every live guest --------------------
 touch "$S1_WORK/holdoff"
@@ -54,14 +78,28 @@ for OLD in $(S1_WORK="$S1_WORK" bash "$HERE/s1own.sh" game 2>/dev/null); do
 done
 
 # --- reinstall the slot's binaries when the live tree differs --------------
-# bin lines record HOST-side canonical paths (the bind sources).
+# bin lines record HOST-side canonical paths (the bind sources).  The copy
+# is the slot's own bin/<name> (raw slots) or the title's shared store.
 while read -r kind sum dest name; do
     [ "$kind" = bin ] || continue
     case "$dest" in /*) ;; *) continue ;; esac
     cur=$(sha1sum "$dest" 2>/dev/null | cut -d' ' -f1)
-    if [ "$cur" != "$sum" ] && [ -f "$DDIR/bin/$name" ]; then
-        cp -f "$DDIR/bin/$name" "$dest" \
+    [ "$cur" = "$sum" ] && continue
+    if [ -f "$IDIR/bin/$name" ]; then
+        cp -f "$IDIR/bin/$name" "$dest" \
             && echo "[s1restore] reinstalled the slot's $name (the live one was rebuilt)"
+    elif [ -s "$STORE/$sum.zst" ]; then
+        tmp="$dest.s1restore.$$"
+        if zstd -d -q -f "$STORE/$sum.zst" -o "$tmp" \
+                && [ "$(sha1sum "$tmp" | cut -d' ' -f1)" = "$sum" ] \
+                && chmod 755 "$tmp" && cp -f "$tmp" "$dest"; then
+            echo "[s1restore] reinstalled the slot's $name (the live one was rebuilt)"
+        else
+            echo "[s1restore] WARNING: the stored $name for this slot is damaged - the restore may fail"
+        fi
+        rm -f "$tmp"
+    else
+        echo "[s1restore] WARNING: the live $name was rebuilt and this slot's copy is gone - the restore may fail"
     fi
 done < "$DDIR/restore.env"
 
@@ -85,7 +123,7 @@ done < "$DDIR/restore.env"
 # --- the throwaway namespace the restore runs inside -----------------------
 # WSL's init-namespace mounts refuse a plain umount, so strip a copy of the
 # namespace down to /, /proc, /dev, /dev/pts + a rootfs re-bind for --root.
-NSCLEAN=$DDIR/nsclean.sh
+NSCLEAN=$IDIR/nsclean.sh
 cat > "$NSCLEAN" <<EOF
 mount --make-rprivate /
 awk '\$5 != "/" && \$5 != "/proc" && \$5 != "/dev" && \$5 != "/dev/pts" { print \$5 }' \
@@ -103,8 +141,8 @@ EOF
 
 do_restore() {
     unshare -m bash "$NSCLEAN" \
-        "$CRIU" restore -D "$DDIR" -v4 -o restore.log -d \
-            --pidfile "$DDIR/restored.pid" \
+        "$CRIU" restore -D "$IDIR" -v4 -o restore.log -d \
+            --pidfile "$IDIR/restored.pid" \
             --root "$R" -L "$PLUGDIR" \
             ${REST_EXT[@]+"${REST_EXT[@]}"} ${INHERIT[@]+"${INHERIT[@]}"}
 }
@@ -112,30 +150,33 @@ do_restore() {
 # growing-output retry: a quicksaved guest kept appending to its logs after
 # the dump, and a fresh boot rewrote them; truncate exactly the file criu
 # names to exactly the size it wants, bounded attempts.
-rm -f "$DDIR/restored.pid"
+rm -f "$IDIR/restored.pid"
 for attempt in 1 2 3 4 5 6 7 8; do
     if do_restore; then
-        NEWPID=$(cat "$DDIR/restored.pid" 2>/dev/null)
+        NEWPID=$(cat "$IDIR/restored.pid" 2>/dev/null)
         # hand the keeper the save-time ball picture (see s1savestate.sh)
-        if [ -f "$DDIR/s1ball.state" ]; then
-            printf 'state %s\n' "$(tr -d '\n' < "$DDIR/s1ball.state")" \
+        if [ -f "$IDIR/s1ball.state" ]; then
+            printf 'state %s\n' "$(tr -d '\n' < "$IDIR/s1ball.state")" \
                 >> "$S1_WORK/s1ball.cmd" 2>/dev/null || true
         fi
         echo "[s1restore] ok - guest pid ${NEWPID:-?} resumed from $SGAME/${DDIR##*/}"
         exit 0
     fi
-    bad=$(grep -a 'has bad size' "$DDIR/restore.log" | tail -1)
+    bad=$(grep -a 'has bad size' "$IDIR/restore.log" | tail -1)
     if [ -n "$bad" ]; then
         f=$(sed -n 's/.*File \(.*\) has bad size.*/\1/p' <<<"$bad")
         want=$(sed -n 's/.*expect \([0-9]*\).*/\1/p' <<<"$bad")
         if [ -n "$f" ] && [ -n "$want" ] && [ -e "$R/$f" ]; then
             truncate -s "$want" "$R/$f"
-            rm -f "$DDIR/restored.pid"
+            rm -f "$IDIR/restored.pid"
             continue
         fi
     fi
     echo "[s1restore] FAILED:"
-    grep -aE 'Error' "$DDIR/restore.log" | tail -10 | sed 's/^/    /'
+    grep -aE 'Error' "$IDIR/restore.log" | tail -10 | sed 's/^/    /'
+    # the unpacked copy goes; criu's log (the diagnosis) is kept
+    cp -f "$IDIR/restore.log" "$S1_WORK/s1restore.failed.log" 2>/dev/null \
+        && echo "[s1restore] criu's full log: $S1_WORK/s1restore.failed.log"
     echo "[s1restore] the boot loop is parked - rm $S1_WORK/holdoff to boot fresh"
     exit 1
 done

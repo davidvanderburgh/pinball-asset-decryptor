@@ -20,7 +20,8 @@ import sys
 #: what each source answers with when it cannot scan
 NO_PC_WIFI = "This computer has no Wi-Fi to scan with (or it is switched off)."
 NO_PC_TOOL = "This computer cannot list Wi-Fi networks here; type the network name instead."
-NO_MACHINE = "The machine is not reachable: find it on the Network tab first (remote access on, the game running)."
+NO_MACHINE = ("The machine is not reachable: find it on the Network tab first (remote access on, and a game, the "
+              "test card or a menu with the network running).")
 MACHINE_OFF = "The machine's Wi-Fi is not running just now (it starts with the game); type the network name instead."
 
 

@@ -4,20 +4,46 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Pinball Asset Decryptor</title>
-<!-- PAD-1545: what the window shows from its first paint until the app has
-     answered with its state (the window opens while the app is still being
-     made).  Inline and wordless: it is drawn before app.css and the
-     language catalog are in.  main.js clears it for the first render. -->
+<!-- PAD-1545, PAD-1628: what the window shows from its first paint until the
+     app's first screen is ready (the window opens while the app is still
+     being made): a steel ball bouncing around the whole window.  Inline and
+     wordless: it is drawn before app.css and the language catalog are in.
+     Styles only, so it keeps moving while the scripts load: the ball's path
+     is two plain animations, a steady run side to side and a fall that
+     speeds up towards the floor and plays back as the rise.  It sits OVER
+     #app; core/pageboot.js fades it away once the first screen is drawn. -->
 <style>
 html, body { margin: 0; height: 100%; background: #15171a; }
-#page-boot { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; }
-#page-boot i { width: 26px; height: 26px; border-radius: 50%; border: 3px solid #323841; border-top-color: #8a929c; animation: page-boot-spin .8s linear infinite; }
-@keyframes page-boot-spin { to { transform: rotate(360deg); } }
+#page-boot { position: fixed; inset: 0; z-index: 9999; overflow: hidden; background: var(--bg, #15171a);
+  animation: pb-in .6s ease both; transition: opacity .45s cubic-bezier(.4,0,.2,1); }
+#page-boot.out { opacity: 0; pointer-events: none; }
+@keyframes pb-in { from { opacity: 0; } }
+.pb-x, .pb-y, .pb-x i { position: absolute; left: 0; top: 0; width: 26px; height: 26px; }
+.pb-x { animation: pb-x 3.1s linear infinite alternate; animation-delay: calc(var(--g, 0) * 16ms - 1.2s); }
+.pb-y { animation: pb-y .92s cubic-bezier(.33,0,.67,.33) infinite alternate; animation-delay: calc(var(--g, 0) * 16ms - 1.84s); }
+@keyframes pb-x { from { transform: translateX(0); } to { transform: translateX(calc(100vw - 26px)); } }
+@keyframes pb-y { from { transform: translateY(16vh); } to { transform: translateY(calc(100vh - 26px)); } }
+.pb-x i { border-radius: 50%;
+  background: radial-gradient(circle at 34% 30%, #ffffff 0 12%, #cfd4da 26%, #7c848d 62%, #3b4046 100%);
+  box-shadow: 0 0 16px rgba(232,163,61,.4), 0 3px 5px rgba(0,0,0,.55);
+  transition: transform .45s cubic-bezier(.3,0,.2,1), opacity .35s ease; }
+/* the trail: fainter, smaller copies a few frames behind the ball */
+.pb-x[style] i { background: radial-gradient(circle, rgba(232,163,61,.9), rgba(232,163,61,0) 70%); box-shadow: none;
+  opacity: calc(.4 - var(--g) * .042); transform: scale(calc(1 - var(--g) * .07)); }
+/* leaving: the ball lifts off the glass towards you as the app comes in */
+#page-boot.out .pb-x:not([style]) i { transform: scale(2.6); opacity: 0; }
+#page-boot.out .pb-x[style] i { opacity: 0; }
+@media (prefers-reduced-motion: reduce) {
+  #page-boot, .pb-x, .pb-y { animation: none; }
+  .pb-x { left: calc(50% - 13px); top: calc(50% - 13px); }
+  .pb-x[style] { display: none; }
+}
 </style>
 <link rel="stylesheet" href="/static/css/app.css">
 <script type="module" src="/static/js/main.js"></script>
 </head>
 <body>
-<div id="app"><div id="page-boot" role="status" aria-label="Starting"><i></i></div></div>
+<div id="app"></div>
+<div id="page-boot" role="status" aria-label="Starting"><span class="pb-x" style="--g:8"><span class="pb-y"><i></i></span></span><span class="pb-x" style="--g:7"><span class="pb-y"><i></i></span></span><span class="pb-x" style="--g:6"><span class="pb-y"><i></i></span></span><span class="pb-x" style="--g:5"><span class="pb-y"><i></i></span></span><span class="pb-x" style="--g:4"><span class="pb-y"><i></i></span></span><span class="pb-x" style="--g:3"><span class="pb-y"><i></i></span></span><span class="pb-x" style="--g:2"><span class="pb-y"><i></i></span></span><span class="pb-x" style="--g:1"><span class="pb-y"><i></i></span></span><span class="pb-x"><span class="pb-y"><i></i></span></span></div>
 </body>
 </html>

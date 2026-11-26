@@ -2,6 +2,7 @@
 import { html, render } from "./vendor/preact-htm.js";
 import { loadAll, connect, POLL, stopPolling } from "./core/store.js";
 import { Shell, applyZoom } from "./shell.js";
+import { dismissPageBoot } from "./core/pageboot.js";
 
 async function boot() {
   const root = document.getElementById("app");
@@ -10,13 +11,15 @@ async function boot() {
   } catch (err) {
     root.innerHTML = '<div style="padding:40px;font-family:sans-serif">The app did not answer (' +
       String(err.message || err) + '). Close this window and start the app again.</div>';
+    dismissPageBoot();
     return;
   }
   try {
     const z = (window.__padState && window.__padState.zoom) || null;
     if (z) applyZoom(z);
   } catch (e) { /* ignore */ }
-  root.textContent = "";     // index.html's spinner (PAD-1545)
+  // index.html's bouncing ball stays over the page until the first screen
+  // is drawn; the shell and its tab host send it away (core/pageboot.js)
   render(html`<${Shell} />`, root);
   connect();
   // captures and tests: say when the first render has settled

@@ -194,8 +194,10 @@ def test_a_mixed_part_shows_its_sum_and_a_lit_glimmer_is_not_black(tmp_path):
 def test_dof_lines_name_the_same_numbers():
     one = padcabinet.strip_dof_lines(200, 1)
     left = one["left"].split("/")
-    assert left[0] == "E200 #FF0000 NOBOOL" and left[7] == "E207 #FFFFFF NOBOOL" and len(left) == 8
-    assert one["right"].split("/")[0] == "E208 #FF0000 NOBOOL"
+    # a whole strip names its area too: without it DOF leaves the strip dark (PAD-1603)
+    assert left[0] == "E200 #FF0000 AW100 AH100 NOBOOL" and left[7] == "E207 #FFFFFF AW100 AH100 NOBOOL"
+    assert len(left) == 8 and all(" AW100 AH100 " in b for s in one.values() for b in s.split("/"))
+    assert one["right"].split("/")[0] == "E208 #FF0000 AW100 AH100 NOBOOL"
     two = padcabinet.strip_dof_lines(200, 2)
     left = two["left"].split("/")
     assert left[0] == "E200 #FF0000 AT50 AH50 NOBOOL"              # bottom part: the lower half

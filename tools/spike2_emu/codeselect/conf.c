@@ -61,6 +61,7 @@ static int test_kind_of(const char *key, const char *file)
     if (!strcmp(key, "test_scene")) return png ? TK_SCENE : TK_NONE;
     if (!strcmp(key, "test_video")) return gif || padv || clip ? TK_VIDEO : TK_NONE;
     if (!strcmp(key, "test_sound")) return wav ? TK_SOUND : TK_NONE;
+    if (!strcmp(key, "test_layered")) return clip || padv ? TK_LAYERED : TK_NONE;
     return png ? TK_IMAGE : gif || padv || clip ? TK_VIDEO : wav ? TK_SOUND : TK_NONE;
 }
 
@@ -566,7 +567,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
             else conf_warn(c, "%s:%d: testcard=%s is not 'on' or 'off': read as 'off'",
                            path, lineno, val);
         } else if (!strcmp(key, "test") || !strcmp(key, "test_image") || !strcmp(key, "test_video")
-                   || !strcmp(key, "test_scene") || !strcmp(key, "test_sound")) {
+                   || !strcmp(key, "test_scene") || !strcmp(key, "test_sound")
+                   || !strcmp(key, "test_layered")) {
             /* PAD-1279: <file>|<label> - one of the card's own test pictures,
              * animations or sounds (Settings > Test pictures), a file name in
              * the media directory.  A name with a path in it, or beyond
@@ -587,6 +589,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                     conf_warn(c, "%s:%d: %s=%s: not a file that list shows (%s): dropped", path,
                               lineno, key, fld[0], !strcmp(key, "test_sound") ? "a .wav"
                               : !strcmp(key, "test_video") ? "a .padv, .gif or .mp4/.mov"
+                              : !strcmp(key, "test_layered") ? "an .mp4/.mov/.m4v clip or a .padv"
                               : "a .png");
                 else {
                     if (!strcmp(key, "test")) c->ntest_flat++;

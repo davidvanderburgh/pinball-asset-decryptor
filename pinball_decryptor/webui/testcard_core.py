@@ -132,6 +132,11 @@ class Item(object):
     def from_project(self):
         return bool(self.project)
 
+    @property
+    def shown_kind(self):
+        """The list it is in on the card and the Test card tab: a layered test has its own (Simon, 2026-11-26)."""
+        return "layered" if self.layers else self.kind
+
     def key(self):
         tail = self.layers + ((self.player,) if self.player else ())
         if self.project:
@@ -246,13 +251,26 @@ class TestCardList(object):
             self.save()
         return added, refused
 
-    def add_layered(self, item):
-        """A layered test (Simon, 2026-11-26: the Scenes tab's Layered test… button) -> '' or why not."""
-        if len(self.items) >= MAX_ITEMS:
+    def layered(self):
+        """[(index, item)] of the layered tests, in the list's order."""
+        return [(i, it) for i, it in enumerate(self.items) if it.kind == "video" and it.layers]
+
+    def add_layered(self, item, replace=None):
+        """A layered test (Simon, 2026-11-26: the Scenes tab's Layered test… button) -> '' or why not.  *replace*:
+        the index of the layered test it takes the place of (Edit).  Simon: "lets max that at 5"."""
+        mine = [i for i, _it in self.layered()]
+        if replace is not None and replace not in mine:
+            return "that layered test is no longer on the list"
+        if replace is None and len(mine) >= MAX_LAYERED:
+            return "the test card takes at most %d layered tests: remove one first" % MAX_LAYERED
+        if replace is None and len(self.items) >= MAX_ITEMS:
             return "the test card takes at most %d items" % MAX_ITEMS
-        if any(it.key() == item.key() for it in self.items):
+        if any(it.key() == item.key() for i, it in enumerate(self.items) if i != replace):
             return "that layered test is already on the list"
-        self.items.append(item)
+        if replace is None:
+            self.items.append(item)
+        else:
+            self.items[replace] = item
         self.save()
         return ""
 
@@ -271,8 +289,8 @@ class TestCardList(object):
         """Move item i up (d=-1) or down (d=1) within its own list (kind)."""
         if not 0 <= i < len(self.items):
             return False
-        kind = self.items[i].kind
-        same = [k for k, it in enumerate(self.items) if it.kind == kind]
+        kind = self.items[i].shown_kind
+        same = [k for k, it in enumerate(self.items) if it.shown_kind == kind]
         at = same.index(i)
         if not 0 <= at + d < len(same):
             return False
@@ -289,7 +307,11 @@ class TestCardList(object):
         return False
 
     def counts(self):
-        return {k: sum(1 for it in self.items if it.kind == k) for k in KINDS}
+        out = {k: sum(1 for it in self.items if it.shown_kind == k) for k in KINDS}
+        n = sum(1 for it in self.items if it.layers)
+        if n:                                           # the layered tests' own list (Simon, 2026-11-26)
+            out["layered"] = n
+        return out
 
     def ordered(self):
         """The items as the card's menu lists them: by list, each in the user's order."""
@@ -336,6 +358,10 @@ S3_NO_NETWORK = ("remote access, Wi-Fi start-up and extra room are for a Spike 2
 
 
 _SHARED = []
+
+
+#: Simon (2026-11-26): "lets max that at 5 for the UI"
+MAX_LAYERED = 5
 
 
 def shared():

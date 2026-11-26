@@ -403,18 +403,26 @@ html.bp-1180 .scenes-card { flex: 0 0 auto; height: 980px; }
 .tree-game.words .tg-what-row { flex-wrap: nowrap; }
 .tree-game.words .tg-words { width: 100%; box-sizing: border-box; color: var(--ink); }
 
-/* THE LAYERED TEST (Simon, 2026-11-26): the bar under the list that opens it, and its dialog's rows - a picture of
-   each scene, its name, then its controls beside it (a grid, never stretched across a wide window) */
-.lt-bar { gap: 8px; align-items: center; padding: 6px 8px; margin-top: 6px; border: 1px solid var(--accent);
-  border-radius: 6px; background: var(--accent-soft); }
-.lt-dialog .k { margin-top: 6px; }
-.lt-row { display: grid; grid-template-columns: 96px minmax(0, 360px) 170px auto auto auto; gap: 8px;
+/* THE LAYERED TEST (Simon, 2026-11-26): the layered tests' list under the Scenes list (Edit, bin, New), and the
+   dialog's two pickers, built the same so they line up: search over the list, the list, details, its button - and
+   its picture on the right ("Make the UI look lined up properly and consistent/similar for both the two items") */
+.lt-tests { gap: 4px; padding: 6px 8px; margin-top: 6px; border: 1px solid var(--accent); border-radius: 6px;
+  background: var(--accent-soft); }
+.lt-tests-head { gap: 8px; align-items: center; }
+.lt-test { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; }
+.lt-dialog .k { margin-top: 8px; }
+.lt-picker { display: grid; grid-template-columns: 380px 240px; gap: 12px; align-items: start; justify-content: start; }
+.lt-pick-left { gap: 6px; min-width: 0; }
+.lt-pick-left .select, .lt-pick-left select, .lt-pick-left input { width: 100%; box-sizing: border-box; }
+.lt-details { min-height: 2.6em; }
+.lt-shown { gap: 8px; align-items: center; margin-top: 4px; }
+.lt-preview { width: 240px; height: 135px; background: #000; border-radius: 4px; overflow: hidden; display: flex;
+  align-items: center; justify-content: center; }
+.lt-preview video, .lt-preview img, .lt-big img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.lt-big { width: 240px; height: 135px; display: flex; align-items: center; justify-content: center; }
+.lt-layers { gap: 4px; }
+.lt-row { display: grid; grid-template-columns: 96px minmax(0, 290px) 170px auto auto auto; gap: 8px;
   align-items: center; justify-content: start; }
-.lt-hit { grid-template-columns: 96px minmax(0, 520px) auto; }
-.lt-hits { max-height: 300px; overflow-y: auto; padding-right: 4px; }
 .lt-thumb { width: 96px; height: 54px; background: #000; border-radius: 3px; overflow: hidden; display: flex;
   align-items: center; justify-content: center; }
 .lt-thumb img { max-width: 100%; max-height: 100%; object-fit: contain; }
-.lt-video { display: grid; grid-template-columns: minmax(0, 380px) 240px; gap: 12px; align-items: start;
-  justify-content: start; }
-.lt-preview { width: 240px; height: 135px; background: #000; border-radius: 4px; object-fit: contain; }

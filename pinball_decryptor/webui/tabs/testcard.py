@@ -22,7 +22,10 @@ from .. import compat
 from .. import testcard_core as tc
 from ...core import pad_temp
 
-KIND_ORDER = {k: n for n, k in enumerate(tc.KINDS)}
+# Simon (2026-11-26): "Layered tests have their own area rather than being grouped into videos" - their own list,
+# after the scenes, as on the machine's TEST CARD menu (LAYERED SCENE TESTS)
+SHOWN_KINDS = ("image", "video", "scene", "layered", "sound")
+KIND_ORDER = {k: n for n, k in enumerate(SHOWN_KINDS)}
 CARD_TYPES = [("Card images", "*.raw *.img"), ("All files", "*.*")]
 
 
@@ -54,7 +57,7 @@ class TestCardTab(TabService):
         lst = tc.shared()
         rows = []
         for i, it in enumerate(lst.items):
-            rows.append({"i": i, "kind": it.kind, "label": it.label,
+            rows.append({"i": i, "kind": "layered" if it.layers else it.kind, "label": it.label,
                          "from": it.game or os.path.basename(it.project.rstrip("/\\")) if it.project else "",
                          "where": (it.rel if it.project else it.path) + (
                              # the layered test: the scenes drawn over the clip

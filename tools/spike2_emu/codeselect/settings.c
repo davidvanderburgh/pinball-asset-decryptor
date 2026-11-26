@@ -76,10 +76,11 @@ enum screen { S_LIST, S_COLOR, S_TEST, S_DONE, S_MENU, S_PICK };
  * VIDEOS / SCENES / SOUNDS"), and Color correction after them when the card
  * has a profile to tune.  G_FLAT is the multi-boot card's one list of
  * everything (Settings > Test pictures). */
-enum { G_CARD, G_IMAGES, G_VIDEOS, G_SCENES, G_SOUNDS, G_COLOR, G_NMENU, G_FLAT = -1 };
+/* Simon (2026-11-26): LAYERED SCENE TESTS, the layered tests' own list (a clip with scenes over it), after SCENES */
+enum { G_CARD, G_IMAGES, G_VIDEOS, G_SCENES, G_LAYERED, G_SOUNDS, G_COLOR, G_NMENU, G_FLAT = -1 };
 static const char *const G_TITLE[G_NMENU] = { "DEFAULT PAD TEST CARD", "IMAGES", "VIDEOS",
-                                              "SCENES", "SOUNDS", "COLOR CORRECTION" };
-static const char *const G_ONE[G_NMENU] = { "pattern", "picture", "video", "scene", "sound", "" };
+                                              "SCENES", "LAYERED SCENE TESTS", "SOUNDS", "COLOR CORRECTION" };
+static const char *const G_ONE[G_NMENU] = { "pattern", "picture", "video", "scene", "layered test", "sound", "" };
 /* the viewer's BACK entry (the flat list only) */
 #define T_BACK (TP_NBUILTIN + CONF_MAX_TESTS)
 #define T_MAX (TP_NBUILTIN + CONF_MAX_TESTS + 1)
@@ -377,6 +378,7 @@ static int group_of_kind(int kind)
     case TK_VIDEO: return G_VIDEOS;
     case TK_SCENE: return G_SCENES;
     case TK_SOUND: return G_SOUNDS;
+    case TK_LAYERED: return G_LAYERED;
     }
     return -2;
 }
@@ -1083,8 +1085,10 @@ static void draw_menu(struct state *st)
     struct settings_env *e = st->e;
     float s = S(e);
     int W = e->g->w, k, n = menu_count(st);
-    int rw = (int)(820 * s), rh = (int)(80 * s), gap = (int)(14 * s), x = (W - rw) / 2;
-    int y0 = (int)((n > 5 ? 128 : 150) * s);
+    /* seven rows (LAYERED SCENE TESTS and COLOR CORRECTION both there) are shorter, to stay above the footer */
+    int rw = (int)(820 * s), rh = (int)((n > 6 ? 68 : 80) * s), gap = (int)((n > 6 ? 10 : 14) * s);
+    int x = (W - rw) / 2;
+    int y0 = (int)((n > 6 ? 118 : n > 5 ? 128 : 150) * s);
     char sub[200];
 
     gfx_fill(e->g, TH(e, BACKGROUND));
@@ -1101,9 +1105,9 @@ static void draw_menu(struct state *st)
             snprintf(sub, sizeof sub, "%d %s%s", cnt, G_ONE[k], cnt == 1 ? "" : "s");
         gfx_round_frame(e->g, x, y, rw, rh, (int)(20 * s), (int)((on ? 7 : 3) * s),
                         on ? TH(e, FRAME_HL) : TH(e, FRAME), on ? TH(e, CARD_HL) : TH(e, CARD));
-        text_fit(e, G_TITLE[k], 34 * s, 20 * s, rw - (int)(60 * s), W / 2, y + (int)(38 * s), 0,
-                 !cnt ? TH(e, SUBTITLE) : on ? TH(e, TITLE_HL) : TH(e, TITLE));
-        text_fit(e, sub, 22 * s, 14 * s, rw - (int)(60 * s), W / 2, y + (int)(66 * s), 0,
+        text_fit(e, G_TITLE[k], (n > 6 ? 30 : 34) * s, 20 * s, rw - (int)(60 * s), W / 2,
+                 y + rh * 38 / 80, 0, !cnt ? TH(e, SUBTITLE) : on ? TH(e, TITLE_HL) : TH(e, TITLE));
+        text_fit(e, sub, (n > 6 ? 20 : 22) * s, 14 * s, rw - (int)(60 * s), W / 2, y + rh * 66 / 80, 0,
                  on ? TH(e, SUBTITLE_HL) : TH(e, SUBTITLE));
     }
     draw_footer(e, e->leave ? K_MOVE ": choose      " K_GO ": open      " K_BACK ": back to the games"
@@ -1476,7 +1480,7 @@ int settings_snapshot(struct settings_env *e, const char *screen, int row, int e
     memset(&st, 0, sizeof st);
     st.e = e;
     st.move_voice = -1;
-    static const char *const GNAME[G_COLOR] = { "card", "images", "videos", "scenes", "sounds" };
+    static const char *const GNAME[G_COLOR] = { "card", "images", "videos", "scenes", "layered", "sounds" };
     const char *colon = strchr(screen, ':');
     int group = e->testcard ? G_CARD : G_FLAT, k;
     size_t base = colon ? (size_t)(colon - screen) : strlen(screen);
@@ -1486,7 +1490,8 @@ int settings_snapshot(struct settings_env *e, const char *screen, int row, int e
             if (!strcmp(colon + 1, GNAME[k])) found = k;
         group = found;
         if (found < 0) {
-            snprintf(why, (size_t)whylen, "--screen %s: after ':' comes card, images, videos, scenes or sounds",
+            snprintf(why, (size_t)whylen,
+                     "--screen %s: after ':' comes card, images, videos, scenes, layered or sounds",
                      screen);
             return -1;
         }

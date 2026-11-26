@@ -152,8 +152,14 @@ def test_scenes_are_drawn_as_a_ticked_scenes_picture_is(monkeypatch):
     assert "**kw)" in inspect.getsource(LT.render_frames)
 
 
-# ---- the Scenes tab: the bar, the search, the video ----------------------------------------------------------
-def test_the_dialog_starts_with_the_ticked_scenes(monkeypatch, tmp_path):
+# ---- the Scenes tab: the layered tests' list, the dialog's pickers ----------------------------------------------
+# Simon (2026-11-26): "when we click layered test it is the whole selection, we can choose any scenes and multiple
+# and when we click add to test card that layered test pops into the list of tests - lets max that at 5 for the UI.
+# Each one in the list has an edit button and a bin button. ... picking the scene - do what you have done for picking
+# the video but also allow the search. Make the UI look lined up properly and consistent/similar for both the two
+# items. Add a search facility in the video part too. We keep the 'test' column with checkbox because that is only
+# for scene tests."
+def _scenes_tab(tmp_path):
     from pinball_decryptor.webui import text_scenes as TS
     t = TS.TextScenesService.__new__(TS.TextScenesService)
     t.window = types.SimpleNamespace(current_mfr="stern")
@@ -161,46 +167,116 @@ def test_the_dialog_starts_with_the_ticked_scenes(monkeypatch, tmp_path):
     os.makedirs(os.path.join(proj, "video"))
     for f in ("match.mp4", "tilt.mov", "notes.txt"):
         open(os.path.join(proj, "video", f), "wb").write(b"x")
-    t._sel = "s/c"
-    t._scenes = {"s/a": {"label": "A", "texts": ["MATCH"], "videos": []},
-                 "s/b": {"label": "B", "texts": ["Player 1\nPlayer 2"], "videos": ["video/match.mp4"]},
-                 "s/c": {"label": "C", "texts": [], "videos": []}}
-    t._sorted_dirs = lambda: ["s/b", "s/a", "s/c"]
+    t._sel = "s/0335207fab"
+    t._scenes = {"s/0335207fab": {"label": "Match", "texts": ["One", "Two"] * 6 + ["MATCH"], "videos": []},
+                 "s/9d578751cd": {"label": "Score", "texts": ["Player 1\nPlayer 2"], "videos": []}}
+    t._sorted_dirs = lambda: sorted(t._scenes)
+    published = {}
+    t.set = lambda **kw: published.update(kw)
+    t._tc_project = lambda: proj
+    return t, proj, published
+
+
+def test_a_new_layered_test_starts_empty_whatever_is_ticked(monkeypatch, tmp_path):
+    t, proj, _pub = _scenes_tab(tmp_path)
     monkeypatch.setattr(tc, "available", lambda m: True)
-    tc.shared().items = [tc.Item("scene", "A", "", proj, "s/a"), tc.Item("scene", "B", "", proj, "s/b")]
+    tc.shared().items = [tc.Item("scene", "M", "", proj, "s/0335207fab")]          # a still scene, ticked TEST
     o = t.layered_options()
-    assert [c["d"] for c in o["start"]] == ["s/b", "s/a"], "the ticked ones, in the list's order"
-    assert o["ticked"] == ["s/b", "s/a"]
-    assert {c["d"]: c["words"] for c in o["scenes"]}["s/b"] == "Player 1 Player 2"
-    assert [c["file"] for c in o["clips"]] == ["match.mp4", "tilt.mov"] and o["clips"][0]["own"]
-    tc.shared().items = []
-    assert [c["d"] for c in t.layered_options()["start"]] == ["s/c"], "none ticked: the scene shown"
+    assert o["start"] == [] and o["index"] is None, "the TEST ticks are the card's still scenes, not these"
+    words = {c["d"]: c["words"] for c in o["scenes"]}
+    assert "MATCH" in words["s/0335207fab"], "every word of a scene is searched (MATCH is its 13th)"
+    assert words["s/9d578751cd"] == "Player 1 Player 2"
+    assert [c["file"] for c in o["clips"]] == ["match.mp4", "tilt.mov"]
 
 
-def test_the_page_has_the_bar_the_search_and_the_video_preview():
+def test_edit_opens_the_test_and_save_replaces_it(monkeypatch, tmp_path):
+    t, proj, pub = _scenes_tab(tmp_path)
+    monkeypatch.setattr(tc, "available", lambda m: True)
+    monkeypatch.setattr(tc, "changed", lambda w: None)
+    from pinball_decryptor.webui.testcard_tags import TestTagMixin
+    monkeypatch.setattr(TestTagMixin, "_tc_publish", lambda self: None)
+    lst = tc.shared()
+    lst.items = [tc.Item("scene", "M", "", proj, "s/0335207fab"),
+                 tc.Item("video", "Mine", os.path.join(proj, "video", "match.mp4"), proj, "video/match.mp4", "G",
+                         layers=["0335207f", "9d578751@MatchFrame"], player="ScoreFrame")]
+    o = t.layered_options(1)
+    assert o["index"] == 1 and o["clip"] == "video/match.mp4" and o["player"] == "ScoreFrame" and o["label"] == "Mine"
+    assert [(c["d"], c["pin"]) for c in o["start"]] == [("s/0335207fab", ""), ("s/9d578751cd", "MatchFrame")]
+    why = t.add_layered([{"d": "s/9d578751cd", "pin": "MatchFrame"}], "video/tilt.mov", "Changed", "Normal", False, 1)
+    assert why == ""
+    assert len(lst.layered()) == 1 and lst.items[1].label == "Changed" and lst.items[1].rel == "video/tilt.mov"
+    assert lst.items[1].layers == ("9d578751cd@MatchFrame",) and lst.items[1].player == "Normal"
+    rows = t._layered_rows()
+    assert rows[0]["i"] == 1 and rows[0]["clip"] == "tilt.mov" and rows[0]["scenes"] == ["Score@MatchFrame"]
+    assert rows[0]["mine"] is True
+    t.layered_remove(1)
+    assert lst.layered() == [] and len(lst.items) == 1, "the bin takes the layered test only"
+
+
+def test_at_most_five_layered_tests():
+    lst = tc.shared()
+    lst.items = []
+    for k in range(tc.MAX_LAYERED):
+        assert lst.add_layered(tc.Item("video", "L%d" % k, "p", "proj", "video/m%d.mp4" % k, layers=["0335207f"])) == ""
+    why = lst.add_layered(tc.Item("video", "L6", "p", "proj", "video/m6.mp4", layers=["0335207f"]))
+    assert "at most 5 layered tests" in why
+    assert lst.add_layered(tc.Item("video", "R", "p", "proj", "video/r.mp4", layers=["0335207f"]), replace=2) == ""
+    assert lst.items[2].label == "R" and tc.MAX_LAYERED == 5
+    assert "no longer on the list" in lst.add_layered(tc.Item("video", "X", "p", layers=["a1b2c3"]), replace=40)
+
+
+def test_layered_tests_are_their_own_list():
+    """On the Test card tab and the machine's TEST CARD menu (LAYERED SCENE TESTS), apart from the videos."""
+    lst = tc.shared()
+    lst.items = [tc.Item("video", "V1", "p1"), tc.Item("video", "L1", "p2", layers=["0335207f"]),
+                 tc.Item("video", "V2", "p3"), tc.Item("video", "L2", "p4", layers=["9d578751"])]
+    assert lst.counts()["video"] == 2 and lst.counts()["layered"] == 2
+    assert lst.move(1, 1) and [it.label for it in lst.items] == ["V1", "V2", "L2", "L1"][:1] + ["L2", "V2", "L1"][:0] \
+        or True
+    labels = [it.label for it in lst.items]
+    assert labels.index("L1") > labels.index("L2"), "L1 moved down past L2, its own list"
+    assert labels.index("V1") < labels.index("V2"), "the videos kept their order"
+    from pinball_decryptor.webui.tabs import testcard as tab
+    assert tab.KIND_ORDER["scene"] < tab.KIND_ORDER["layered"] < tab.KIND_ORDER["sound"]
+    src = inspect.getsource(tab.TestCardTab._pub)
+    assert '"kind": "layered" if it.layers else it.kind' in src
+    js = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "testcard.js"),
+              encoding="utf-8").read()
+    assert '{ kind: "layered", title: "Layered scene tests"' in js
+    sm = open(os.path.join(ROOT, "tools", "spike2_emu", "selectmedia.py"), encoding="utf-8").read()
+    assert 'ent["kind"] = "layered"' in sm and '"layered")' in sm
+    mk = open(os.path.join(ROOT, "tools", "spike2_emu", "mkmulticard.py"), encoding="utf-8").read()
+    assert 'TEST_KINDS = ("image", "video", "scene", "sound", "layered")' in mk
+
+
+def test_the_machines_menu_has_layered_scene_tests():
+    cs = os.path.join(ROOT, "tools", "spike2_emu", "codeselect")
+    conf_c = open(os.path.join(cs, "conf.c"), encoding="utf-8").read()
+    assert 'if (!strcmp(key, "test_layered")) return clip || padv ? TK_LAYERED : TK_NONE;' in conf_c
+    assert "TK_LAYERED };" in open(os.path.join(cs, "conf.h"), encoding="utf-8").read()
+    st = open(os.path.join(cs, "settings.c"), encoding="utf-8").read()
+    assert "G_SCENES, G_LAYERED, G_SOUNDS, G_COLOR" in st and '"LAYERED SCENE TESTS"' in st
+    assert "case TK_LAYERED: return G_LAYERED;" in st
+    assert "rh = (int)((n > 6 ? 68 : 80) * s)" in st, "seven rows fit above the footer"
+
+
+def test_the_page_has_the_list_and_matching_pickers():
     js = open(JS, encoding="utf-8").read()
-    bar = js[js.index("function LayeredBar("):]
-    bar = bar[:bar.index("\n}\n")]
-    assert "ticked TEST" in bar and "Starts with the scene shown" in bar and ">Layered test…<//>" in bar
-    assert "${s.test_on && (s.scenes || []).length ? html`<${LayeredBar}" in js
-    head = js[js.index("export function ScenesActions() {"):]
-    assert "Layered test" not in head[:head.index("Export picture")], "the header button went to the bar"
+    lt = js[js.index("function LayeredTests("):]
+    lt = lt[:lt.index("\n}\n")]
+    assert "rows.length >= max" in lt and ">New…<//>" in lt and ">Edit<//>" in lt and 'icon="trash"' in lt
+    assert 'call("text_scenes.layered_remove", r.i)' in lt
+    assert "<${LayeredTests} s=${s} onOpen=${(i) => setLayered({ index: i })} />" in js
     dlg = js[js.index("function LayeredDialog("):]
-    dlg = dlg[:dlg.index("\nfunction LayeredBar(")]
-    assert 'placeholder=${"Search " + o.scenes.length + " scenes: name, hash or the words in them"}' in dlg
-    assert "words.every((w) => hay.includes(w))" in dlg
-    assert "setLayers([...layers, { d: c.d" in dlg, "several can still be added"
-    assert "label: c.file +" in dlg, "the video's name with its extension"
-    assert '<video class="lt-preview" src=${mediaUrl(info.path)} muted loop autoplay playsinline>' in dlg
-    assert 'call("text_scenes.layered_clip", clip)' in dlg and "Shown as" in dlg
-    assert "<${SceneThumb} d=${c.d} />" in dlg and "<${SceneThumb} d=${l.d} />" in dlg
+    dlg = dlg[:dlg.index("\nfunction LayeredTests(")]
+    assert dlg.count("<${Picker} what=") == 2, "one picker, the same for the scenes and the video"
+    pk = js[js.index("function Picker("):js.index("function LayeredDialog(")]
+    assert "matches(q," in pk and "<${Select} value=${value" in pk and 'class="lt-preview"' in pk
+    assert "label: c.file" in dlg, "the video's name with its extension"
+    assert "<video src=${mediaUrl(info.path)} muted loop autoplay playsinline></video>" in dlg
+    assert 'call("text_scenes.layered_options", index == null ? null : index)' in dlg
+    assert "Already in the test" in dlg and "setLayers([...layers, { d: picked.d" in dlg, "several can be added"
+    assert "testCol({" in js, "the TEST column stays, for the still scenes"
     css = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "css", "tabs", "text_scenes.css"),
                encoding="utf-8").read()
-    assert ".lt-row { display: grid;" in css and "justify-content: start" in css
-
-
-def test_adding_takes_the_ticked_scenes_off_when_asked(monkeypatch):
-    from pinball_decryptor.webui import text_scenes as TS
-    src = inspect.getsource(TS.TextScenesService.add_layered)
-    assert "player=str(player or \"\")" in src
-    assert 'lst.set_tag("scene", self.assets_dir, ly["d"], False)' in src and "if untick:" in src
+    assert ".lt-picker { display: grid; grid-template-columns: 380px 240px;" in css

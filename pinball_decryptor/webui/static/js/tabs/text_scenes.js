@@ -209,81 +209,110 @@ function Divider({ k, horizontal, measure, split, setSplit, save, dir = 1, label
 // the scenes are drawn over it, frame by frame (ACTION freezes, a long press goes back).
 const LAYERED_TIP = { head: "Layered test", lines: [
   "Puts a video on the Test card tab's list with scenes drawn over it, as the game shows them over a clip - to check on the machine how they line up.",
-  "It starts with the scenes ticked TEST in the list (else the scene shown); add more in it by searching their name, hash or words.",
+  "Pick its scenes in it from the whole list (search by name, hash or words): the TEST ticks are the card's still scenes, not these. Up to 5 layered tests; Edit or remove each here.",
   "Add more scenes to draw over it (the lowest first), and pin a scene to a frame or a label of its own if it should hold there (e.g. the score panel at its Match frame).",
   "On the machine: ACTION freezes the video, a long press goes back." ] };
 
 // Simon (2026-11-26) on the first table run: "there is no search facility, just a drop down list so it is VERY hard
 // to know what you want to select. Although being able to select multiple is excellent and we don't want to lose
 // that", "The video - should show the file extension too and perhaps we could have a preview thumbnail", and the
-// number "is in the wrong place" (Godzilla shows Match in its video player's ScoreFrame state, not 1:1).
+// number "is in the wrong place" (Godzilla shows Match in its video player's ScoreFrame state, not 1:1).  Then:
+// "picking the scene - do what you have done for picking the video but also allow the search ... Make the UI look
+// lined up properly and consistent/similar for both the two items. Add a search facility in the video part too."
 const ltThumbs = {};
 
-function SceneThumb({ d }) {
+function SceneThumb({ d, cls = "lt-thumb" }) {
   const [p, setP] = useState(ltThumbs[d] || "");
   useEffect(() => {
     let live = true;
+    if (!d) { setP(""); return undefined; }
     if (!ltThumbs[d]) call("text_scenes.layered_thumb", d).then((x) => { if (x && live) { ltThumbs[d] = x; setP(x); } });
     else setP(ltThumbs[d]);
     return () => { live = false; };
   }, [d]);
-  return html`<div class="lt-thumb">${p ? html`<img src=${mediaUrl(p)} alt="" loading="lazy" />` : null}</div>`;
+  return html`<div class=${cls}>${p ? html`<img src=${mediaUrl(p)} alt="" loading="lazy" />` : null}</div>`;
 }
 
 function mb(n) { return n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB"; }
+
+function matches(q, hay) {
+  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const h = hay.toLowerCase();
+  return words.every((w) => h.includes(w));
+}
 
 const SHOWN_TIP = { head: "Video shown as", lines: [
   "How the game's video player draws this video: it can show a clip full size or zoomed in (cropped), and the game picks which for each moment.",
   "Godzilla shows the Match video with the score panel on screen in its ScoreFrame state (1.06x, moved up), so the video's own 0 lines up beside the Match digit.",
   "Pick another if what you see on the machine does not line up." ] };
 
-const MAX_HITS = 40;
+// ONE PICKER, the same for the scenes and the video: a search over the list, the list (drop-down) of what matches,
+// what the picked one is under it, its picture on the right, and its button
+function Picker({ items, value, onChange, what, preview, details, action }) {
+  const [q, setQ] = useState("");
+  const shown = q.trim() ? items.filter((it) => matches(q, it.label + " " + (it.sub || "") + " " + (it.words || ""))) : items;
+  const keep = value && !shown.some((it) => it.value === value) ? items.filter((it) => it.value === value) : [];
+  const opts = [{ value: "", label: shown.length ? "Pick a " + what + "… (" + shown.length + (q.trim() ? " match" : "") + ")" : "No " + what + " matches" },
+    ...keep.concat(shown).map((it) => ({ value: it.value, label: it.label + (it.sub ? "  ·  " + it.sub : "") }))];
+  return html`<div class="lt-picker">
+    <div class="stack lt-pick-left">
+      <${Field} sm value=${q} placeholder=${"Search " + items.length + " " + what + "s" + (what === "scene" ? ": name, hash or the words in them" : ": name")}
+        onChange=${setQ} />
+      <${Select} value=${value || ""} options=${opts} onChange=${onChange} />
+      <div class="small muted lt-details">${details}</div>
+      ${action ? html`<div class="row">${action}</div>` : null}
+    </div>
+    <div class="lt-preview">${preview}</div>
+  </div>`;
+}
 
-function LayeredDialog({ onClose }) {
+function LayeredDialog({ index, onClose }) {
   const [o, setO] = useState(null);
   const [layers, setLayers] = useState([]);
+  const [pick, setPick] = useState("");
   const [clip, setClip] = useState("");
   const [info, setInfo] = useState(null);
   const [player, setPlayer] = useState("");
   const [label, setLabel] = useState("");
   const [why, setWhy] = useState("");
-  const [q, setQ] = useState("");
-  const [untick, setUntick] = useState(true);
   useEffect(() => { (async () => {
-    const got = await call("text_scenes.layered_options");
+    const got = await call("text_scenes.layered_options", index == null ? null : index);
     setO(got || { why: "No answer." });
-    if (got && got.start) setLayers(got.start.map((c) => ({ d: c.d, label: c.label, hash: c.hash, pin: "" })));
+    if (got && got.start) setLayers(got.start.map((c) => ({ d: c.d, label: c.label, hash: c.hash, pin: c.pin || "" })));
     if (got && got.clip) setClip(got.clip);
+    if (got && got.label) setLabel(got.label);
+    if (got && got.player) setPlayer(got.player);
   })(); }, []);
   useEffect(() => { (async () => {
     setInfo(null);
     if (!clip) return;
     const got = await call("text_scenes.layered_clip", clip);
     setInfo(got || {});
-    setPlayer((got && got.state) || "");
+    setPlayer((p) => (got && (got.states || []).some((st) => st.label === p) ? p : (got && got.state) || ""));
   })(); }, [clip]);
   const add = async () => {
     const w = await call("text_scenes.add_layered", layers.map((l) => ({ d: l.d, pin: l.pin })), clip, label, player,
-      !!(o.ticked || []).length && untick);
+      false, index == null ? null : index);
     if (w) setWhy(w); else onClose();
   };
   const move = (i, d) => { const n = layers.slice(); const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setLayers(n); };
-  const inList = new Set(layers.map((l) => l.d));
-  const words = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const hits = !o || o.why || !words.length ? [] : o.scenes.filter((c) => {
-    const hay = (c.label + " " + c.hash + " " + (c.words || "")).toLowerCase();
-    return words.every((w) => hay.includes(w));
-  });
   const ready = o && !o.why;
-  const ticked = (o && o.ticked) || [];
+  const inList = new Set(layers.map((l) => l.d));
+  const picked = ready && pick ? o.scenes.find((c) => c.d === pick) : null;
+  const addPicked = () => { if (picked && !inList.has(picked.d)) setLayers([...layers, { d: picked.d, label: picked.label, hash: picked.hash, pin: "" }]); setPick(""); };
   const footer = html`<${Button} onClick=${onClose}>Cancel<//>
-    <${Button} kind="primary" disabled=${!ready || !layers.length || !clip} onClick=${add}>Add to test card<//>`;
-  return html`<${Modal} title="Layered test" onClose=${onClose} wide footer=${footer}>
+    <${Button} kind="primary" disabled=${!ready || !layers.length || !clip} onClick=${add}>${index == null ? "Add to test card" : "Save"}<//>`;
+  return html`<${Modal} title=${index == null ? "New layered test" : "Edit layered test"} onClose=${onClose} wide footer=${footer}>
     ${!o ? html`<span class="small muted">Reading the project…</span>`
       : o.why ? html`<span class="small bad">${o.why}</span>` : html`<div class="stack lt-dialog">
       <span class="small muted">The video plays under the scenes, as the game shows them over a clip. The lowest scene is first; a scene pinned to a frame or label holds there, else it plays from its first frame.</span>
-      <div class="k">${"Scenes drawn over the video" + (ticked.length ? " (started with the " + ticked.length + " ticked TEST)" : "")}</div>
-      <div class="stack lt-layers">
+      <div class="k">Scenes drawn over the video</div>
+      <${Picker} what="scene" value=${pick} onChange=${setPick}
+        items=${o.scenes.map((c) => ({ value: c.d, label: c.label, sub: c.hash, words: c.words }))}
+        details=${picked ? html`<div class="ellip" title=${picked.words || ""}>${picked.words || "No words in it"}</div>` : "Pick a scene, then add it: add as many as you like."}
+        preview=${picked ? html`<${SceneThumb} d=${picked.d} cls="lt-big" />` : null}
+        action=${html`<${Button} size="sm" kind="primary" disabled=${!picked || inList.has(pick)} onClick=${addPicked}>${picked && inList.has(pick) ? "Already in the test" : "Add this scene"}<//>`} />
+      ${layers.length ? html`<div class="stack lt-layers">
         ${layers.map((l, i) => html`<div class="lt-row" key=${l.d + i}>
           <${SceneThumb} d=${l.d} />
           <span class="ellip" title=${l.label + " (" + l.hash + ")"}>${(i + 1) + ". " + l.label}<span class="muted small">${"  " + l.hash}</span></span>
@@ -291,58 +320,44 @@ function LayeredDialog({ onClose }) {
             onChange=${(v) => setLayers(layers.map((x, j) => (j === i ? { ...x, pin: v } : x)))} />
           <${Button} size="xs" disabled=${i === 0} onClick=${() => move(i, -1)} title="Lower (drawn earlier)">↑<//>
           <${Button} size="xs" disabled=${i === layers.length - 1} onClick=${() => move(i, 1)} title="Higher (drawn later)">↓<//>
-          <${Button} size="xs" disabled=${layers.length === 1} onClick=${() => setLayers(layers.filter((_, j) => j !== i))} title="Take it out">✕<//>
+          <${Button} size="xs" onClick=${() => setLayers(layers.filter((_, j) => j !== i))} title="Take it out">✕<//>
         </div>`)}
-      </div>
-      <div class="k">Add more scenes</div>
-      <${Field} sm value=${q} placeholder=${"Search " + o.scenes.length + " scenes: name, hash or the words in them"} onChange=${setQ} />
-      ${words.length ? html`<div class="stack lt-hits">
-        ${hits.length ? hits.slice(0, MAX_HITS).map((c) => html`<div class="lt-row lt-hit" key=${c.d}>
-          <${SceneThumb} d=${c.d} />
-          <span class="ellip" title=${c.label + " (" + c.hash + ")" + (c.words ? "\n" + c.words : "")}>${c.label}<span class="muted small">${"  " + c.hash}</span>
-            ${c.words ? html`<div class="small muted ellip">${c.words}</div>` : null}</span>
-          <${Button} size="xs" disabled=${inList.has(c.d)} title=${inList.has(c.d) ? "Already in the test" : "Draw it over the others"}
-            onClick=${() => setLayers([...layers, { d: c.d, label: c.label, hash: c.hash, pin: "" }])}>${inList.has(c.d) ? "Added" : "Add"}<//>
-        </div>`) : html`<span class="small muted">No scene matches.</span>`}
-        ${hits.length > MAX_HITS ? html`<span class="small muted">${"…and " + (hits.length - MAX_HITS) + " more: type more to narrow it."}</span>` : null}
-      </div>` : null}
+      </div>` : html`<span class="small muted">No scenes in it yet.</span>`}
       <div class="k">Video under them</div>
-      <div class="lt-video">
-        <div class="stack">
-          <${Select} width=${360} value=${clip} options=${[{ value: "", label: "Pick a video…" }, ...o.clips.map((c) => ({ value: c.rel, label: c.file + (c.own ? "  (in this scene)" : "") }))]}
-            onChange=${setClip} />
-          ${info && info.file ? html`<span class="small muted">${[info.seconds ? info.seconds.toFixed(1) + " s" : "", info.w ? info.w + "x" + info.h : "",
-            info.fps ? info.fps + " fps" : "", mb(info.bytes || 0)].filter(Boolean).join(" · ")}</span>` : null}
-          ${info && (info.states || []).length ? html`<div class="row" ...${tip(SHOWN_TIP)}>
+      <${Picker} what="video" value=${clip} onChange=${setClip}
+        items=${o.clips.map((c) => ({ value: c.rel, label: c.file, sub: c.own ? "in these scenes" : "" }))}
+        details=${info && info.file ? html`<div>${[info.seconds ? info.seconds.toFixed(1) + " s" : "", info.w ? info.w + "x" + info.h : "",
+            info.fps ? info.fps + " fps" : "", mb(info.bytes || 0)].filter(Boolean).join(" · ")}</div>
+          ${(info.states || []).length ? html`<div class="row lt-shown" ...${tip(SHOWN_TIP)}>
             <span class="small">Shown as</span>
             <${Select} sm width=${220} value=${player} options=${info.states.map((st) => ({ value: st.label, label: st.label + "  (" + st.zoom + "x)" }))} onChange=${setPlayer} />
-          </div>` : info && info.file ? html`<span class="small muted">No scene of the project plays it: it is shown full size.</span>` : null}
-        </div>
-        ${info && info.path ? html`<video class="lt-preview" src=${mediaUrl(info.path)} muted loop autoplay playsinline></video>` : html`<div class="lt-preview"></div>`}
-      </div>
+          </div>` : html`<div>No scene of the project plays it: it is shown full size.</div>`}` : clip ? "Reading the video…" : "Pick the video the scenes are drawn over."}
+        preview=${info && info.path ? html`<video src=${mediaUrl(info.path)} muted loop autoplay playsinline></video>` : null} />
       <div class="k">Name on the test card</div>
-      <${Field} sm width="420px" value=${label} placeholder="this scene over the video (left empty)" onChange=${setLabel} />
-      ${ticked.length ? html`<${Check} checked=${untick} onChange=${setUntick}
-        label=${"Take the " + ticked.length + " ticked scene" + (ticked.length === 1 ? "" : "s") + " off the test card's still pictures (they are in the layered test)"} />` : null}
+      <${Field} sm width="420px" value=${label} placeholder="the top scene over the video (left empty)" onChange=${setLabel} />
       ${why ? html`<span class="small bad">${why}</span>` : null}
     </div>`}
   <//>`;
 }
 
-// Simon (2026-11-26): the tick and the Layered test button had no visual connection - a bar under the list says
-// which scenes the test starts with (the ones ticked TEST, else the one shown) and opens it
-function LayeredBar({ s, onOpen }) {
-  const tags = s.test_tags || [];
-  const rows = s.scenes || [];
-  const ticked = rows.filter((r) => tags.includes(r.d));
-  const shown = rows.find((r) => r.d === s.sel);
-  const what = ticked.length
-    ? "Starts with the " + ticked.length + " scene" + (ticked.length === 1 ? "" : "s") + " ticked TEST"
-    : shown ? "Starts with the scene shown: " + shown.label : "Tick TEST on scenes, or pick one, to draw over a video";
-  return html`<div class="row lt-bar" ...${tip(LAYERED_TIP)}>
-    <${Icon} name="video" />
-    <span class="small grow ellip" title=${ticked.map((r) => r.label).join("\n") || what}>${what}</span>
-    <${Button} size="sm" kind="primary" disabled=${!ticked.length && !shown} onClick=${onOpen}>Layered test…<//>
+// Simon (2026-11-26): "when we click add to test card that layered test pops into the list of tests - lets max that
+// at 5 for the UI. Each one in the list has an edit button and a bin button" - under the Scenes list
+function LayeredTests({ s, onOpen }) {
+  const rows = s.layered || [];
+  const max = s.layered_max || 5;
+  return html`<div class="stack lt-tests">
+    <div class="row lt-tests-head" ...${tip(LAYERED_TIP)}>
+      <${Icon} name="video" />
+      <span class="small grow"><b>Layered tests</b>${" (" + rows.length + " of " + max + ")"}</span>
+      <${Button} size="sm" kind="primary" disabled=${rows.length >= max} onClick=${() => onOpen(null)}
+        title=${rows.length >= max ? "The test card takes " + max + " layered tests: remove one first" : "A video with scenes drawn over it, for the test card"}>New…<//>
+    </div>
+    ${rows.map((r) => html`<div class="lt-test" key=${r.i}>
+      <span class="ellip small" title=${r.label + "\n" + r.scenes.join(", ") + " over " + r.clip + (r.player ? " (" + r.player + ")" : "") + (r.mine ? "" : "\nFrom " + r.game)}>
+        <b>${r.label}</b><span class="muted">${"  " + r.scenes.length + " scene" + (r.scenes.length === 1 ? "" : "s") + " over " + r.clip}</span></span>
+      <${Button} size="xs" disabled=${!r.mine} title=${r.mine ? "Change its scenes, video or name" : "From " + r.game + ": open that project to edit it"} onClick=${() => onOpen(r.i)}>Edit<//>
+      <${Button} size="xs" icon="trash" title="Take it off the test card" onClick=${() => call("text_scenes.layered_remove", r.i)} />
+    </div>`)}
   </div>`;
 }
 
@@ -390,7 +405,7 @@ export function ScenesActions() {
 // scenes.js); while it (or the Font bar) is open the scene list steps aside unless shown
 // again.  openFont(): the Font bar (PAD-452), from a line of text's Selected panel
 export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
-  const [layered, setLayered] = useState(false);
+  const [layered, setLayered] = useState(null);   // {index: null (new) or the layered test's list index}
   const s = useNs("text_scenes");
   const [color, setColor] = useState(null);     // {text, start, stock, title}
   const [wideOwn, setWideOwn] = useState(false); // the scene editor without the scene list
@@ -538,8 +553,8 @@ export function ScenesPage({ colorsOpen = false, openColors, openFont } = {}) {
             onSort=${(k) => call("text_scenes.sort_by", k)}
             resizable widths=${sceneWidths} onResize=${(w) => { sceneWidths = w; }} />
         </div>
-        ${s.test_on && (s.scenes || []).length ? html`<${LayeredBar} s=${s} onOpen=${() => setLayered(true)} />` : null}
-        ${layered ? html`<${LayeredDialog} onClose=${() => setLayered(false)} />` : null}
+        ${s.test_on && (s.scenes || []).length ? html`<${LayeredTests} s=${s} onOpen=${(i) => setLayered({ index: i })} />` : null}
+        ${layered ? html`<${LayeredDialog} index=${layered.index} onClose=${() => setLayered(null)} />` : null}
       </div>
       <${Divider} k="left" measure=${measureLeft} label="Scene list width" ...${splitProps} />
       <div class="scenes-center" onPointerDown=${editor ? (e) => deselectOnBlank(s.tree_view, e) : null}>

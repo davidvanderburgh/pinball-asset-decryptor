@@ -137,7 +137,8 @@ GIF_DEFAULT_DELAY_MS = 100                  # what the selector uses when a fram
 #: a preview, not a frame-rate test); any sound becomes the menu's WAV.
 TEST_MAX = 64                               # codeselect conf.h CONF_MAX_TESTS
 #: THE TEST CARD's lists (PAD-1279, DragonRR): what --test KIND:PATH puts an item under
-TEST_KINDS = ("image", "video", "scene", "sound")
+#: "layered" (Simon, 2026-11-26): a clip with scenes over it, in the TEST CARD menu's own LAYERED SCENE TESTS list
+TEST_KINDS = ("image", "video", "scene", "sound", "layered")
 #: Simon (2026-11-22): --test clip:PATH puts a video on the card AS IT IS (.mp4/.mov/.m4v),
 #: for the menu to play through the machine's own decoder (codeselect/gstclip.c) - in the
 #: Videos list, beside the .padv ones
@@ -757,7 +758,9 @@ def validate_manifest(m):
             # its name (codeselect/overlay.h) - only a TEST CARD video's, which plays whole
             if t.get("overlay") is not None:
                 ov = t["overlay"]
-                if not isinstance(ov, str) or not ov.lower().endswith(".pado") or t.get("kind") != "video" \
+                # Simon (2026-11-26): a layered test is its own kind ("layered"), the overlay's only owner now
+                if not isinstance(ov, str) or not ov.lower().endswith(".pado") \
+                        or t.get("kind") not in ("video", "layered") \
                         or os.path.splitext(ov)[0] != os.path.splitext(t["file"])[0]:
                     raise Refused("media.json: tests[%d].overlay must be the video's own name as a .pado" % k)
                 check_media_name(ov)
@@ -2987,7 +2990,7 @@ def parse_test_spec(spec):
     if kind:
         got = test_kind(path)
         fits = {"image": ("picture",), "scene": ("picture",), "video": ("anim",), "sound": ("sound",),
-                "clip": ("anim",)}[kind]
+                "clip": ("anim",), "layered": ("anim",)}[kind]
         if got not in fits:
             raise Refused("--test %s: a %s is asked for, but it is a %s"
                           % (path, kind, {"picture": "picture", "anim": "video", "sound": "sound"}[got]))
@@ -3398,6 +3401,8 @@ def cmd_prepare(a):
                 if k in overlays:
                     shutil.copyfile(overlays[k], pado)
                     ent["overlay"] = os.path.basename(pado)
+                    # Simon (2026-11-26): "Layered tests have their own area rather than being grouped into videos"
+                    ent["kind"] = "layered"
                     say("  test %d: a scene over it, %s" % (k, fmt_bytes(os.path.getsize(pado))))
                 elif os.path.exists(pado):
                     os.remove(pado)

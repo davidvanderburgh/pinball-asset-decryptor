@@ -168,6 +168,7 @@
  *   test_video=<file>|<label>  "DEFAULT PAD TEST CARD / IMAGES / VIDEOS /
  *   test_scene=<file>|<label>  SCENES / SOUNDS"): the same as test= with the
  *   test_sound=<file>|<label>  list it goes in said.  An image or scene is a
+ *   test_layered=<file>|<label>  (LAYERED SCENE TESTS: a clip, its overlay beside it)
  *                            PNG, a video a .padv (video.h) or a GIF, a sound
  *                            a WAV; test= puts a .png under IMAGES, a .gif or
  *                            .padv under VIDEOS and a .wav under SOUNDS
@@ -325,8 +326,10 @@ struct conf_colour {
 /* ONE OF THE CARD'S OWN TEST ITEMS (PAD-1279): a media file name and what
  * Settings > Test pictures calls it */
 #define CONF_MAX_TESTS 64
-/* the TEST CARD menu's lists (TK_NONE: the file is not one any list takes) */
-enum { TK_NONE, TK_IMAGE, TK_VIDEO, TK_SCENE, TK_SOUND };
+/* the TEST CARD menu's lists (TK_NONE: the file is not one any list takes).  TK_LAYERED (Simon, 2026-11-26: "add
+ * another menu item 'Layered Scene Tests' so Layered tests have their own area rather than being grouped into
+ * videos"): a clip with the scenes drawn over it (overlay.h, the .pado beside it) */
+enum { TK_NONE, TK_IMAGE, TK_VIDEO, TK_SCENE, TK_SOUND, TK_LAYERED };
 struct conf_test {
     char file[CONF_STR];
     char label[CONF_STR];

@@ -58,10 +58,14 @@ def test_the_selector_makes_its_screen_texture_before_the_test_card_loop():
     src = (RIG / "codeselect" / "codeselect.c").read_text(encoding="utf-8")
     branch = src[src.index("if (c.testcard) {"):]
     branch = branch[:branch.index("goto testcard_done;")]
-    tex = branch.find("egl_stern_texture(")
+    # screen_texture(): made once, since the menu can come up twice in a run (the TEST CARD
+    # entry, 2026-11-23); it calls egl_stern_texture the first time
+    tex = branch.find("screen_texture(")
     loop = branch.find("settings_run(&se)")
     assert tex != -1, "the test card branch never creates the screen texture: a black glass"
     assert tex < loop
+    helper = src[src.index("static void screen_texture("):]
+    assert "egl_stern_texture(" in helper[:helper.index("\n}\n")]
 
 
 def test_the_rig_runs_a_test_card_as_its_menu():
@@ -105,7 +109,8 @@ def test_the_emulator_runs_the_test_cards_own_menu_program():
     inner = run[run.index("<<'INNER'"):]
     assert 'SEL_BIN="${SEL_BIN:-/usr/local/codeselect/codeselect}"' in inner
     line = next(ln for ln in run.splitlines() if "--conf /dump/codeselect.conf --out" in ln)
-    assert line.strip().startswith('chroot "$R" $SEL_BIN --conf') and "$SEL_FONT" in line
+    # (through `env $SEL_ENV`: a test card's clips get the video bridge, test_test_card_clip.py)
+    assert line.strip().startswith('chroot "$R" ${SEL_ENV:+/usr/bin/env $SEL_ENV} $SEL_BIN --conf') and "$SEL_FONT" in line
 
 
 def test_a_card_menu_that_does_not_know_an_option_gets_pads_build():

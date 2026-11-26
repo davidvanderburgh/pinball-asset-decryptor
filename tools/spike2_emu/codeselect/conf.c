@@ -55,11 +55,13 @@ static int test_kind_of(const char *key, const char *file)
     const char *dot = strrchr(file, '.');
     int png = dot && !strcasecmp(dot, ".png"), gif = dot && !strcasecmp(dot, ".gif");
     int padv = dot && !strcasecmp(dot, ".padv"), wav = dot && !strcasecmp(dot, ".wav");
+    /* Simon (2026-11-22): a clip as it is, for the machine's own decoder (gstclip.h) */
+    int clip = dot && (!strcasecmp(dot, ".mp4") || !strcasecmp(dot, ".mov") || !strcasecmp(dot, ".m4v"));
     if (!strcmp(key, "test_image")) return png ? TK_IMAGE : TK_NONE;
     if (!strcmp(key, "test_scene")) return png ? TK_SCENE : TK_NONE;
-    if (!strcmp(key, "test_video")) return gif || padv ? TK_VIDEO : TK_NONE;
+    if (!strcmp(key, "test_video")) return gif || padv || clip ? TK_VIDEO : TK_NONE;
     if (!strcmp(key, "test_sound")) return wav ? TK_SOUND : TK_NONE;
-    return png ? TK_IMAGE : gif || padv ? TK_VIDEO : wav ? TK_SOUND : TK_NONE;
+    return png ? TK_IMAGE : gif || padv || clip ? TK_VIDEO : wav ? TK_SOUND : TK_NONE;
 }
 
 static void split_fields(char *val, char *fld[7])
@@ -280,6 +282,7 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     int lineno = 0;
     int gpos[CONF_MAX_GROUPS];    /* the image index each group= line sits before */
     int gline[CONF_MAX_GROUPS];   /* and the line it was on, for the warnings */
+    int has_tile_tests;           /* test lines that are the SETTINGS tile's to show */
 
     memset(c, 0, sizeof *c);
     memset(gpos, 0, sizeof gpos);
@@ -287,6 +290,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     c->def = -1;
     c->def_card = -1;
     c->timeout = -1;
+    c->flip_hold = FLIP_HOLD_DEFAULT;
+    c->flip_guard = FLIP_GUARD_DEFAULT;
     c->volume = -1;
     c->volume_machine = 0;
     c->mv_store[0] = 0;
@@ -527,6 +532,25 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 snprintf(c->colour[idx].name, sizeof c->colour[idx].name, "%s",
                          fld[5] ? fld[5] : "");
             }
+        } else if (!strcmp(key, "boot_menu")) {
+            if (!*val || !strcmp(val, "menu")) c->boot_menu = BOOT_MENU_MENU;
+            else if (!strcmp(val, "flipper")) c->boot_menu = BOOT_MENU_FLIPPER;
+            else if (!strcmp(val, "hidden")) c->boot_menu = BOOT_MENU_HIDDEN;
+            else {
+                c->boot_menu = BOOT_MENU_MENU;
+                conf_warn(c, "%s:%d: boot_menu=%s is not 'menu', 'flipper' or 'hidden': read as 'menu'",
+                          path, lineno, val);
+            }
+        } else if (!strcmp(key, "flip_hold")) {
+            int v = atoi(val);
+            if (v >= 1 && v <= 30) c->flip_hold = v;
+            else conf_warn(c, "%s:%d: flip_hold=%s is not 1..30 seconds: %d is used",
+                           path, lineno, val, c->flip_hold);
+        } else if (!strcmp(key, "flip_guard")) {
+            int v = atoi(val);
+            if (*val >= '0' && *val <= '9' && v <= 600) c->flip_guard = v;
+            else conf_warn(c, "%s:%d: flip_guard=%s is not 0..600 seconds: %d is used",
+                           path, lineno, val, c->flip_guard);
         } else if (!strcmp(key, "testcard")) {
             if (!strcmp(val, "on")) c->testcard = 1;
             else if (!*val || !strcmp(val, "off")) c->testcard = 0;
@@ -553,10 +577,12 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 if (c->test[c->ntest].kind == TK_NONE && strcmp(key, "test"))
                     conf_warn(c, "%s:%d: %s=%s: not a file that list shows (%s): dropped", path,
                               lineno, key, fld[0], !strcmp(key, "test_sound") ? "a .wav"
-                              : !strcmp(key, "test_video") ? "a .padv or .gif"
+                              : !strcmp(key, "test_video") ? "a .padv, .gif or .mp4/.mov"
                               : "a .png");
-                else
+                else {
+                    if (!strcmp(key, "test")) c->ntest_flat++;
                     c->ntest++;
+                }
             }
         } else if (!strcmp(key, "settings")) {
             if (!*val || !strcmp(val, "on")) c->settings = 1;
@@ -668,7 +694,16 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
     /* the tile, when it has something on it: a game to correct, or the
      * card's own test pictures (PAD-1279) - and, once it is there, the built-in
      * test patterns always ride along under Test pictures */
-    if (c->settings && (c->ncolour > 0 || c->ntest > 0)) {
+    /* ...but on a card with the TEST CARD entry, the test card's own lists
+     * (test_<kind>=) are the entry's, and a SETTINGS tile for them alone would
+     * be the same screens twice */
+    {
+        int i, entry = 0;
+        for (i = 0; i < c->n; i++) if (conf_image_is_testcard(c, i)) entry = 1;
+        if (entry && c->ncolour == 0 && c->ntest_flat == 0) has_tile_tests = 0;
+        else has_tile_tests = c->ntest > 0;
+    }
+    if (c->settings && (c->ncolour > 0 || has_tile_tests)) {
         c->settings_card = c->ncards;
         c->cards[c->ncards].image = -1;
         c->cards[c->ncards].group = -1;
@@ -684,6 +719,11 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
 int conf_card_is_settings(const struct conf *c, int k)
 {
     return k >= 0 && k == c->settings_card;
+}
+
+int conf_image_is_testcard(const struct conf *c, int i)
+{
+    return i >= 0 && i < c->n && !strcmp(c->img[i].device, CONF_TESTCARD_DEVICE);
 }
 
 int conf_has_art(const struct conf *c)

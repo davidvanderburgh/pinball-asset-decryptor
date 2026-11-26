@@ -602,6 +602,8 @@ class ModePlan:
     picture_file: str = ""
     #: PAD-1382: ``settings.cfg`` beside the mode files, the settings sharing the MORE SETTINGS rows ("" = none)
     settings_file: str = ""
+    #: BOOT MENU FLIPPER: ``padmenu.cfg`` beside the mode files, where padmenu.so reads the row ("" = none)
+    flip_file: str = ""
     #: image sets: ``scenes.cfg`` beside the mode files ("" = none) and the variants' own scene files with it
     scenes_file: str = ""
     scene_files: list = field(default_factory=list)
@@ -850,7 +852,7 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
          idle_prof=None, handicap=False, handicap_prof=None, handicap_setting=0, cabs=None, cabs_prof=None,
          cabs_sids=None, comp=False, comp_prof=None, screen_times=None, screen_prof=None, score_feed="",
          score_feed_prof=None, records=None, records_prof=None, code_ok=True, arch="arm", scenes=None,
-         scenes_prof=None, saved=False, saved_setting=0, access=None, access_prof=None):
+         scenes_prof=None, saved=False, saved_setting=0, access=None, access_prof=None, menu_prof=None):
     """Build a project's modes against this card's STOCK scenes into *scratch* and say what
     goes where. ``None`` when the project has no modes. Raises :class:`ModeWriteError`.
     *end_sound* is the build's own decision when it has already made one (the engine
@@ -999,6 +1001,8 @@ def plan(project, stock_hud, stock_bank, game_elf, scratch, ffmpeg=None, sound_o
                                      or screen_prof or comp_prof or handicap_prof or idle_prof or coop_prof
                                      or attract_prof or variants_prof or sound_modes_prof or picture_prof)
             access_into(result, game_elf, scratch, access, only=True)
+        if result is None and menu_prof is not None:  # BOOT MENU FLIPPER (or shared rows) and nothing else
+            result = menu_plan(project, game_elf, menu_prof)
         return result
     titles = {spec.title for _s, spec in modes}
     if len(titles) > 1:
@@ -1542,6 +1546,18 @@ def access_into(result, game_elf, scratch, access, only=False):
 
 
 # ---- PAD-1033: a handicap for each player ------------------------------------------------------
+def menu_plan(project, game_elf, prof):
+    """A plan carrying only service menu settings (BOOT MENU FLIPPER's ``padmenu.cfg``, the shared rows'
+    ``settings.cfg``): no mode, no scene; the runtime and the title's port on p2 beside them. Simon (2026-11-25): the
+    first Write of the row alone stopped with "none of the project's random clips can go on this card"."""
+    try:
+        port = find_port(prof, game_elf)
+    except ModeWriteError:
+        raise ModeWriteError("this card's game program is not the %s the app knows how to add service menu settings "
+                             "to" % prof.label) from None
+    return ModePlan(project=project, profile=prof, port=port, build=None)
+
+
 def handicap_plan(project, game_elf, prof):
     """A plan carrying only the players' handicaps: no mode, no scene; the runtime and the title's port on p2 with
     ``handicap.cfg`` (:func:`handicap_into`)."""
@@ -2661,6 +2677,11 @@ def p2_payload(result, out_dir, project=None, arch="arm"):
             from . import menu_settings as MSet
             dst = os.path.join(out_dir, MSet.SHARED_CFG)
             shutil.copyfile(result.settings_file, dst)
+            extras.append(dst)
+        if getattr(result, "flip_file", ""):           # BOOT MENU FLIPPER: padmenu.cfg, for padmenu.so
+            from . import boot_flip as BF
+            dst = os.path.join(out_dir, BF.CFG_NAME)
+            shutil.copyfile(result.flip_file, dst)
             extras.append(dst)
         if getattr(result, "scenes_file", ""):         # image sets: scenes.cfg and the variants' scene files
             from . import scene_variants as SV

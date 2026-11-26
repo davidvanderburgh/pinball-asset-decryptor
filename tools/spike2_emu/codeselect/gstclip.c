@@ -1,0 +1,649 @@
+/* gstclip.c - a TEST CARD clip through the machine's own video chain: see gstclip.h.
+ *
+ * Simon (2026-11-22), for judging a replacement clip with the game's overlay on it:
+ * "It is vitally important that regardless of methodology the look must match exactly
+ * how it would look in the game normally on the machine".  The decode is the game's:
+ * the same elements, linked in the same order, the same VPU.  The YUV -> RGB step is
+ * still this file's (BT.601 limited range); matching the game's own conversion is
+ * the next step.
+ *
+ * GStreamer 0.10 is called through hand prototypes (the card has no headers for it)
+ * and looked up with dlsym(RTLD_DEFAULT) AFTER the libraries are opened RTLD_GLOBAL,
+ * so in the emulator a preloaded bridge's gst_* (padgst.so) are the ones called. */
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <strings.h>
+#include <time.h>
+#include <pthread.h>
+#include "gstclip.h"
+#include "log.h"
+
+int gclip_is_clip(const char *path)
+{
+    const char *dot = path ? strrchr(path, '.') : NULL;
+    return dot && (!strcasecmp(dot, ".mp4") || !strcasecmp(dot, ".mov") || !strcasecmp(dot, ".m4v"));
+}
+
+#ifndef PAD_GSTCLIP
+
+/* every machine but the Spike 2: no GStreamer 0.10 video chain to borrow */
+struct gclip { int unused; };
+struct gclip *gclip_open(const char *path, int max_w, int max_h, char *err, int errlen)
+{
+    (void)path; (void)max_w; (void)max_h;
+    snprintf(err, errlen, "this machine has no video decoder for a clip (only a .padv plays here)");
+    return NULL;
+}
+const struct art_image *gclip_frame(struct gclip *g, long long now_ms, int *k)
+{ (void)g; (void)now_ms; (void)k; return NULL; }
+const struct art_image *gclip_current(struct gclip *g) { (void)g; return NULL; }
+int gclip_loops(const struct gclip *g) { (void)g; return 0; }
+float gclip_fps(const struct gclip *g) { (void)g; return 0; }
+int gclip_frames(const struct gclip *g) { (void)g; return 0; }
+void gclip_stats(const struct gclip *g, int *shown, int *dropped)
+{ (void)g; if (shown) *shown = 0; if (dropped) *dropped = 0; }
+const char *gclip_error(const struct gclip *g) { (void)g; return ""; }
+void gclip_close(struct gclip *g) { (void)g; }
+void gclip_want_rgba(struct gclip *g, int on) { (void)g; (void)on; }
+int gclip_yuv_take(struct gclip *g, struct gclip_yuv *f) { (void)g; (void)f; return 0; }
+void gclip_yuv_done(struct gclip *g) { (void)g; }
+void gclip_pause(struct gclip *g, int on) { (void)g; (void)on; }
+
+#else
+
+#include <dlfcn.h>
+#include <unistd.h>
+
+/* GStreamer 0.10 / GLib 2 values (gstelement.h, gstformat.h, gstevent.h) */
+enum { GST_STATE_NULL = 1, GST_STATE_PAUSED = 3, GST_STATE_PLAYING = 4 };
+enum { GST_STATE_CHANGE_FAILURE = 0 };
+enum { GST_FORMAT_TIME = 3 };
+enum { GST_SEEK_FLAG_FLUSH = 1, GST_SEEK_FLAG_KEY_UNIT = 4 };
+enum { GST_SEEK_TYPE_NONE = 0, GST_SEEK_TYPE_SET = 1 };
+#define FOURCC(a, b, c, d) ((unsigned)(a) | (unsigned)(b) << 8 | (unsigned)(c) << 16 | (unsigned)(d) << 24)
+
+static struct {
+    int tried, ok;
+    char why[160];
+    void (*init)(int *, char ***);
+    void *(*pipeline_new)(const char *);
+    void *(*factory_make)(const char *, const char *);
+    int (*bin_add_many)(void *, void *, ...);
+    int (*link_many)(void *, void *, ...);
+    void (*object_set)(void *, const char *, ...);
+    unsigned long (*signal_connect)(void *, const char *, void *, void *, void *, int);
+    int (*set_state)(void *, int);
+    int (*get_state)(void *, int *, int *, unsigned long long);
+    void *(*static_pad)(void *, const char *);
+    void *(*negotiated_caps)(void *);
+    void *(*caps_structure)(void *, unsigned);
+    int (*structure_int)(void *, const char *, int *);
+    int (*structure_fourcc)(void *, const char *, unsigned *);
+    int (*structure_fraction)(void *, const char *, int *, int *);
+    void (*caps_unref)(void *);
+    void (*object_unref)(void *);
+    int (*query_position)(void *, int *, long long *);
+    int (*query_duration)(void *, int *, long long *);
+    int (*seek)(void *, double, int, int, int, long long, int, long long);
+    void *(*buf_alloc)(unsigned);
+    void (*mini_unref)(void *);
+    /* qtdemux's pad is made once the file is read ("pad-added"); the game links its
+     * "video_00" by hand, as this does (its own imports: gst_pad_link, gst_object_get_name) */
+    int (*pad_link)(void *, void *);
+    char *(*object_name)(void *);
+    void (*g_free)(void *);
+    int off_data, off_size;
+} G;
+
+static void *sym(const char *name)
+{
+    void *p = dlsym(RTLD_DEFAULT, name);
+    if (!p && !G.why[0]) snprintf(G.why, sizeof G.why, "GStreamer has no %s", name);
+    return p;
+}
+
+/* where a GstBuffer keeps its data pointer and size: found, not assumed (a real
+ * buffer with an unusual size, its size field, the pointer just before it) -
+ * the same probe as the emulator's bridge (gstvid.c buf_layout) */
+static int buffer_layout(void)
+{
+    unsigned probe = 0x00ABCDE0u;
+    unsigned long *w;
+    void *b = G.buf_alloc(probe);
+    int i;
+    if (!b) return 0;
+    w = (unsigned long *)b;
+    for (i = 2; i < 16; i++)
+        if ((unsigned)w[i] == probe && w[i - 1] > 0x1000) {
+            G.off_size = i * (int)sizeof(long);
+            G.off_data = (i - 1) * (int)sizeof(long);
+            break;
+        }
+    if (G.mini_unref) G.mini_unref(b);
+    return G.off_data > 0;
+}
+
+static int load(void)
+{
+    if (G.tried) return G.ok;
+    G.tried = 1;
+    if (!dlopen("libgstreamer-0.10.so.0", RTLD_NOW | RTLD_GLOBAL)
+        || !dlopen("libgobject-2.0.so.0", RTLD_NOW | RTLD_GLOBAL)) {
+        snprintf(G.why, sizeof G.why, "no GStreamer 0.10 on this card: %s", dlerror());
+        return 0;
+    }
+    G.init = sym("gst_init");
+    G.pipeline_new = sym("gst_pipeline_new");
+    G.factory_make = sym("gst_element_factory_make");
+    G.bin_add_many = sym("gst_bin_add_many");
+    G.link_many = sym("gst_element_link_many");
+    G.object_set = sym("g_object_set");
+    G.signal_connect = sym("g_signal_connect_data");
+    G.set_state = sym("gst_element_set_state");
+    G.get_state = sym("gst_element_get_state");
+    G.static_pad = sym("gst_element_get_static_pad");
+    G.negotiated_caps = sym("gst_pad_get_negotiated_caps");
+    G.caps_structure = sym("gst_caps_get_structure");
+    G.structure_int = sym("gst_structure_get_int");
+    G.caps_unref = sym("gst_caps_unref");
+    G.object_unref = sym("gst_object_unref");
+    G.query_position = sym("gst_element_query_position");
+    G.query_duration = sym("gst_element_query_duration");
+    G.seek = sym("gst_element_seek");
+    G.buf_alloc = sym("gst_buffer_new_and_alloc");
+    G.pad_link = sym("gst_pad_link");
+    G.object_name = sym("gst_object_get_name");
+    G.g_free = sym("g_free");
+    /* optional: the frame format and rate.  NOT under the emulator's bridge
+     * (padgst.so, found by its own pad_vid_prepare): its caps are a stand-in
+     * that only answers width and height, and the real library reading one
+     * segfaulted the menu (2026-11-22) - its frames are I420, its rate is the
+     * clip's own */
+    if (!dlsym(RTLD_DEFAULT, "pad_vid_prepare")) {
+        G.structure_fourcc = dlsym(RTLD_DEFAULT, "gst_structure_get_fourcc");
+        G.structure_fraction = dlsym(RTLD_DEFAULT, "gst_structure_get_fraction");
+    } else {
+        sel_say("clip: the emulator's video bridge answers (frames I420)");
+    }
+    G.mini_unref = dlsym(RTLD_DEFAULT, "gst_mini_object_unref");
+    if (G.why[0]) return 0;
+    G.init(NULL, NULL);
+    if (!buffer_layout()) {
+        snprintf(G.why, sizeof G.why, "could not find the GstBuffer layout");
+        return 0;
+    }
+    sel_say("clip: GStreamer 0.10 loaded (buffer data at +%d, size at +%d)", G.off_data, G.off_size);
+    G.ok = 1;
+    return 1;
+}
+
+struct gclip {
+    void *pipe, *src, *demux, *queue, *dec, *sink;
+    int w, h;                       /* the decoded size, from the caps */
+    unsigned fourcc;                /* the decoded format (0: not said - taken as I420) */
+    float fps;
+    long long dur_ns;
+    int ow, oh;                     /* what the caller is handed (fitted to the screen) */
+    int max_w, max_h;
+    pthread_mutex_t mu;
+    unsigned char *px[2];           /* RGBA, ow * oh * 4: [front] is the caller's */
+    int *xmap;                      /* output column -> decoded column (ow of them) */
+    long long conv_ms, copy_ms;     /* time spent converting / copying, for the log */
+    /* the frames copied out of the decoder's memory, [front] the newest; the graphics
+     * chip's upload reads [held] (gclip_yuv_take .. gclip_yuv_done), so no copy goes into
+     * that one meanwhile */
+    unsigned char *raw[2];
+    unsigned raw_len[2], raw_size[2];
+    int held;
+    int want_rgba;                  /* 0: the graphics chip converts (gclip_want_rgba) */
+    /* the clip's own frame number since it last started, for each copy: the scene over it
+     * follows THIS, not the clock (the table, 2026-11-25: the 0s did not line up) */
+    long long pos, raw_k[2];
+    int paused;                     /* frozen on the test card: the pipeline is PAUSED */
+    int front;
+    long long made, taken;          /* frames converted / frames handed out */
+    long long last_frame_ms;
+    int loops, seeking;
+    int shown, dropped;
+    struct art_image out;
+    int have_out;
+    /* CLOSING: no handoff touches the buffers once it is set, and the close waits for
+     * one under way (in_cb).  The emulator's video bridge hands frames over from its own
+     * thread and was still doing so after set_state(NULL): backing out of a test clip
+     * crashed the menu (2026-11-23).  Real GStreamer stops its streaming thread first. */
+    int closing, in_cb;
+    int linked;                     /* the demuxer's video pad reached the decoder */
+    int short_said;                 /* a too-short frame has been logged */
+    char err[200];
+    char path[600];
+};
+
+static long long now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static unsigned char clamp8(int v) { return v < 0 ? 0 : v > 255 ? 255 : (unsigned char)v; }
+
+/* one decoded frame -> RGBA in the back buffer (BT.601, limited range, nearest
+ * sample when it is fitted down) */
+/* a decoder may pad the planes to 16: the stride and plane height the size says */
+static void planes(const struct gclip *g, unsigned size, int *ys, int *ph)
+{
+    static const int al[] = { 1, 16, 32, 64 };
+    int i, j;
+    *ys = g->w;
+    *ph = g->h;
+    for (i = 0; i < 4; i++)
+        for (j = 0; j < 4; j++) {
+            int aw = (g->w + al[i] - 1) / al[i] * al[i], ah = (g->h + al[j] - 1) / al[j] * al[j];
+            if ((unsigned)(aw * ah * 3 / 2) == size) { *ys = aw; *ph = ah; return; }
+        }
+}
+
+static void convert(struct gclip *g, const unsigned char *data, unsigned size, unsigned char *dst)
+{
+    int sw = g->w, sh = g->h, x, y;
+    int ys, ph, nv12 = g->fourcc == FOURCC('N', 'V', '1', '2');
+    int yv12 = g->fourcc == FOURCC('Y', 'V', '1', '2');
+    const unsigned char *Y, *U, *V;
+    planes(g, size, &ys, &ph);
+    (void)sw;
+    Y = data;
+    if (nv12) { U = data + ys * ph; V = U + 1; }
+    else {
+        const unsigned char *p1 = data + ys * ph, *p2 = p1 + (ys / 2) * (ph / 2);
+        U = yv12 ? p2 : p1;
+        V = yv12 ? p1 : p2;
+    }
+    /* The table, 2026-11-25 (Simon: "work but only at 1.4FPS"): a 64-bit divide for every
+     * pixel is a library call on the Cortex-A9 - hundreds of ms a 1360x768 frame.  The
+     * column map is made once a clip (g->xmap), the row once a row. */
+    for (y = 0; y < g->oh; y++) {
+        int sy = (int)((long long)y * sh / g->oh);
+        const unsigned char *yr = Y + (size_t)sy * ys;
+        const unsigned char *ur = nv12 ? U + (size_t)(sy / 2) * ys : U + (size_t)(sy / 2) * (ys / 2);
+        const unsigned char *vr = nv12 ? V + (size_t)(sy / 2) * ys : V + (size_t)(sy / 2) * (ys / 2);
+        const int *xm = g->xmap;
+        unsigned char *o = dst + (size_t)y * g->ow * 4;
+        for (x = 0; x < g->ow; x++) {
+            int sx = xm[x];
+            int c = 298 * (yr[sx] - 16), d, e, k = nv12 ? (sx & ~1) : (sx >> 1);
+            d = ur[k] - 128;
+            e = vr[k] - 128;
+            o[0] = clamp8((c + 409 * e + 128) >> 8);
+            o[1] = clamp8((c - 100 * d - 208 * e + 128) >> 8);
+            o[2] = clamp8((c + 516 * d + 128) >> 8);
+            o[3] = 255;
+            o += 4;
+        }
+    }
+}
+
+/* fakesink's "handoff", on GStreamer's streaming thread: (sink, buffer, pad, data) */
+static void on_handoff(void *sink, void *buf, void *pad, void *data)
+{
+    struct gclip *g = data;
+    const unsigned char *px = *(const unsigned char **)((char *)buf + G.off_data);
+    unsigned size = *(unsigned *)((char *)buf + G.off_size);
+    int back, want;
+    long long k;
+    (void)sink; (void)pad;
+    if (!px || !g->ow) return;
+    /* a frame too short for its picture (not decoded YUV) is skipped, never read past */
+    if ((unsigned long long)size < (unsigned long long)g->w * g->h * 3 / 2) {
+        pthread_mutex_lock(&g->mu);
+        if (!g->short_said) sel_log("clip: a %u-byte frame for a %dx%d picture: skipped", size, g->w, g->h);
+        g->short_said = 1;
+        g->dropped++;
+        pthread_mutex_unlock(&g->mu);
+        return;
+    }
+    pthread_mutex_lock(&g->mu);
+    if (g->closing) { pthread_mutex_unlock(&g->mu); return; }
+    k = g->pos++;
+    back = !g->front;
+    if (back == g->held) {                  /* the upload is reading it: this one goes */
+        g->dropped++;
+        pthread_mutex_unlock(&g->mu);
+        return;
+    }
+    g->in_cb++;
+    want = g->want_rgba;
+    pthread_mutex_unlock(&g->mu);
+    {
+        /* The table, 2026-11-25: GStreamer's own ffmpegcolorspace took 470 ms a frame off
+         * vpudec too - the decoder's frames are in uncached DMA memory, where every byte
+         * the CPU reads is a bus trip.  One block copy (burst reads, 13 ms) into cached
+         * memory; then the conversion (64 ms) only when the graphics chip is not doing it. */
+        long long t0 = now_ms(), t1;
+        if (g->raw_len[back] < size) {
+            unsigned char *r = realloc(g->raw[back], size);
+            if (r) { g->raw[back] = r; g->raw_len[back] = size; }
+        }
+        if (g->raw[back] && g->raw_len[back] >= size) {
+            memcpy(g->raw[back], px, size);
+            g->raw_size[back] = size;
+        } else {
+            g->raw_size[back] = 0;
+        }
+        t1 = now_ms();
+        if (want) convert(g, g->raw_size[back] ? g->raw[back] : px, size, g->px[back]);
+        g->copy_ms += t1 - t0;
+        g->conv_ms += now_ms() - t1;
+    }
+    pthread_mutex_lock(&g->mu);
+    g->in_cb--;
+    if (g->made > g->taken) g->dropped++;   /* the one before was never shown */
+    g->front = back;
+    g->raw_k[back] = k;
+    g->made++;
+    g->last_frame_ms = now_ms();
+    if (g->made % 30 == 0)                  /* what a frame costs here (the table's 1.4 fps) */
+        sel_log("clip: %lld frames: copy %lld ms, convert %lld ms a frame (%s)",
+                g->made, g->copy_ms / g->made, g->conv_ms / g->made,
+                want ? "on the CPU" : "the graphics chip converts");
+    pthread_mutex_unlock(&g->mu);
+}
+
+/* qtdemux's "pad-added": its video pad to the queue, as the game does ("video_00");
+ * an audio pad is left alone - nothing here plays a clip's sound through GStreamer.
+ * The table found this (Simon, 2026-11-25: "the decoder gave no picture size"):
+ * gst_element_link_many cannot link a pad that is not there yet, so nothing past the
+ * demuxer was ever fed.  The emulator's bridge never looked at the links. */
+static void on_pad_added(void *demux, void *pad, void *data)
+{
+    struct gclip *g = data;
+    char *name = G.object_name(pad);
+    void *sinkpad;
+    (void)demux;
+    if (!name || strncmp(name, "video", 5)) {
+        sel_log("clip: demuxer pad %s left alone", name ? name : "(no name)");
+        if (name) G.g_free(name);
+        return;
+    }
+    sinkpad = G.static_pad(g->queue, "sink");
+    if (!sinkpad) {
+        sel_log("clip: the queue has no sink pad for %s", name);
+    } else {
+        int r = G.pad_link(pad, sinkpad);        /* GST_PAD_LINK_OK is 0 */
+        sel_log("clip: demuxer pad %s linked to the decoder (%d)", name, r);
+        if (r == 0) g->linked = 1;
+        G.object_unref(sinkpad);
+    }
+    G.g_free(name);
+}
+
+/* the size (and format) vpudec negotiated with the sink */
+static int read_caps(struct gclip *g)
+{
+    void *pad = G.static_pad(g->sink, "sink"), *caps, *s;
+    int ok = 0, n = 0, d = 0;
+    if (!pad) return 0;
+    caps = G.negotiated_caps(pad);
+    if (caps) {
+        s = G.caps_structure(caps, 0);
+        if (s && G.structure_int(s, "width", &g->w) && G.structure_int(s, "height", &g->h)
+            && g->w > 0 && g->h > 0) ok = 1;
+        if (s && G.structure_fourcc) G.structure_fourcc(s, "format", &g->fourcc);
+        if (s && G.structure_fraction && G.structure_fraction(s, "framerate", &n, &d) && n > 0 && d > 0)
+            g->fps = (float)n / (float)d;
+        G.caps_unref(caps);
+    }
+    G.object_unref(pad);
+    return ok;
+}
+
+struct gclip *gclip_open(const char *path, int max_w, int max_h, char *err, int errlen)
+{
+    struct gclip *g;
+    int fmt = GST_FORMAT_TIME, st = 0, pend = 0, r;
+    if (!load()) { snprintf(err, errlen, "clip: %s", G.why); return NULL; }
+    g = calloc(1, sizeof *g);
+    if (!g) { snprintf(err, errlen, "clip: out of memory"); return NULL; }
+    pthread_mutex_init(&g->mu, NULL);
+    g->max_w = max_w;
+    g->max_h = max_h;
+    snprintf(g->path, sizeof g->path, "%s", path);
+    /* the game's own chain, made and linked in the game's order (gstvid.c's header) */
+    g->pipe = G.pipeline_new("padclip");
+    g->src = G.factory_make("filesrc", "src");
+    g->demux = G.factory_make("qtdemux", "demux");
+    g->queue = G.factory_make("queue", "queue");
+    {
+        /* CODESELECT_CLIP_DECODER: another element in vpudec's place, for a test under qemu
+         * against the card's real GStreamer (there is no video chip there: "identity"
+         * passes the demuxer's frames on, which proves the links) */
+        const char *dn = getenv("CODESELECT_CLIP_DECODER");
+        g->dec = G.factory_make(dn && *dn ? dn : "vpudec", "dec");
+        /* planar I420, as the game asks for ("output-format" is in its strings) and hands
+         * to the graphics chip as GL_VIV_I420 - the table gave NV12 when nothing was said */
+        if (g->dec && !(dn && *dn)) G.object_set(g->dec, "output-format", 1, NULL);
+    }
+    g->sink = G.factory_make("fakesink", "sink");
+    if (!g->pipe || !g->src || !g->demux || !g->queue || !g->dec || !g->sink) {
+        snprintf(err, errlen, "clip: the card's GStreamer lacks %s",
+                 !g->src ? "filesrc" : !g->demux ? "qtdemux" : !g->queue ? "queue"
+                 : !g->dec ? "vpudec (the video chip's decoder)" : !g->sink ? "fakesink" : "a pipeline");
+        goto fail;
+    }
+    G.object_set(g->src, "location", path, NULL);
+    /* the frames at the clip's own pace (sync), each one handed to us */
+    G.object_set(g->sink, "signal-handoffs", 1, "sync", 1, NULL);
+    G.signal_connect(g->sink, "handoff", (void *)on_handoff, g, NULL, 0);
+    G.bin_add_many(g->pipe, g->src, g->demux, g->queue, g->dec, g->sink, NULL);
+    /* filesrc -> qtdemux now; qtdemux -> queue when its video pad appears (on_pad_added);
+     * queue -> vpudec -> fakesink now.  Linking all five at once, as this first did, stops
+     * at the demuxer on a real GStreamer: its pad does not exist yet. */
+    G.signal_connect(g->demux, "pad-added", (void *)on_pad_added, g, NULL, 0);
+    {
+        int a = G.link_many(g->src, g->demux, NULL), b = G.link_many(g->queue, g->dec, g->sink, NULL);
+        /* said, not refused: the preroll below is the test, and the emulator's bridge
+         * answers for links it never makes */
+        sel_log("clip: linked file -> demuxer %s, queue -> decoder -> sink %s", a ? "yes" : "NO", b ? "yes" : "NO");
+    }
+    r = G.set_state(g->pipe, GST_STATE_PAUSED);
+    if (r == GST_STATE_CHANGE_FAILURE) { snprintf(err, errlen, "clip: %s would not start", path); goto fail; }
+    /* preroll: up to 5 s for the first frame to reach the sink */
+    r = G.get_state(g->pipe, &st, &pend, 5000000000ULL);
+    sel_log("clip: preroll state %d (now %d, pending %d), video pad %s", r, st, pend,
+            g->linked ? "linked" : "NOT linked");
+    if (!read_caps(g)) {
+        snprintf(err, errlen, "clip: the decoder gave no picture size for %s%s", path,
+                 g->linked ? "" : " (the file's video never reached the decoder)");
+        goto fail;
+    }
+    g->ow = g->w;
+    g->oh = g->h;
+    if (g->ow > max_w || g->oh > max_h) {       /* fitted down, never up */
+        if ((long long)g->w * max_h > (long long)g->h * max_w) { g->ow = max_w; g->oh = (int)((long long)g->h * max_w / g->w); }
+        else { g->oh = max_h; g->ow = (int)((long long)g->w * max_h / g->h); }
+    }
+    g->px[0] = calloc((size_t)g->ow * g->oh, 4);
+    g->px[1] = calloc((size_t)g->ow * g->oh, 4);
+    g->xmap = malloc((size_t)g->ow * sizeof *g->xmap);
+    if (!g->px[0] || !g->px[1] || !g->xmap) { snprintf(err, errlen, "clip: out of memory for %dx%d", g->ow, g->oh); goto fail; }
+    { int x; for (x = 0; x < g->ow; x++) g->xmap[x] = (int)((long long)x * g->w / g->ow); }
+    g->held = -1;
+    g->want_rgba = 1;
+    if (G.query_duration(g->pipe, &fmt, &g->dur_ns) && fmt == GST_FORMAT_TIME && g->dur_ns > 0) {}
+    else g->dur_ns = 0;
+    if (G.set_state(g->pipe, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE) {
+        snprintf(err, errlen, "clip: %s would not play", path);
+        goto fail;
+    }
+    if (g->fps <= 0) g->fps = 30.0f;
+    sel_say("clip: %s %dx%d %c%c%c%c%s, %.3f s, shown at %dx%d", path, g->w, g->h,
+            g->fourcc ? (char)(g->fourcc & 255) : 'I', g->fourcc ? (char)(g->fourcc >> 8 & 255) : '4',
+            g->fourcc ? (char)(g->fourcc >> 16 & 255) : '2', g->fourcc ? (char)(g->fourcc >> 24) : '0',
+            g->fourcc ? "" : " (format not said)", g->dur_ns / 1e9, g->ow, g->oh);
+    g->last_frame_ms = now_ms();
+    return g;
+fail:
+    gclip_close(g);
+    return NULL;
+}
+
+/* at the end, back to the start: by position when the clip says its length,
+ * else when no frame has come for a second */
+static void maybe_loop(struct gclip *g, long long now)
+{
+    int fmt = GST_FORMAT_TIME;
+    long long pos = 0, quiet;
+    if (g->paused) return;                  /* no frames while frozen: not the end */
+    pthread_mutex_lock(&g->mu);
+    quiet = now - g->last_frame_ms;
+    pthread_mutex_unlock(&g->mu);
+    if (quiet < 300) { g->seeking = 0; return; }
+    if (g->seeking && quiet < 3000) return;
+    if (g->dur_ns > 0 && quiet < 1000
+        && !(G.query_position(g->pipe, &fmt, &pos) && fmt == GST_FORMAT_TIME
+             && pos >= g->dur_ns - 200000000LL)) return;
+    G.seek(g->pipe, 1.0, GST_FORMAT_TIME, GST_SEEK_FLAG_FLUSH | GST_SEEK_FLAG_KEY_UNIT,
+           GST_SEEK_TYPE_SET, 0, GST_SEEK_TYPE_NONE, -1);
+    G.set_state(g->pipe, GST_STATE_PLAYING);
+    g->seeking = 1;
+    g->loops++;
+    pthread_mutex_lock(&g->mu);
+    g->last_frame_ms = now;
+    g->pos = 0;                             /* frame 0 again */
+    g->shown = g->dropped = 0;              /* the caption's fps is per start (the table: "200FPS") */
+    pthread_mutex_unlock(&g->mu);
+}
+
+const struct art_image *gclip_frame(struct gclip *g, long long now, int *k)
+{
+    int fresh = 0;
+    (void)now;
+    maybe_loop(g, now_ms());
+    pthread_mutex_lock(&g->mu);
+    if (g->made > g->taken) {
+        g->taken = g->made;
+        g->out.w = g->ow;
+        g->out.h = g->oh;
+        g->out.rgba = g->px[g->front];
+        g->have_out = 1;
+        g->shown++;
+        fresh = 1;
+        if (k) *k = (int)g->taken;
+    }
+    pthread_mutex_unlock(&g->mu);
+    return fresh ? &g->out : NULL;
+}
+
+/* THE GRAPHICS CHIP'S WAY (the table, 2026-11-25: 10 fps with the CPU converting):
+ * the newest copied frame as it came from the decoder; the game itself hands vpudec's
+ * frames to the GPU (glTexDirectVIV) and never converts them on the CPU */
+void gclip_want_rgba(struct gclip *g, int on)
+{
+    pthread_mutex_lock(&g->mu);
+    g->want_rgba = on ? 1 : 0;
+    pthread_mutex_unlock(&g->mu);
+}
+
+int gclip_yuv_take(struct gclip *g, struct gclip_yuv *f)
+{
+    int fresh = 0;
+    maybe_loop(g, now_ms());
+    pthread_mutex_lock(&g->mu);
+    if (g->made > g->taken && g->raw_size[g->front]) {
+        int i = g->front;
+        g->taken = g->made;
+        g->shown++;
+        g->held = i;
+        f->data = g->raw[i];
+        f->size = g->raw_size[i];
+        f->fourcc = g->fourcc ? g->fourcc : FOURCC('I', '4', '2', '0');
+        f->w = g->w;
+        f->h = g->h;
+        planes(g, f->size, &f->stride, &f->rows);
+        f->ow = g->ow;
+        f->oh = g->oh;
+        f->k = g->raw_k[i];
+        fresh = 1;
+    }
+    pthread_mutex_unlock(&g->mu);
+    return fresh;
+}
+
+void gclip_yuv_done(struct gclip *g)
+{
+    pthread_mutex_lock(&g->mu);
+    g->held = -1;
+    pthread_mutex_unlock(&g->mu);
+}
+
+/* FROZEN (the table, 2026-11-25: "pressed action to pause and again to unpause... FPS
+ * counter was 22, 24"): the decoder kept going under a frozen picture, so the clip had
+ * moved on by the time it played again.  Now the pipeline itself is paused. */
+void gclip_pause(struct gclip *g, int on)
+{
+    if (!g->pipe || g->paused == (on ? 1 : 0)) return;
+    G.set_state(g->pipe, on ? GST_STATE_PAUSED : GST_STATE_PLAYING);
+    pthread_mutex_lock(&g->mu);
+    g->paused = on ? 1 : 0;
+    g->last_frame_ms = now_ms();
+    pthread_mutex_unlock(&g->mu);
+}
+
+/* NOTE: the caller draws from out.rgba while the streaming thread may be
+ * converting into the OTHER buffer - never into the one handed out, unless two
+ * frames arrive between two looks; then a frame may tear (seen as a dropped one) */
+const struct art_image *gclip_current(struct gclip *g) { return g->have_out ? &g->out : NULL; }
+int gclip_loops(const struct gclip *g) { return g->loops; }
+float gclip_fps(const struct gclip *g) { return g->fps; }
+int gclip_frames(const struct gclip *g)
+{
+    return g->dur_ns > 0 ? (int)(g->dur_ns / 1e9 * g->fps + 0.5) : 0;
+}
+void gclip_stats(const struct gclip *g, int *shown, int *dropped)
+{
+    if (shown) *shown = g->shown;
+    if (dropped) *dropped = g->dropped;
+}
+const char *gclip_error(const struct gclip *g) { return g->err; }
+
+void gclip_close(struct gclip *g)
+{
+    long long until;
+    if (!g) return;
+    pthread_mutex_lock(&g->mu);
+    g->closing = 1;
+    pthread_mutex_unlock(&g->mu);
+    until = now_ms() + 2000;
+    for (;;) {                               /* a frame being converted finishes first */
+        int busy;
+        pthread_mutex_lock(&g->mu);
+        busy = g->in_cb;
+        pthread_mutex_unlock(&g->mu);
+        if (!busy || now_ms() > until) break;
+        usleep(2000);
+    }
+    if (g->pipe) {
+        G.set_state(g->pipe, GST_STATE_NULL);
+        G.object_unref(g->pipe);            /* the bin's elements go with it */
+    } else {
+        void *e[] = { g->src, g->demux, g->queue, g->dec, g->sink };
+        int i;
+        for (i = 0; i < 5; i++) if (e[i]) G.object_unref(e[i]);
+    }
+    pthread_mutex_lock(&g->mu);
+    free(g->px[0]);
+    free(g->px[1]);
+    g->px[0] = g->px[1] = NULL;
+    free(g->xmap);
+    g->xmap = NULL;
+    free(g->raw[0]);
+    free(g->raw[1]);
+    g->raw[0] = g->raw[1] = NULL;
+    g->raw_len[0] = g->raw_len[1] = 0;
+    pthread_mutex_unlock(&g->mu);
+    /* the record itself stays (a few hundred bytes a clip): a handoff that still
+     * arrives after this - the emulator's bridge - finds `closing` and leaves */
+}
+
+#endif

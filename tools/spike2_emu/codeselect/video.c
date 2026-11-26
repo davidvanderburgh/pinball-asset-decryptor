@@ -9,8 +9,10 @@
 #include <pthread.h>
 #include <sys/resource.h>
 #include <sys/syscall.h>
+#include <time.h>
 #include "video.h"
 #include "art.h"
+#include "gstclip.h"
 
 #define MAX_THREADS 4
 
@@ -23,6 +25,7 @@ struct slot {
 };
 
 struct vid {
+    struct gclip *gc;         /* a clip through the machine's own decoder (gstclip.h), or NULL */
     int fd;
     int w, h, n;
     float fps;
@@ -42,9 +45,19 @@ struct vid {
     int gen;                  /* bumped by a restart: in-flight decodes are thrown away */
     int stop;
     int shown, dropped;
+    /* what a decode costs on this machine (the log: Simon's table ran a 1360x768 .padv at
+     * 0.1 fps on 2026-11-25, which no emulator run came near) */
+    long long dec_ms, dec_n;
     struct art_image out;
     char err[200];
 };
+
+static long long mono_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (long long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
 
 static unsigned rd32(const unsigned char *p)
 {
@@ -69,6 +82,7 @@ static void *decoder(void *arg)
         long long k = v->next_k;
         struct slot *s = &v->slot[k % v->R];
         int gen, fk, ok = 0, w = 0, h = 0;
+        long long t_dec;
         size_t len;
         unsigned char *rgba;
         char why[160] = "";
@@ -88,6 +102,7 @@ static void *decoder(void *arg)
         pthread_mutex_unlock(&v->mu);
 
         fk = (int)(k % v->n);
+        t_dec = mono_ms();
         len = v->off[fk + 1] - v->off[fk];
         if (len > cap) {
             unsigned char *nb = realloc(buf, len);
@@ -110,6 +125,10 @@ static void *decoder(void *arg)
         }
 
         pthread_mutex_lock(&v->mu);
+        if (ok) {
+            v->dec_ms += mono_ms() - t_dec;
+            v->dec_n++;
+        }
         if (gen != v->gen) {
             s->state = SL_EMPTY;            /* a restart came while it decoded */
         } else {
@@ -141,8 +160,22 @@ struct vid *vid_open(const char *path, int max_w, int max_h, long long now_ms,
     off_t fsize;
     ssize_t got;
     struct vid *v;
-    int k, fd = open(path, O_RDONLY | O_CLOEXEC);
+    int k, fd;
     unsigned fps1000;
+    /* Simon (2026-11-22): a clip as it is (.mp4/.mov) plays through the
+     * machine's own GStreamer chain and video chip, not as JPEG frames */
+    if (gclip_is_clip(path)) {
+        struct gclip *g = gclip_open(path, max_w, max_h, err, errlen);
+        if (!g) return NULL;
+        v = calloc(1, sizeof *v);
+        if (!v) { gclip_close(g); snprintf(err, (size_t)errlen, "out of memory"); return NULL; }
+        v->gc = g;
+        v->fd = -1;
+        v->held = -1;
+        v->t0 = now_ms;
+        return v;
+    }
+    fd = open(path, O_RDONLY | O_CLOEXEC);
     if (fd < 0) {
         snprintf(err, (size_t)errlen, "%s: %s", path, strerror(errno));
         return NULL;
@@ -241,6 +274,7 @@ const struct art_image *vid_frame(struct vid *v, long long now_ms, int *k)
 {
     long long target;
     int fresh = 0, released = 0;
+    if (v->gc) return gclip_frame(v->gc, now_ms, k);
     pthread_mutex_lock(&v->mu);
     target = due_k(v, now_ms);
     v->target = target;
@@ -276,12 +310,14 @@ const struct art_image *vid_frame(struct vid *v, long long now_ms, int *k)
 
 const struct art_image *vid_current(struct vid *v)
 {
+    if (v->gc) return gclip_current(v->gc);
     return v->held >= 0 ? &v->out : NULL;
 }
 
 void vid_restart(struct vid *v, long long now_ms)
 {
     int i;
+    if (v->gc) return;                        /* a clip runs on its own clock */
     pthread_mutex_lock(&v->mu);
     v->gen++;
     for (i = 0; i < v->R; i++)
@@ -297,31 +333,51 @@ void vid_restart(struct vid *v, long long now_ms)
     pthread_mutex_unlock(&v->mu);
 }
 
-int vid_frames(const struct vid *v) { return v->n; }
-float vid_fps(const struct vid *v) { return v->fps; }
+int vid_frames(const struct vid *v) { return v->gc ? gclip_frames(v->gc) : v->n; }
+float vid_fps(const struct vid *v) { return v->gc ? gclip_fps(v->gc) : v->fps; }
 int vid_threads(const struct vid *v) { return v->nthreads; }
 
 int vid_loops(const struct vid *v)
 {
     long long d = v->done_k;
+    if (v->gc) return gclip_loops(v->gc);
     return d < 0 ? 0 : (int)(d / v->n);
 }
 
 void vid_stats(const struct vid *v, int *shown, int *dropped)
 {
+    if (v->gc) { gclip_stats(v->gc, shown, dropped); return; }
     if (shown) *shown = v->shown;
     if (dropped) *dropped = v->dropped;
 }
 
+int vid_decode_ms(struct vid *v)
+{
+    int r;
+    if (v->gc) return -1;
+    pthread_mutex_lock(&v->mu);
+    r = v->dec_n ? (int)(v->dec_ms / v->dec_n) : -1;
+    pthread_mutex_unlock(&v->mu);
+    return r;
+}
+
 const char *vid_error(const struct vid *v)
 {
+    if (v->gc) return gclip_error(v->gc);
     return v->err;
 }
+
+int vid_is_clip(const struct vid *v) { return v && v->gc; }
+void vid_want_rgba(struct vid *v, int on) { if (v && v->gc) gclip_want_rgba(v->gc, on); }
+int vid_yuv_take(struct vid *v, struct gclip_yuv *f) { return v && v->gc ? gclip_yuv_take(v->gc, f) : 0; }
+void vid_yuv_done(struct vid *v) { if (v && v->gc) gclip_yuv_done(v->gc); }
+void vid_pause(struct vid *v, int on) { if (v && v->gc) gclip_pause(v->gc, on); }
 
 void vid_close(struct vid *v)
 {
     int k;
     if (!v) return;
+    if (v->gc) { gclip_close(v->gc); free(v); return; }
     pthread_mutex_lock(&v->mu);
     v->stop = 1;
     pthread_cond_broadcast(&v->cv);

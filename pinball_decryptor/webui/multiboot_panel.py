@@ -819,6 +819,8 @@ class WebMultibootPanel(_Base):
             "scores_column": bool(be.scores_column),
             "emulate": bool(be.emulate),
             "flash": bool(be.flash),
+            # Simon (2026-11-26): a TEST CARD entry in the menu - Spike 2 cards (mkmulticard --test-entry)
+            "test_entry": be.key == "stern",
             # Simon (2026-11-26): the menu on the network with no game running - Spike 2 cards only
             # (core/menu_network.py: padnet on the card's system partition, select.sh starts it)
             "menu_network": be.key == "stern",
@@ -1265,6 +1267,9 @@ class WebMultibootPanel(_Base):
             # PAD-1309: Jersey Jack and The Big Lebowski have no BACK hold (Version Select
             # is The Big Lebowski's way back), so the row is not shown for them
             "back_hold_ok": self._backend.key not in ("jjp", "dp"),
+            # Simon, 2026-11-22: the right flipper back to the menu reads a Spike 2 game's node bus (padmenu.so),
+            # so the Boot menu choice is a Stern Spike 2 card's alone
+            "flip_ok": self._backend.key == "stern",
             "own_note": own,
             "sounds_note": (
                 "auto = a click and a stinger pulled from the primary "

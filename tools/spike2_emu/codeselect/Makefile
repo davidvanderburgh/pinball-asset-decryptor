@@ -139,8 +139,8 @@ endif
 GLLIBS    =
 AUDLIBS   =
 LIBC      =
-SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c scores.c
-HDRS = conf.h colour.h settings.h testpics.h video.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h jjp_glibc.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c gstclip.c overlay.c theme.c gfx.c egl_x11.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_jjp.c log.c art.c audio.c audio_fifo.c audio_alsa.c audio_pulse.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h testpics.h video.h gstclip.h overlay.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h jjp_glibc.h $(BUILD)/theme_table.h
 else ifeq ($(PLATFORM),bof)
 # ---- BOF: native x86-64, the host gcc, STATIC, the machine's paths baked in ----
 # Everything the menu keeps lives under the update's own folder: the
@@ -168,8 +168,8 @@ LDPOST    =
 GLLIBS    =
 AUDLIBS   =
 LIBC      = -lpthread -lm
-SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c theme.c gfx.c fb_linux.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_bof.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
-HDRS = conf.h colour.h settings.h testpics.h video.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c gstclip.c overlay.c theme.c gfx.c fb_linux.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_bof.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h testpics.h video.h gstclip.h overlay.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
 else ifneq ($(filter dp spk,$(PLATFORM)),)
 # ---- DP: native x86-64, the host gcc, STATIC (as BOF), drawing on X ----
 # Every path is passed by the launcher (padselect_dp.sh): the menu's folder
@@ -204,8 +204,8 @@ LDPOST    =
 GLLIBS    =
 AUDLIBS   =
 LIBC      = -lpthread -lm
-SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c theme.c gfx.c fb_linux.c x11_raw.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_dp.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
-HDRS = conf.h colour.h settings.h testpics.h video.h theme.h gfx.h egl_stern.h x11_raw.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c gstclip.c overlay.c theme.c gfx.c fb_linux.c x11_raw.c input.c input_jjpio.c input_padsw.c input_fast.c input_pipe.c stubs_dp.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h testpics.h video.h gstclip.h overlay.h theme.h gfx.h egl_stern.h x11_raw.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
 else ifeq ($(PLATFORM),s3)
 # ---- Stern Spike 3: aarch64, the cross gcc from xgcc.sh, the card's own GL ----
 # The cross libc is Ubuntu 24.04's glibc 2.39, the same as the cards' Buildroot
@@ -246,8 +246,8 @@ AUDLIBS   =
 # libgcc_s.so.1, which gcc's default dynamic link asks for; the menu throws nothing, so the
 # static helpers are all it needs (the card has libgcc_s, but nothing here loads it)
 LIBC      = -lpthread -lm -static-libgcc
-SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c theme.c gfx.c egl_kms.c input.c input_padsw.c input_jjpio.c input_fast.c input_pipe.c stubs_s3.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
-HDRS = conf.h colour.h settings.h testpics.h video.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c gstclip.c overlay.c theme.c gfx.c egl_kms.c input.c input_padsw.c input_jjpio.c input_fast.c input_pipe.c stubs_s3.c log.c art.c audio.c audio_fifo.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h testpics.h video.h gstclip.h overlay.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
 else
 # ---- Stern: the ARM cross build against the card rootfs ----
 CC        = $(CROSS)gcc
@@ -271,7 +271,7 @@ CRTEND   := $(shell $(CC) -print-file-name=crtend.o)
 CFLAGS    = -std=gnu17 -O2 -Wall -Werror=implicit-function-declaration \
             -U_TIME_BITS -U_FILE_OFFSET_BITS -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 \
             -fno-stack-protector -fno-pie -no-pie \
-            -nostdinc -isystem $(GCCINC) -isystem $(ROOT)/usr/include -I$(BUILD) $(EXTRA_CFLAGS)
+            -nostdinc -isystem $(GCCINC) -isystem $(ROOT)/usr/include -I$(BUILD) $(EXTRA_CFLAGS)             -DPAD_GSTCLIP
 LDPRE     = -nostdlib -nostartfiles $(ROOT)/usr/lib/crt1.o $(ROOT)/usr/lib/crti.o $(CRTBEGIN)
 LDPOST    = $(CRTEND) $(ROOT)/usr/lib/crtn.o -L$(ROOT)/lib -L$(ROOT)/usr/lib \
             -Wl,-rpath-link,$(ROOT)/lib -Wl,-rpath-link,$(ROOT)/usr/lib \
@@ -279,15 +279,16 @@ LDPOST    = $(CRTEND) $(ROOT)/usr/lib/crtn.o -L$(ROOT)/lib -L$(ROOT)/usr/lib \
 # libc_nonshared.a: __libc_csu_init/fini for the rootfs crt1.o + the stat wrappers
 # -l:libgcc_s.so.1: the rig's bridge shims leave __aeabi_uldivmod undefined
 # -l:libpthread.so.0: the input scan and the animation cache are threads (2.8)
-LIBC      = -l:libpthread.so.0 -l:libc.so.6 $(ROOT)/usr/lib/libc_nonshared.a -l:libm.so.6 -l:libgcc_s.so.1 -lgcc
+# -l:libdl.so.2: a test clip opens the card's own GStreamer 0.10 at run time (gstclip.c)
+LIBC      = -l:libpthread.so.0 -l:libdl.so.2 -l:libc.so.6 $(ROOT)/usr/lib/libc_nonshared.a -l:libm.so.6 -l:libgcc_s.so.1 -lgcc
 GLLIBS    = -l:libEGL.so.1 -l:libGLESv2.so.2
 # the rootfs alsa-lib 1.0.28 (GLIBC_2.4 only; its libdl/libpthread/librt are
 # in the rootfs). Hand prototypes in audio_alsa.c: no headers on the box.
 AUDLIBS   = -l:libasound.so.2
 # input_jjpio.c is plain POSIX and rides along: codeselect.c dispatches every
 # backend by name, and on a Stern card `--input jjpio` finds no /dev/jjpio
-SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c input_fast.c input_pipe.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c scores.c
-HDRS = conf.h colour.h settings.h testpics.h video.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
+SRCS = codeselect.c conf.c colour.c settings.c testpics.c video.c gstclip.c overlay.c theme.c gfx.c egl_stern.c input.c input_hw.c input_padsw.c input_jjpio.c input_fast.c input_pipe.c log.c art.c audio.c audio_fifo.c audio_alsa.c codec.c nvm.c scores.c
+HDRS = conf.h colour.h settings.h testpics.h video.h gstclip.h overlay.h theme.h gfx.h egl_stern.h input.h log.h art.h audio.h codec.h nvm.h scores.h $(BUILD)/theme_table.h
 endif
 
 # THE PAST-32 BINARY (item 105).  The animation tick used to mark the cards
@@ -527,9 +528,11 @@ else
 check: $(BIN) capbin $(PADMENU)
 > bash test/check_elf.sh "$(CROSS)" "$(BIN)"
 > bash test/padmenu_test.sh "$(ROOT)" "$(PADMENU)"
+> bash test/padmenu_flip_test.sh "$(ROOT)" "$(PADMENU)"
 > CAPBIN="$(CAPBIN)" CAP_N=$(CAP_N) bash test/headless.sh "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > python3 test/padsw_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(TABLES)" "$(DEJAVU)"
 > python3 test/settings_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
+> python3 test/testcard_entry_test.py "$(ROOT)" "$(BIN)" "$(BUILD)/t" "$(DEJAVU)"
 > bash -n select.sh && bash test/select_sh_test.sh
 > @echo "check: OK"
 

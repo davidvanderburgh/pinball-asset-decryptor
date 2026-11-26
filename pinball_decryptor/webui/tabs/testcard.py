@@ -56,7 +56,10 @@ class TestCardTab(TabService):
         for i, it in enumerate(lst.items):
             rows.append({"i": i, "kind": it.kind, "label": it.label,
                          "from": it.game or os.path.basename(it.project.rstrip("/\\")) if it.project else "",
-                         "where": it.rel if it.project else it.path,
+                         "where": (it.rel if it.project else it.path) + (
+                             # the layered test: the scenes drawn over the clip
+                             "  -  layered: %d scene%s over it (%s)" % (len(it.layers), "" if len(it.layers) == 1 else "s",
+                                                                       ", ".join(it.layers)) if it.layers else ""),
                          "problem": tc.item_problem(it)})
         rows.sort(key=lambda r: KIND_ORDER[r["kind"]])        # stable: each list in its own order
         source_ok = bool(lst.source) and os.path.isfile(lst.source)
@@ -310,7 +313,7 @@ class TestCardTab(TabService):
                     self._say("test card: " + tc.S3_NO_NETWORK)
                 net = dict(tc.NETWORK_DEFAULTS)
             staged = tc.stage(items, os.path.join(work, "files"), None, log=self._say,
-                              cancel=lambda: self._cancel)
+                              cancel=lambda: self._cancel, clips=not s3)
             if self._cancel:
                 why = "canceled"
                 return

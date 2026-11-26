@@ -52,6 +52,7 @@
 #include "log.h"
 #include "colour.h"
 #include "settings.h"
+#include "gstclip.h"
 
 #define VERSION "3.2"
 
@@ -121,6 +122,12 @@
  * this bounds a file walk and a --frames run, not memory */
 #define ANIM_MAX_FRAMES 150
 #define CONFIRM_CAP_MS 8000
+/* boot_menu=hidden: how long the start-up screen waits for the right flipper,
+ * and what it says (Simon, 2026-11-22: "The short menu is OK at power up") */
+#define PEEK_MS 2500
+#define PEEK_TEXT "Hold the right flipper for the boot menu"
+/* select.sh --reboot's note: the game asked for the menu (CODESELECT_MENU_FLAG overrides) */
+#define MENU_FLAG "/data/codeselect.menu"
 
 /* The two footer lines, and the two long forms of the countdown line. Which
  * pair is drawn depends on whether this title HAS a lockdown-bar Action
@@ -1429,6 +1436,20 @@ static void draw_menu(struct gfx *g, struct gfx_font *f, const struct layout *L,
         gfx_text_center(g, f, cpx, W / 2, (int)(718 * s), cut, TH(L, COUNTDOWN));
     }
 
+    /* THE WAY BACK, SAID ON THE GLASS (boot_menu=flipper|hidden).  Simon,
+     * 2026-11-22: "the only problem is that users just won't know about this" -
+     * this screen is the one every owner of the card sees, so it says so here,
+     * small, along the bottom edge under the countdown. */
+    if (c->boot_menu != BOOT_MENU_MENU) {
+        const int wmax = W - (int)(40 * s);
+        float px;
+        snprintf(buf, sizeof buf, "Hold the right flipper %d s in attract to come back to this menu",
+                 c->flip_hold);
+        px = gfx_fit_px(f, buf, wmax, 20 * s, 14 * s);
+        gfx_ellipsize(f, px, buf, wmax, cut, sizeof cut);
+        gfx_text_center(g, f, px, W / 2, (int)(756 * s), cut, TH(L, FOOTER));
+    }
+
     /* SOUND OFF, SAID ON THE GLASS.  The GNR's menu came up with no sound anyone
      * could hear (2026-09-14) and nothing on the machine said whether the sink had
      * opened at all; the log lives where no owner reads it.  So a menu that asked
@@ -1838,6 +1859,40 @@ static void present_cb(void *ctx)
     present(p->g, p->egl, p->headless, p->invert);
 }
 
+/* the test card's clip, drawn by the graphics chip (settings.h; the table, 2026-11-25) */
+static int video_cb(void *ctx, const struct gclip_yuv *f, int x, int y, int w, int h)
+{
+    struct present_ctx *p = ctx;
+    if (p->headless) return -1;
+    if (!f) return egl_stern_video(p->egl, NULL, 0, 0, 0, 0, 0, 0, 0, 0, 0, p->invert);
+    return egl_stern_video(p->egl, f->data, f->fourcc, f->w, f->h, f->stride, f->rows, x, y, w, h, p->invert);
+}
+
+/* CODESELECT_VIDEO_CPU=1: the CPU converts a clip, as before (to compare the two) */
+static int video_gpu_wanted(int headless)
+{
+    const char *v = getenv("CODESELECT_VIDEO_CPU");
+    return !headless && !(v && *v && *v != '0');
+}
+
+/* THE SCREEN TEXTURE, ONCE.  egl_stern_texture makes a new one every call; the
+ * menu can now come up more than once in a run (back from the TEST CARD ENTRY,
+ * or after the hidden start-up screen), so the second time the whole frame -
+ * every screen here starts with a full gfx_fill - goes up as an ordinary present */
+static int g_tex_made;
+
+static void screen_texture(struct gfx *g, struct egl_stern *egl, int headless, int invert)
+{
+    if (headless) { gfx_clean(g); return; }
+    if (!g_tex_made) {
+        egl_stern_texture(egl, g->w, g->h, gfx_pixels(g, invert));
+        g_tex_made = 1;
+        gfx_clean(g);
+    } else {
+        present(g, egl, 0, invert);
+    }
+}
+
 int main(int argc, char **argv)
 {
     struct opts o;
@@ -1880,7 +1935,7 @@ int main(int argc, char **argv)
     int rc = 2;
     /* PAD-307: the card the countdown boots from the SETTINGS tile, and the
      * request to open the tile's screens */
-    int home = 0, open_settings = 0;
+    int home = 0, open_settings = 0, asked_menu = 0;
     struct present_ctx pctx;
 
     if (parse_args(&o, argc, argv) < 0) return 2;
@@ -2320,6 +2375,8 @@ int main(int argc, char **argv)
         se.media_dir = *c.test_dir ? c.test_dir : media.dir;
         se.first_image = 0;
         se.present = present_cb;
+        se.video = video_cb;
+        se.video_gpu = video_gpu_wanted(headless);
         se.ctx = &pctx;
         se.stop = &g_stop;
         se.testcard = 1;
@@ -2329,13 +2386,64 @@ int main(int argc, char **argv)
          * settings loop uploaded every frame into no texture and the glass
          * stayed black (the emulator showed it; --headless never makes one,
          * so the snapshot tests could not). */
-        if (!headless) egl_stern_texture(&egl, w, h, gfx_pixels(&g, invert));
-        gfx_clean(&g);
+        screen_texture(&g, &egl, headless, invert);
         sel_say("testcard: nothing boots: the test card menu until power-off");
         while (!g_stop) settings_run(&se);
         goto testcard_done;
     }
 
+    /* NO MENU UNLESS THE RIGHT FLIPPER IS HELD (boot_menu=hidden).  Simon,
+     * 2026-11-22: "No menu appears, available only through flippers", and "The
+     * short menu is OK at power up".  So for PEEK_MS a plain screen names the
+     * game about to start and says how to get the menu; the right flipper -
+     * held from before the menu came up (its level: a key already down at the
+     * first scan makes no press) or pressed in that time - opens the menu,
+     * and anything else boots the card the menu would have opened on. */
+    /* A RESTART THAT ASKED FOR THE MENU (select.sh --reboot: the right flipper or
+     * BACK held in the game) leaves a note on /data; it is read once, here, in
+     * every boot_menu= so an old one never surprises a card switched to hidden */
+    {
+        const char *flag = getenv("CODESELECT_MENU_FLAG");
+        if (!flag || !*flag) flag = MENU_FLAG;
+        asked_menu = unlink(flag) == 0;
+        if (asked_menu) sel_say("boot menu: the game asked for it (%s)", flag);
+    }
+    if (c.boot_menu == BOOT_MENU_HIDDEN && !pinned && !asked_menu) {
+        long long t0 = sel_now_ms(), until = t0 + PEEK_MS;
+        int want = 0, ev;
+        draw_loading(&g, font, &L.th, "STARTING", conf_card_face(&c, home)->title,
+                     conf_card_face(&c, home)->subtitle, card_picture(&media, home));
+        {
+            const float s = (float)g.h / 768.0f;
+            const int wmax = g.w - (int)(80 * s);
+            char cut[300];
+            float px = gfx_fit_px(font, PEEK_TEXT, wmax, 30 * s, 20 * s);
+            gfx_ellipsize(font, px, PEEK_TEXT, wmax, cut, sizeof cut);
+            gfx_text_center(&g, font, px, g.w / 2, (int)(718 * s), cut, L.th.rgb[TH_FOOTER]);
+        }
+        screen_texture(&g, &egl, headless, invert);
+        sel_say("boot menu hidden: %d ms to hold the right flipper, else card %d (%s)",
+                PEEK_MS, home + 1, conf_card_face(&c, home)->title);
+        while (!g_stop && !want) {
+            long long now = sel_now_ms();
+            while ((ev = input_poll(in, now)) != EV_NONE)
+                if (ev == EV_RIGHT) want = 1;
+            if (input_held(in, EV_RIGHT)) want = 1;
+            if (now >= until) break;
+            audio_pump(au, now);
+            present(&g, &egl, headless, invert);
+            if (headless) sel_sleep_ms(20);
+        }
+        if (!want) {
+            chosen = home;
+            sel_say("boot menu hidden: no right flipper - booting card %d", chosen + 1);
+            goto testcard_done;
+        }
+        sel_say("boot menu hidden: right flipper - the menu opens");
+    }
+
+    /* the menu comes up here, and again on the way back from the TEST CARD ENTRY */
+menu_again:
     start = sel_now_ms();
     last_key = start;
     deadline = timeout > 0 ? start + (long long)timeout * 1000LL : 0;
@@ -2347,8 +2455,7 @@ int main(int argc, char **argv)
               deadline ? timeout : -1, action, audio_missing(au));
     remain_shown = deadline ? timeout : -1;
     dirty = 0;
-    if (!headless) egl_stern_texture(&egl, w, h, gfx_pixels(&g, invert));
-    gfx_clean(&g);
+    screen_texture(&g, &egl, headless, invert);
     music_clip = media.music[hl];
     if (music_clip) music_voice = audio_play(au, music_clip, 1);
 
@@ -2447,6 +2554,8 @@ int main(int argc, char **argv)
             se.media_dir = *c.test_dir ? c.test_dir : media.dir;
             se.first_image = lastimg;
             se.present = present_cb;
+            se.video = video_cb;
+            se.video_gpu = video_gpu_wanted(headless);
             se.ctx = &pctx;
             se.stop = &g_stop;
             if (music_voice >= 0) { audio_stop(au, music_voice); music_voice = -1; music_clip = NULL; }
@@ -2618,6 +2727,50 @@ testcard_done:
                 snprintf(rolled, sizeof rolled, " (%s)", why);
             }
             sel_log("group: card %d boots image %d%s", chosen + 1, boot, rolled);
+        }
+        /* THE TEST CARD ENTRY boots nothing (Simon, 2026-11-23: "a 1.16 vanilla
+         * plus the test card").  Its screens take the glass until ACTION on their
+         * top screen, then the menu comes back on it.  The last-choice file
+         * remembers it like a game, so a card that starts where it was left
+         * starts here again - and nothing is handed to select.sh. */
+        if (conf_image_is_testcard(&c, boot)) {
+            struct settings_env se;
+            if (conf_write_last(o.last, boot, -1, &bags) < 0)
+                sel_log("cannot write %s: %s (continuing)", o.last, strerror(errno));
+            lastimg = boot;
+            if (music_voice >= 0) { audio_stop(au, music_voice); music_voice = -1; music_clip = NULL; }
+            memset(&se, 0, sizeof se);
+            pctx.g = &g;
+            pctx.egl = &egl;
+            pctx.headless = headless;
+            pctx.invert = invert;
+            se.g = &g;
+            se.font = font;
+            se.th = &L.th;
+            se.c = &c;
+            se.in = in;
+            se.au = au;
+            se.move = media.move;
+            se.colour_file = o.colour_file;
+            se.media_dir = *c.test_dir ? c.test_dir : media.dir;
+            se.first_image = -1;
+            se.present = present_cb;
+            se.video = video_cb;
+            se.video_gpu = video_gpu_wanted(headless);
+            se.ctx = &pctx;
+            se.stop = &g_stop;
+            se.testcard = 1;
+            se.leave = 1;
+            gfx_fill(&g, L.th.rgb[TH_BACKGROUND]);
+            screen_texture(&g, &egl, headless, invert);
+            sel_say("testcard entry: card %d (%s): the test card screens", chosen + 1, c.img[boot].title);
+            settings_run(&se);
+            if (g_stop) { chosen = -1; goto testcard_done; }
+            sel_say("testcard entry: back to the menu");
+            hl = chosen;
+            chosen = -1;
+            boot = -1;
+            goto menu_again;
         }
         if (headless) {
             if (gfx_write_ppm(&g, o.headless, invert) < 0)

@@ -517,6 +517,15 @@ int egl_stern_texture(struct egl_stern *e, int w, int h, const unsigned char *px
     return 0;
 }
 
+/* the video layer is the Spike 2's (egl_stern.c): here the CPU converts a clip */
+int egl_stern_video(struct egl_stern *e, const unsigned char *data, unsigned fourcc, int w, int h,
+                    int stride, int rows, int x, int y, int dw, int dh, int invert)
+{
+    (void)e; (void)data; (void)fourcc; (void)w; (void)h; (void)stride; (void)rows;
+    (void)x; (void)y; (void)dw; (void)dh; (void)invert;
+    return -1;
+}
+
 void egl_stern_frame(struct egl_stern *e, const unsigned char *packed, int x, int y, int w, int h)
 {
     if (!e->up) return;

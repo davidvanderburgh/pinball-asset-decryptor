@@ -1012,7 +1012,8 @@ pad_can_pivot() {
 # reason build.sh already records in its own comment: alsastub.c was on the
 # compile line and missing from the copy list, an edit was silently never
 # built, and the build still said "built ok".
-PAD_SHIM_SRCS="hwshim.c alsastub.c gststub.c gstvid.c padvid.h padsw.h"
+# padgst.c: the video bridge alone, for the boot menu (padgst.so - see build.sh)
+PAD_SHIM_SRCS="hwshim.c alsastub.c gststub.c gstvid.c padvid.h padsw.h padgst.c"
 export PAD_SHIM_SRCS
 
 #: Where build.sh records what it compiled.
@@ -1211,7 +1212,7 @@ pad_glguest_hash() { pad_src_hash "${1:-$RIG}" $PAD_GLGUEST_SRCS; }
 # platform's SRCS reads the FAST Neuron now (PAD-342), and the BOF hooks
 # and the DP / Spooky launchers (padselect_spk.sh, padselect_proc.sh: PAD-980)
 # because the Makefile installs them by name.
-PAD_SELECT_SRCS="codeselect/codeselect.c codeselect/conf.c codeselect/conf.h codeselect/colour.c codeselect/colour.h codeselect/settings.c codeselect/settings.h codeselect/testpics.c codeselect/testpics.h codeselect/video.c codeselect/video.h codeselect/theme.c codeselect/theme.h codeselect/themes.json codeselect/gen_themes.py codeselect/gfx.c codeselect/gfx.h codeselect/egl_stern.c codeselect/egl_stern.h codeselect/input.c codeselect/input.h codeselect/input_hw.c codeselect/input_padsw.c codeselect/input_jjpio.c codeselect/input_fast.c codeselect/input_pipe.c codeselect/egl_x11.c codeselect/stubs_jjp.c codeselect/audio_pulse.c codeselect/jjp_glibc.h codeselect/padselect.sh codeselect/padselect_bof.sh codeselect/padselect_dp.sh codeselect/padselect_spk.sh codeselect/padselect_s3.sh codeselect/padselect_proc.sh codeselect/pad_install_bof.sh codeselect/log.c codeselect/log.h codeselect/art.c codeselect/art.h codeselect/audio.c codeselect/audio.h codeselect/audio_fifo.c codeselect/audio_alsa.c codeselect/codec.c codeselect/codec.h codeselect/nvm.c codeselect/nvm.h codeselect/scores.c codeselect/scores.h codeselect/padmenu.c codeselect/padmenu_proc.py codeselect/Makefile codeselect/select.sh codeselect/materialize.py codeselect/images.conf.example codeselect/third_party/stb_truetype.h codeselect/third_party/stb_image.h"
+PAD_SELECT_SRCS="codeselect/codeselect.c codeselect/conf.c codeselect/conf.h codeselect/colour.c codeselect/colour.h codeselect/settings.c codeselect/settings.h codeselect/testpics.c codeselect/testpics.h codeselect/video.c codeselect/video.h codeselect/gstclip.c codeselect/gstclip.h codeselect/overlay.c codeselect/overlay.h codeselect/theme.c codeselect/theme.h codeselect/themes.json codeselect/gen_themes.py codeselect/gfx.c codeselect/gfx.h codeselect/egl_stern.c codeselect/egl_stern.h codeselect/input.c codeselect/input.h codeselect/input_hw.c codeselect/input_padsw.c codeselect/input_jjpio.c codeselect/input_fast.c codeselect/input_pipe.c codeselect/egl_x11.c codeselect/stubs_jjp.c codeselect/audio_pulse.c codeselect/jjp_glibc.h codeselect/padselect.sh codeselect/padselect_bof.sh codeselect/padselect_dp.sh codeselect/padselect_spk.sh codeselect/padselect_s3.sh codeselect/padselect_proc.sh codeselect/pad_install_bof.sh codeselect/log.c codeselect/log.h codeselect/art.c codeselect/art.h codeselect/audio.c codeselect/audio.h codeselect/audio_fifo.c codeselect/audio_alsa.c codeselect/codec.c codeselect/codec.h codeselect/nvm.c codeselect/nvm.h codeselect/scores.c codeselect/scores.h codeselect/padmenu.c codeselect/padmenu_proc.py codeselect/Makefile codeselect/select.sh codeselect/materialize.py codeselect/images.conf.example codeselect/third_party/stb_truetype.h codeselect/third_party/stb_image.h"
 export PAD_SELECT_SRCS
 
 #: The installed selector, and what it was built from - stamped beside it,

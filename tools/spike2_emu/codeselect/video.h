@@ -58,10 +58,23 @@ float vid_fps(const struct vid *v);
 int   vid_loops(const struct vid *v);       /* times it has started again */
 /* since the last start: frames shown and frames skipped (late) */
 void  vid_stats(const struct vid *v, int *shown, int *dropped);
+/* a JPEG frame's decode, averaged (ms; -1: none yet, or a clip through the machine's
+ * decoder) - for the log */
+int   vid_decode_ms(struct vid *v);
 /* decoder threads, for the log */
 int   vid_threads(const struct vid *v);
 /* the decode error that stopped a frame, or "" */
 const char *vid_error(const struct vid *v);
+
+/* THE GRAPHICS CHIP'S WAY (gstclip.h, the table 2026-11-25): a clip through the
+ * machine's decoder can hand its frames over as YUV for a shader; a .padv cannot */
+struct gclip_yuv;
+int   vid_is_clip(const struct vid *v);
+void  vid_want_rgba(struct vid *v, int on);
+int   vid_yuv_take(struct vid *v, struct gclip_yuv *f);
+void  vid_yuv_done(struct vid *v);
+/* frozen: a clip's decoder pauses (a .padv is held by not taking frames) */
+void  vid_pause(struct vid *v, int on);
 
 void vid_close(struct vid *v);
 

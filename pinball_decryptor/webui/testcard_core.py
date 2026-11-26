@@ -119,14 +119,17 @@ class Item(object):
     THE LAYERED TEST (Simon, 2026-11-22/26): a video item with `layers` - the project's scenes drawn over the clip
     (plugins/stern/layered_test.py specs, ``HASH`` or ``HASH@FRAME``, the lowest first), made on the Scenes tab's
     Layered test… button.  `player` (Simon, 2026-11-26: the number "is in the wrong place"): the state of the game's
-    video player the clip is shown in (a label of layered_test.clip_states, e.g. ScoreFrame); empty = the default."""
-    __slots__ = ("kind", "label", "path", "project", "rel", "game", "layers", "player")
+    video player the clip is shown in (a label of layered_test.clip_states, e.g. ScoreFrame); empty = the default.
+    `plain` (Simon, 2026-11-26, an A/B test of the overlay's colour on the table): its scenes drawn from the pictures
+    as extracted, without each file's own colour profile."""
+    __slots__ = ("kind", "label", "path", "project", "rel", "game", "layers", "player", "plain")
 
-    def __init__(self, kind, label="", path="", project="", rel="", game="", layers=(), player=""):
+    def __init__(self, kind, label="", path="", project="", rel="", game="", layers=(), player="", plain=False):
         self.kind, self.label, self.path = kind, label, path
         self.project, self.rel, self.game = project, rel, game
         self.layers = tuple(str(x) for x in (layers or ()) if str(x).strip())
         self.player = str(player or "").strip() if self.layers else ""
+        self.plain = bool(plain) and bool(self.layers)
 
     @property
     def from_project(self):
@@ -138,7 +141,7 @@ class Item(object):
         return "layered" if self.layers else self.kind
 
     def key(self):
-        tail = self.layers + ((self.player,) if self.player else ())
+        tail = self.layers + ((self.player,) if self.player else ()) + (("plain",) if self.plain else ())
         if self.project:
             return (self.kind, norm_dir(self.project), self.rel.replace("\\", "/")) + tail
         return (self.kind, "", norm_dir(self.path)) + tail
@@ -155,7 +158,7 @@ class Item(object):
             return None
         it = cls(d["kind"], *(str(d.get(k) or "") for k in ("label", "path", "project", "rel", "game")),
                  layers=d.get("layers") if isinstance(d.get("layers"), list) and d["kind"] == "video" else (),
-                 player=str(d.get("player") or ""))
+                 player=str(d.get("player") or ""), plain=d.get("plain") is True)
         if not it.project and not it.path:
             return None
         return it
@@ -566,7 +569,8 @@ def layer_overlay(item, clip, work, n, log=print):
     from pinball_decryptor.plugins.stern import layered_test as LT
     frames, fps = LT.clip_frames(clip)
     out = os.path.join(work, "clip%02d.pado" % n)
-    LT.make_overlay(item.project, list(item.layers), out, frames, fps, log=lambda m: log("test card: " + m.strip()))
+    LT.make_overlay(item.project, list(item.layers), out, frames, fps, log=lambda m: log("test card: " + m.strip()),
+                    profiles=not getattr(item, "plain", False))
     return out
 
 

@@ -101,12 +101,16 @@ def player_names(draws):
     return out
 
 
-def scene_setup(project, card, man):
+def scene_setup(project, card, man, profiles=True):
     """``(manifest, render_tree keywords)`` for scene *card* drawn as the machine shows it, as a ticked scene's
     picture is (webui/text_scenes.render_resting_frame): the project's Scenes edits (PAD-403: less what the scene
     already shows), its text colours (PAD-438) and score panel colours (PAD-507), each picture's own colour profile
     baked, the whole-screen profile (PAD-312) and not the PC screen's simulation.  Each step that cannot be worked
-    out is left off, as the Scenes tab leaves it."""
+    out is left off, as the Scenes tab leaves it.
+
+    *profiles* False (Simon, 2026-11-26: the overlay "too dark / saturated" on the table, "It is possible you are
+    carrying through the emulation style profiling of the graphics to the actual machine" - an A/B test): the
+    pictures and lines as extracted, without each file's own colour profile."""
     from . import scene_edit, scene_render
     kw = {}
     try:
@@ -116,14 +120,14 @@ def scene_setup(project, card, man):
         ops = []
     try:
         from . import text_colour
-        lines, _w = text_colour.line_ops(project, card, man, ops, bake=True)
+        lines, _w = text_colour.line_ops(project, card, man, ops, bake=profiles)
         if lines:
             man, _n = scene_edit.apply_manifest(man, lines)
     except Exception:                                           # noqa: BLE001
         pass
     try:
         from . import score_colours
-        game = score_colours.preview_ops(project, man, bake=True)
+        game = score_colours.preview_ops(project, man, bake=profiles)
         if game:
             man, _n = scene_edit.apply_manifest(man, game)
     except Exception:                                           # noqa: BLE001
@@ -132,7 +136,7 @@ def scene_setup(project, card, man):
         scene_edit.mark_own_of(man, project, card)
     except Exception:                                           # noqa: BLE001
         pass
-    for key, make in (("pictures", lambda: scene_render.pending_pictures(project, bake=True)),
+    for key, make in (("pictures", lambda: scene_render.pending_pictures(project, bake=profiles)),
                       ("sizes", lambda: scene_render.picture_sizes(project)),
                       ("view", lambda: _machine_view(project)),
                       ("colors", lambda: _text_colors(project, card)),
@@ -367,15 +371,15 @@ def read_pado(path):
     return {"canvas": (w, h), "fps": fps / 1000.0, "frames": n, "pictures": pics, "table": table}
 
 
-def make_overlay(project, scene_specs, out, frames, fps=30.0, log=print):
+def make_overlay(project, scene_specs, out, frames, fps=30.0, log=print, profiles=True):
     """The overlay for a clip of *frames* frames at *fps*, from the project's scenes
-    (:func:`parse_scene` specs, drawn in order)."""
+    (:func:`parse_scene` specs, drawn in order); *profiles*: :func:`scene_setup`'s."""
     tree = scene_tree(project)
     scenes = []
     for spec in scene_specs:
         key, pin = parse_scene(spec)
         name, man = find_scene(tree, key)
-        man, kw = scene_setup(project, name, man)
+        man, kw = scene_setup(project, name, man, profiles=profiles)
         f = pin_frame(man, pin)
         scenes.append((man, f, kw))
         log("  scene %s%s: %s" % (key, " at frame %d" % f if f is not None else " from frame 0",

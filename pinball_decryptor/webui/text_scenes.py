@@ -1135,7 +1135,8 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
                "start": [dict(one(k), pin=pin) for k, pin in start], "ticked": ticked,
                "scenes": scenes, "clips": clips, "clip": "", "index": None}
         if editing is not None:
-            out.update(index=int(index), clip=editing.rel, player=editing.player, label=editing.label)
+            out.update(index=int(index), clip=editing.rel, player=editing.player, label=editing.label,
+                       plain=editing.plain)
         return out
 
     def _layered_rows(self):
@@ -1151,7 +1152,7 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
                             if os.path.basename(k).startswith(key)), None) if mine else None
                 names.append((hit or key) + ("@" + spec.partition("@")[2] if "@" in spec else ""))
             rows.append({"i": i, "label": it.label, "clip": os.path.basename(it.rel or it.path or ""),
-                         "player": it.player, "scenes": names, "mine": mine,
+                         "player": it.player, "scenes": names, "mine": mine, "plain": it.plain,
                          "game": it.game or os.path.basename((it.project or "").rstrip("/\\"))})
         return rows
 
@@ -1243,11 +1244,12 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
         return out
 
     @rpc
-    def add_layered(self, layers, clip_rel, label="", player="", untick=False, index=None):
+    def add_layered(self, layers, clip_rel, label="", player="", untick=False, index=None, plain=False):
         """Put a layered test on the Test card tab's list: *layers* ``[{"d": scene dir, "pin": frame or label}]``,
         the lowest first, over the project's video *clip_rel*, shown in the player's state *player* (a label of
         layered_test.clip_states).  *untick*: the scenes of it ticked TEST come off the list as still pictures.
-        *index*: the layered test it replaces (Edit).  Returns '' or why not."""
+        *index*: the layered test it replaces (Edit).  *plain*: its pictures without each file's colour profile (an
+        A/B test of the overlay's colour, Simon 2026-11-26).  Returns '' or why not."""
         from . import testcard_core as tc
         specs = []
         for ly in layers or []:
@@ -1267,7 +1269,7 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
         name = tc.clean_label(label or "%s over %s" % (self._scenes[layers[-1]["d"]].get("label") or "scene",
                                                         os.path.splitext(os.path.basename(path))[0]), "layered test")
         why = tc.shared().add_layered(tc.Item("video", name, path, self.assets_dir, clip_rel, self._tc_game(),
-                                              layers=specs, player=str(player or "")),
+                                              layers=specs, player=str(player or ""), plain=bool(plain)),
                                       replace=None if index is None else int(index))
         if not why:
             if untick:

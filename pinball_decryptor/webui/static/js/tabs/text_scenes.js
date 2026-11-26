@@ -246,6 +246,13 @@ const SHOWN_TIP = { head: "Video shown as", lines: [
   "Godzilla shows the Match video with the score panel on screen in its ScoreFrame state (1.06x, moved up), so the video's own 0 lines up beside the Match digit.",
   "Pick another if what you see on the machine does not line up." ] };
 
+// Simon (2026-11-26): the overlay "too dark / saturated" on the table - "It is possible you are carrying through
+// the emulation style profiling of the graphics to the actual machine": an A/B test, the same test both ways
+const COLOURS_TIP = { head: "Picture colours", lines: [
+  "With each file's colour profile: the scenes' pictures as a Write puts them on the card, each with the colour profile switched on for it.",
+  "As extracted: the pictures as they came off the card, without those profiles.",
+  "Make the same test both ways to see on the machine which matches the game." ] };
+
 // ONE PICKER, the same for the scenes and the video: a search over the list, the list (drop-down) of what matches,
 // what the picked one is under it, its picture on the right, and its button
 function Picker({ items, value, onChange, what, preview, details, action }) {
@@ -275,8 +282,10 @@ function LayeredDialog({ index, onClose }) {
   const [player, setPlayer] = useState("");
   const [label, setLabel] = useState("");
   const [why, setWhy] = useState("");
+  const [plain, setPlain] = useState(false);
   useEffect(() => { (async () => {
     const got = await call("text_scenes.layered_options", index == null ? null : index);
+    if (got && got.plain) setPlain(true);
     setO(got || { why: "No answer." });
     if (got && got.start) setLayers(got.start.map((c) => ({ d: c.d, label: c.label, hash: c.hash, pin: c.pin || "" })));
     if (got && got.clip) setClip(got.clip);
@@ -292,7 +301,7 @@ function LayeredDialog({ index, onClose }) {
   })(); }, [clip]);
   const add = async () => {
     const w = await call("text_scenes.add_layered", layers.map((l) => ({ d: l.d, pin: l.pin })), clip, label, player,
-      false, index == null ? null : index);
+      false, index == null ? null : index, plain);
     if (w) setWhy(w); else onClose();
   };
   const move = (i, d) => { const n = layers.slice(); const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setLayers(n); };
@@ -333,6 +342,12 @@ function LayeredDialog({ index, onClose }) {
             <${Select} sm width=${220} value=${player} options=${info.states.map((st) => ({ value: st.label, label: st.label + "  (" + st.zoom + "x)" }))} onChange=${setPlayer} />
           </div>` : html`<div>No scene of the project plays it: it is shown full size.</div>`}` : clip ? "Reading the video…" : "Pick the video the scenes are drawn over."}
         preview=${info && info.path ? html`<video src=${mediaUrl(info.path)} muted loop autoplay playsinline></video>` : null} />
+      <div class="row lt-shown" ...${tip(COLOURS_TIP)}>
+        <span class="small">Picture colours</span>
+        <${Select} sm width=${360} value=${plain ? "plain" : "profiled"} onChange=${(v) => setPlain(v === "plain")}
+          options=${[{ value: "profiled", label: "With each file's colour profile (as written)" },
+                     { value: "plain", label: "As extracted (no file colour profiles)" }]} />
+      </div>
       <div class="k">Name on the test card</div>
       <${Field} sm width="420px" value=${label} placeholder="the top scene over the video (left empty)" onChange=${setLabel} />
       ${why ? html`<span class="small bad">${why}</span>` : null}
@@ -354,7 +369,7 @@ function LayeredTests({ s, onOpen }) {
     </div>
     ${rows.map((r) => html`<div class="lt-test" key=${r.i}>
       <span class="ellip small" title=${r.label + "\n" + r.scenes.join(", ") + " over " + r.clip + (r.player ? " (" + r.player + ")" : "") + (r.mine ? "" : "\nFrom " + r.game)}>
-        <b>${r.label}</b><span class="muted">${"  " + r.scenes.length + " scene" + (r.scenes.length === 1 ? "" : "s") + " over " + r.clip}</span></span>
+        <b>${r.label}</b><span class="muted">${"  " + r.scenes.length + " scene" + (r.scenes.length === 1 ? "" : "s") + " over " + r.clip + (r.plain ? " · as extracted" : "")}</span></span>
       <${Button} size="xs" disabled=${!r.mine} title=${r.mine ? "Change its scenes, video or name" : "From " + r.game + ": open that project to edit it"} onClick=${() => onOpen(r.i)}>Edit<//>
       <${Button} size="xs" icon="trash" title="Take it off the test card" onClick=${() => call("text_scenes.layered_remove", r.i)} />
     </div>`)}

@@ -148,7 +148,7 @@ def test_scenes_are_drawn_as_a_ticked_scenes_picture_is(monkeypatch):
     assert kw == {"pictures": {"a": 1}, "sizes": {"a": (1, 1)}, "view": "VIEW", "colors": {"MATCH": (1, 2, 3)}}
     src = open(LT.__file__, encoding="utf-8").read()
     assert "return cp.machine_view(project, True, False)" in src, "the game's whole-screen profile, not the PC screen's"
-    assert "man, kw = scene_setup(project, name, man)" in inspect.getsource(LT.make_overlay)
+    assert "man, kw = scene_setup(project, name, man, profiles=profiles)" in inspect.getsource(LT.make_overlay)
     assert "**kw)" in inspect.getsource(LT.render_frames)
 
 
@@ -302,3 +302,30 @@ def test_a_send_freezes_a_menu_card_s_menu_and_lets_it_go():
     assert "kill -9 $c" not in pause and "kill $c" not in pause
     assert pause.index("kill -STOP $c") < pause.index("pad_say @TEXT@")
     assert "kill -CONT $c" in rs.SCREEN_FNS[rs.SCREEN_FNS.index("pad_resume()"):]
+
+
+# ---- an A/B test of the overlay's colour (Simon, 2026-11-26: "too dark / saturated" on the table) -------------
+def test_a_layered_test_can_leave_the_files_colour_profiles_off(monkeypatch):
+    from pinball_decryptor.plugins.stern import scene_edit, scene_render
+    seen = []
+    monkeypatch.setattr(scene_edit, "ops_for", lambda p, c: [])
+    monkeypatch.setattr(scene_edit, "to_apply", lambda p, c, m, o=None: [])
+    monkeypatch.setattr(scene_edit, "apply_manifest", lambda m, ops: (m, []))
+    monkeypatch.setattr(scene_edit, "mark_own_of", lambda m, p, c: None)
+    monkeypatch.setattr(scene_render, "pending_pictures", lambda p, bake=True: seen.append(bake) or {"a": 1})
+    monkeypatch.setattr(scene_render, "picture_sizes", lambda p: {})
+    monkeypatch.setattr(LT, "_machine_view", lambda p: None)
+    monkeypatch.setattr(LT, "_text_colors", lambda p, c: {})
+    monkeypatch.setattr(LT, "_text_edits", lambda p, c, m: {})
+    LT.scene_setup("proj", "c", {"root": {}})
+    LT.scene_setup("proj", "c", {"root": {}}, profiles=False)
+    assert seen == [True, False]
+    it = tc.Item("video", "B", "p", "proj", "video/match.mp4", layers=["0335207f"], plain=True)
+    back = tc.Item.from_json(it.to_json())
+    assert back.plain is True and back.key() != tc.Item("video", "B", "p", "proj", "video/match.mp4",
+                                                        layers=["0335207f"]).key()
+    assert tc.Item("video", "V", "p", plain=True).plain is False, "only a layered test has it"
+    assert "profiles=not getattr(item, \"plain\", False)" in inspect.getsource(tc.layer_overlay)
+    js = open(JS, encoding="utf-8").read()
+    assert '{ value: "plain", label: "As extracted (no file colour profiles)" }' in js
+    assert "index == null ? null : index, plain);" in js

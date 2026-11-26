@@ -218,7 +218,10 @@ def _decl(src):
     end = src.index("static int coop_dbl_armed;", start)
     # PAD-1450: the later ball's view card (coop_view_turn / coop_view_tick) is emulator-proven; here they do nothing
     return src[start:src.index("\n", end) + 1] + ("static void coop_view_turn(void) {}\n"
-                                                    "static void coop_view_tick(void) {}\n")
+                                                    "static void coop_view_tick(void) {}\n"
+                                                    # PAD-1611: the select music is emulator-proven
+                                                    "static void cselm_end(int fade, const char *how) {}\n"
+                                                    "static int cselm_picked_follows(int c) { return 0; }\n")
 
 
 def _run(tmp_path, main=MAIN):

@@ -1,6 +1,7 @@
 """PAD-1458: the app's WSL disks give their freed space back to Windows when
-the app closes - weekly at most, 20 GB spare, only when nothing runs, and
-every check fails closed.  Everything outside (wsl.exe, the compact, the
+the app closes - daily at most (PAD-1600: was weekly), 5 GB or 10% of the
+file spare (was 20 GB), only when nothing runs, and every check fails
+closed.  Everything outside (wsl.exe, the compact, the
 process list) is a fake here; the real compact is proven on a real disk in
 docs/plans/disk_giveback.md."""
 
@@ -84,15 +85,15 @@ class Rig:
                     trim=lambda: setattr(self, "trimmed", self.trimmed + 1))
 
 
-def test_due_reads_files_only_and_is_weekly(tmp_path, monkeypatch):
+def test_due_reads_files_only_and_is_daily(tmp_path, monkeypatch):
     big = [_disk(tmp_path, "PAD-Runtime", 30 * GB, "/")]
-    small = [_disk(tmp_path, "rigs' data disk", 5 * GB, "/mnt/wsl/paddata")]
+    small = [_disk(tmp_path, "rigs' data disk", 4 * GB, "/mnt/wsl/paddata")]
     now = time.time()
     assert g.due(now, st={}, disk_list=big)
-    assert not g.due(now, st={}, disk_list=small)      # cannot hold 20 GB spare
-    assert not g.due(now, st={"giveback_checked": now - 6 * 86400},
+    assert not g.due(now, st={}, disk_list=small)      # cannot hold 5 GB spare
+    assert not g.due(now, st={"giveback_checked": now - 20 * 3600},
                      disk_list=big)
-    assert g.due(now, st={"giveback_checked": now - 8 * 86400}, disk_list=big)
+    assert g.due(now, st={"giveback_checked": now - 25 * 3600}, disk_list=big)
     monkeypatch.setenv("PAD_DISK_GIVEBACK", "0")
     assert not g.due(now, st={}, disk_list=big)
 
@@ -103,12 +104,12 @@ def test_the_keepers_automatic_box_turns_it_off(tmp_path):
     assert not g.due(time.time(), disk_list=big)
 
 
-def test_gives_back_only_the_disks_holding_20_gb_spare(tmp_path):
+def test_gives_back_only_the_disks_holding_their_slack(tmp_path):
     rt = _disk(tmp_path, "PAD-Runtime", 89 * GB, "/")
     dd = _disk(tmp_path, "rigs' data disk", 40 * GB, "/mnt/wsl/paddata")
-    rig = Rig(tmp_path, used={"/": 65 * GB, "/mnt/wsl/paddata": 30 * GB})
+    rig = Rig(tmp_path, used={"/": 65 * GB, "/mnt/wsl/paddata": 36 * GB})
     rec = g.run(disk_list=[rt, dd], **rig.kw())
-    assert rig.compacted == [rt["vhdx"]]               # data disk: 10 GB spare
+    assert rig.compacted == [rt["vhdx"]]               # data disk: 4 GB spare
     assert rig.released == [rt["vhdx"]] and rig.trimmed == 1
     assert rec["freed"] == 88 * GB
     st = space_keeper.load_state()
@@ -170,9 +171,9 @@ def test_wsl_taking_the_disk_back_is_retried(tmp_path):
     assert rec["freed"] == 88 * GB
 
 
-def test_nothing_spare_starts_the_week_again(tmp_path):
+def test_nothing_spare_starts_the_day_again(tmp_path):
     rt = _disk(tmp_path, "PAD-Runtime", 30 * GB, "/")
-    rig = Rig(tmp_path, used={"/": 25 * GB})
+    rig = Rig(tmp_path, used={"/": 26 * GB})
     assert g.run(disk_list=[rt], **rig.kw())["skipped"]
     assert space_keeper.load_state()["giveback_checked"] > 0
     assert rig.compacted == []

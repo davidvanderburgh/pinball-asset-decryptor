@@ -218,6 +218,8 @@ class ShellExtras(ProjectsMixin, MachinesMixin, DiskMixin, OldDistroMixin, Cards
                 # the badge, after the automatic clean-up's first look
                 # (PAD-613), which re-arms itself every half hour
                 self.ctx.loop.after(1500, self._keeper_tick)
+                # PAD-1600: the give-back while the app stays open
+                self.ctx.loop.after(60 * 1000, self._giveback_tick)
             except Exception:                           # noqa: BLE001
                 pass
 

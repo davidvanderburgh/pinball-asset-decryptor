@@ -1,5 +1,5 @@
 """Give the space freed inside the app's WSL disks back to Windows when the
-app closes (PAD-1458).
+app closes (PAD-1458), or while it stays open at a quiet moment (PAD-1600).
 
 WHY. A WSL disk file only ever grows: the space keeper (core/space_keeper.py,
 PAD-613) deletes unused emulator games, card copies and leftovers inside
@@ -8,9 +8,21 @@ disabled by WSL), so the user's C: never got that space back.  The only way
 was Manage disk space > Reclaim: a button, Administrator, WSL shut down.  On
 David's PC one ticket's compactions gave back PAD-Runtime 88.9 -> 65.5 GB.
 
-WHEN. The app's close (its own WSL polling stops then), at most weekly, when
-one of its disks holds :data:`space_keeper.GIVEBACK_SLACK_BYTES` more than it
-uses, and only when NOTHING RUNS - the rules proven in
+WHEN. A look at most daily - at once after a clean-up that freed more than
+the slack (``space_keeper.owe_giveback``) - and a disk is given back when it
+holds its slack (:func:`space_keeper.giveback_slack`: 5 GB or 10% of the
+file, whichever is larger) more than it uses.  Two places look:
+
+* the app's close (a hidden helper, below), and
+* the open app itself (:func:`run_when_quiet`, PAD-1600): a user who leaves
+  the app open used to get nothing back.  Only once nobody has touched the
+  PC for :data:`QUIET_IDLE_S` and the app has no job of its own on (an
+  extract, a build, a card write, the disk window at work), so nobody is at
+  a button that would need WSL while it is down; inside the pause the app's
+  own short wsl.exe calls are let finish, and one still open after
+  :data:`OWN_WSL_WAIT_S` (an emulator) is a reason to wait.
+
+Either way only when NOTHING RUNS - the rules proven in
 ``tools/spike2_emu/padcompact.ps1`` (PAD-1453):
 
 * a rig lease touched in the last 10 minutes,
@@ -43,6 +55,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 
 from . import space_keeper, wsl_disk
@@ -56,19 +69,26 @@ _FLAGS = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
 LEASE_FRESH_S = 600
 #: how long the helper waits for the app to finish closing
 APP_EXIT_WAIT_S = 300
+#: PAD-1600: the open app gives back only once the PC has had no keyboard or
+#: mouse input this long...
+QUIET_IDLE_S = 10 * 60
+#: ...and, WSL paused, waits this long for its own wsl.exe calls to end
+OWN_WSL_WAIT_S = 60
 
 #: a disk file's size after its compact (a hook for tests)
 _file_size = os.path.getsize
 
 
-def _slack_bytes():
+def _slack_bytes(size=0):
+    """What a disk file of *size* may hold spare before it is given back."""
     # support / proof override, in GB
     v = os.environ.get("PAD_GIVEBACK_SLACK_GB")
     try:
-        return int(float(v) * 1024 ** 3) if v else \
-            space_keeper.GIVEBACK_SLACK_BYTES
+        if v:
+            return int(float(v) * 1024 ** 3)
     except ValueError:
-        return space_keeper.GIVEBACK_SLACK_BYTES
+        pass
+    return space_keeper.giveback_slack(size)
 
 
 def disabled():
@@ -126,9 +146,10 @@ def disks():
 
 
 def due(now=None, st=None, disk_list=None):
-    """Worth starting the helper at all: Windows, not turned off, a week since
-    the last look, and a disk file big enough to hold the slack.  Reads files
-    only - never runs wsl.exe (the close must stay quick)."""
+    """Worth a look at all: Windows, not turned off, a day since the last
+    look or a clean-up that owes one since, and a disk file big enough to
+    hold the slack.  Reads files only - never runs wsl.exe (the close must
+    stay quick)."""
     if not wsl_disk.is_supported() or disabled():
         return False
     now = time.time() if now is None else now
@@ -136,10 +157,11 @@ def due(now=None, st=None, disk_list=None):
     dl = disks() if disk_list is None else disk_list
     if any(d.get("old") for d in dl):
         return True                     # owed since a press (PAD-1599)
-    if now - float(st.get("giveback_checked") or 0) \
-            < space_keeper.GIVEBACK_EVERY_SECS:
+    checked = float(st.get("giveback_checked") or 0)
+    owed = float(st.get("giveback_owed") or 0) > checked
+    if not owed and now - checked < space_keeper.GIVEBACK_EVERY_SECS:
         return False
-    return any(d["size"] >= _slack_bytes() for d in dl)
+    return any(d["size"] >= _slack_bytes(d["size"]) for d in dl)
 
 
 # ---------------------------------------------------------------------------
@@ -147,7 +169,8 @@ def due(now=None, st=None, disk_list=None):
 # ---------------------------------------------------------------------------
 
 def _win_processes():
-    """``[(pid, exe_name_lower, full_path_lower_or_'')]`` of every process."""
+    """``[(pid, exe_name_lower, full_path_lower_or_'', parent_pid)]`` of
+    every process."""
     import ctypes
     from ctypes import wintypes
 
@@ -182,7 +205,8 @@ def _win_processes():
                 if k32.QueryFullProcessImageNameW(h, 0, buf, ctypes.byref(n)):
                     path = buf.value.lower()
                 k32.CloseHandle(h)
-            out.append((e.th32ProcessID, e.szExeFile.lower(), path))
+            out.append((e.th32ProcessID, e.szExeFile.lower(), path,
+                        e.th32ParentProcessID))
             ok = k32.Process32NextW(snap, ctypes.byref(e))
     finally:
         k32.CloseHandle(snap)
@@ -214,8 +238,40 @@ def _app_windows():
     return found
 
 
-def windows_busy(procs=None, me=None, board=None, now=None, windows=None):
-    """Reasons on the Windows side not to shut WSL down now ([] = none)."""
+_WSL_CLIENTS = ("wsl.exe", "wslg.exe")
+
+
+def _descendants(procs, me):
+    """Process ids started by *me*, and by those, all the way down: a
+    ``wsl.exe`` starts a second ``wsl.exe`` of its own (measured on WSL
+    2.6, 2026-11-25), so a direct-children test misses half of them."""
+    kids = {}
+    for p in procs:
+        if len(p) > 3:
+            kids.setdefault(p[3], []).append(p[0])
+    out, todo = set(), [me]
+    while todo:
+        for c in kids.get(todo.pop(), ()):
+            if c not in out and c != me:
+                out.add(c)
+                todo.append(c)
+    return out
+
+
+def own_wsl_calls(procs=None, me=None):
+    """Process ids of the wsl.exe this process started (the open app's status
+    polls, its emulators).  Raises when the processes cannot be listed."""
+    me = os.getpid() if me is None else me
+    procs = _win_processes() if procs is None else procs
+    mine = _descendants(procs, me)
+    return [p[0] for p in procs if p[1] in _WSL_CLIENTS and p[0] in mine]
+
+
+def windows_busy(procs=None, me=None, board=None, now=None, windows=None,
+                 own_ok=False):
+    """Reasons on the Windows side not to shut WSL down now ([] = none).
+    *own_ok*: the open app asks (PAD-1600) - the wsl.exe it started itself
+    are left to its own checks (they end, or show as a game in Linux)."""
     why = []
     me = os.getpid() if me is None else me
     try:
@@ -223,13 +279,15 @@ def windows_busy(procs=None, me=None, board=None, now=None, windows=None):
         windows = _app_windows() if windows is None else windows
     except Exception as e:                              # noqa: BLE001
         return ["could not list the running programs (%s)" % e]
-    clients = sorted({n for p, n, _ in procs
-                      if n in ("wsl.exe", "wslg.exe") and p != me})
+    mine = _descendants(procs, me) if own_ok else ()
+    clients = sorted({p[1] for p in procs
+                      if p[1] in _WSL_CLIENTS and p[0] != me
+                      and p[0] not in mine})
     if clients:
         why.append("a Linux program is still open (%s)" % ", ".join(clients))
     # the app's window, from a Python (the app), not a browser tab or an
     # Explorer window that happens to show the name
-    pyw = {p for p, n, _ in procs if n.startswith("python")}
+    pyw = {p[0] for p in procs if p[1].startswith("python")}
     if any(w != me and w in pyw for w in windows):
         why.append("the app is open again")
     board = board or os.path.join(os.path.expanduser("~"), ".pad-rig")
@@ -339,14 +397,23 @@ def _gb(n):
 
 def run(force=False, dry_run=False, now=None, disk_list=None, release=None,
         compact=None, busy_host=None, distros=None, wsl_script=None,
-        trim=None):
+        trim=None, app_busy=None, own_calls=None, sleep=time.sleep):
     """One give-back.  Returns its record: ``{"at", "freed", "disks"}`` when it
     compacted, else ``{"skipped": why}`` / ``{"busy": [why...]}`` /
-    ``{"would": [names]}`` (dry run).  The keyword hooks are for tests."""
+    ``{"would": [names]}`` (dry run).
+
+    *app_busy* (``callable() -> [why...]``) means the OPEN APP runs it
+    (PAD-1600): its own wsl.exe calls do not count as busy at first, and
+    with WSL paused they get :data:`OWN_WSL_WAIT_S` to end before the last
+    look.  The other keyword hooks are for tests."""
     now = time.time() if now is None else now
+    in_app = app_busy is not None
     release = release or wsl_disk._shutdown_until_free
     compact = compact or wsl_disk.virtdisk_compact
-    busy_host = busy_host or windows_busy
+    if busy_host is None:
+        def busy_host(strict=False):
+            return windows_busy(own_ok=in_app and not strict)
+    own_calls = own_calls or own_wsl_calls
     distros = distros or running_distros
     wsl_script = wsl_script or (
         lambda s: wsl_disk._wsl_script(s, timeout=600))
@@ -356,14 +423,16 @@ def run(force=False, dry_run=False, now=None, disk_list=None, release=None,
     dl = disks() if disk_list is None else disk_list
     if not force and not due(now, disk_list=dl):
         return {"skipped": "not due"}
-    slack = _slack_bytes()
     owed = [d for d in dl if d.get("old")]
-    big = [d for d in dl if not d.get("old") and d["size"] >= slack]
+    big = [d for d in dl if not d.get("old")
+           and d["size"] >= _slack_bytes(d["size"])]
     if not big and not owed:
         space_keeper.record_giveback(checked=now)
-        return {"skipped": "no disk is big enough to hold %s spare" % _gb(slack)}
+        return {"skipped": "no disk is big enough to hold %s spare"
+                % _gb(_slack_bytes())}
 
-    why = list(busy_host())
+    why = list(app_busy()) if in_app else []
+    why += list(busy_host())
     try:
         app = runtime_distro()
         others = [n for n in distros() if n.casefold() != (app or "").casefold()]
@@ -394,7 +463,7 @@ def run(force=False, dry_run=False, now=None, disk_list=None, release=None,
             continue
         _say("%s: %s file, %s used, %s to give back"
              % (d["name"], _gb(d["size"]), _gb(u), _gb(d["size"] - u)))
-        if d["size"] - u >= slack:
+        if d["size"] - u >= _slack_bytes(d["size"]):
             todo.append(d)
     for d in owed:
         _say("%s: %s file, its leftovers removed - giving it back"
@@ -402,7 +471,8 @@ def run(force=False, dry_run=False, now=None, disk_list=None, release=None,
         todo.append(d)
     if not todo:
         space_keeper.record_giveback(checked=now)
-        _say("nothing holds %s more than it uses" % _gb(slack))
+        _say("nothing holds its slack (%s, or 10%% of the file) more "
+             "than it uses" % _gb(_slack_bytes()))
         return {"skipped": "nothing to give back"}
     if dry_run:
         return {"would": [d["name"] for d in todo]}
@@ -411,14 +481,15 @@ def run(force=False, dry_run=False, now=None, disk_list=None, release=None,
         trim()
     except Exception as e:                              # noqa: BLE001
         _say("fstrim failed (%s) - compacting what it can" % e)
-    # the last look before WSL goes down: the app reopened, a terminal...
-    why = list(busy_host())
-    if why:
-        _say("not now - " + " | ".join(why))
-        return {"busy": why}
 
     done = []
     with wsl_disk.wsl_paused():
+        # the last look before WSL goes down, with nothing new from this
+        # process able to start: the app reopened, a terminal, a job...
+        why = _last_look(in_app, app_busy, busy_host, own_calls, sleep)
+        if why:
+            _say("not now - " + " | ".join(why))
+            return {"busy": why}
         for d in todo:
             before = d["size"]
             err = None
@@ -452,10 +523,77 @@ def run(force=False, dry_run=False, now=None, disk_list=None, release=None,
     return rec
 
 
+def _last_look(in_app, app_busy, busy_host, own_calls, sleep):
+    """Reasons not to shut WSL down, looked at with WSL paused.  In the open
+    app its own short wsl.exe calls (status polls) get OWN_WSL_WAIT_S to end
+    first; one still open is a job of its own (an emulator)."""
+    if in_app:
+        try:
+            left = own_calls()
+            waited = 0
+            while left and waited < OWN_WSL_WAIT_S:
+                sleep(1)
+                waited += 1
+                left = own_calls()
+        except Exception as e:                          # noqa: BLE001
+            return ["could not list the running programs (%s)" % e]
+        if left:
+            return ["the app's own Linux program is still open"]
+        why = list(app_busy())
+        return why + list(busy_host(strict=True))
+    return list(busy_host())
+
+
 def runtime_distro():
     """The distro the app runs in (its own PAD-Runtime, or the default)."""
     name, _ = wsl_disk._default_distro_vhdx()
     return name
+
+
+# ---------------------------------------------------------------------------
+# The open app, at a quiet moment (PAD-1600)
+# ---------------------------------------------------------------------------
+
+def idle_seconds():
+    """Seconds since the last keyboard or mouse input on this PC (Windows'
+    GetLastInputInfo), 0 when it cannot be told."""
+    if sys.platform != "win32":
+        return 0
+    import ctypes
+    from ctypes import wintypes
+
+    class LII(ctypes.Structure):
+        _fields_ = [("cbSize", wintypes.UINT), ("dwTime", wintypes.DWORD)]
+    lii = LII()
+    lii.cbSize = ctypes.sizeof(LII)
+    try:
+        if not ctypes.WinDLL("user32").GetLastInputInfo(ctypes.byref(lii)):
+            return 0
+        tick = ctypes.WinDLL("kernel32").GetTickCount() & 0xFFFFFFFF
+    except Exception:                                   # noqa: BLE001
+        return 0
+    return ((tick - lii.dwTime) & 0xFFFFFFFF) / 1000.0
+
+
+_in_app_lock = threading.Lock()
+
+
+def run_when_quiet(app_busy, idle=None, **kw):
+    """The open app's give-back: when one is due, the PC has been left alone
+    for QUIET_IDLE_S and *app_busy()* names nothing of the app's own at
+    work.  Never asks for Administrator, never says anything; returns the
+    run's record (``{"skipped"}`` / ``{"busy"}`` when it did nothing)."""
+    if not due(disk_list=kw.get("disk_list")):
+        return {"skipped": "not due"}
+    quiet = (idle or idle_seconds)()
+    if quiet < QUIET_IDLE_S:
+        return {"busy": ["the PC is in use (input %d s ago)" % quiet]}
+    if not _in_app_lock.acquire(blocking=False):
+        return {"busy": ["a give-back is already running"]}
+    try:
+        return run(app_busy=app_busy, **kw)
+    finally:
+        _in_app_lock.release()
 
 
 # ---------------------------------------------------------------------------
@@ -553,4 +691,6 @@ def _off_main_thread(fn):
 
 
 __all__ = ["run", "due", "disks", "start_after_close", "helper_main",
-           "windows_busy", "parse_scan", "scan_script", "disabled"]
+           "windows_busy", "parse_scan", "scan_script", "disabled",
+           "run_when_quiet", "idle_seconds", "own_wsl_calls",
+           "QUIET_IDLE_S", "OWN_WSL_WAIT_S"]

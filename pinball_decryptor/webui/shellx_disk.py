@@ -49,6 +49,11 @@ TREE_NOTE = ("Select rows to remove, or use “Clean all”. Finished runs clean
              "again, the emulator's Python installed again). An emulator whose "
              "game is running is left alone; saved settings and high scores "
              "are never listed.")
+#: PAD-1600: how long the PC must be left alone before the open app gives
+#: space back (core/disk_giveback.QUIET_IDLE_S; kept here so the window's
+#: sentence needs no import of the give-back at load), and how often it looks
+_GIVEBACK_IDLE_S = 10 * 60
+GIVEBACK_POLL_MS = 5 * 60 * 1000
 #: PAD-613: what the automatic clean-up (core/space_keeper.py) does - the
 #: numbers are its own, so the sentence cannot drift from the code.
 AUTO_NOTE = (
@@ -56,14 +61,18 @@ AUTO_NOTE = (
     "for a day. An emulator's unpacked game, and a cached Spike 2 card, go "
     "after %d days unplayed — and the least recently played go first "
     "whenever the app's Linux has under %d GB of room left. Nothing in use "
-    "is touched, nor settings, high scores or save states. When you close "
-    "the app, the space freed inside its Linux disks goes back to Windows "
-    "once they hold %d GB more than they use (at most every %d days, and "
-    "only when nothing is running in Linux)."
+    "is touched, nor settings, high scores or save states. The space freed "
+    "inside the app's Linux disks goes back to Windows by itself once a disk "
+    "holds %d GB or %d%% of its size more than it uses, whichever is "
+    "larger: looked at daily, and straight after a clean-up that frees more "
+    "than that. It happens when you close the app, or while it stays open "
+    "once the PC has been left alone for %d minutes, and only when nothing "
+    "is running in Linux."
     % (space_keeper.UNUSED_SECS // 86400,
        space_keeper.FLOOR_BYTES // 1024 ** 3,
        space_keeper.GIVEBACK_SLACK_BYTES // 1024 ** 3,
-       space_keeper.GIVEBACK_EVERY_SECS // 86400))
+       round(space_keeper.GIVEBACK_SLACK_SHARE * 100),
+       _GIVEBACK_IDLE_S // 60))
 RESIZE_NOTE = ("Set how large the WSL virtual disk may grow. Increase it when "
                "an extract needs more room than WSL has (the biggest titles "
                "can need 20+ GiB); the disk only uses real space as it fills. "
@@ -139,6 +148,54 @@ class DiskMixin:
             text = space_keeper.summary()
             self.ctx.loop.post(lambda: self._disk_view(auto_summary=text))
         return bool(rec and rec.get("count"))
+
+    # ------------------------------------------------------------------
+    # PAD-1600: the give-back while the app stays open.  Every few minutes
+    # a worker asks core/disk_giveback whether one is due (files only) and,
+    # when the PC has been left alone and nothing of the app's runs, does it
+    # - silent, no Administrator, the close-time helper's own checks.
+    # ------------------------------------------------------------------
+    def _giveback_tick(self):
+        try:
+            self.ctx.loop.after(GIVEBACK_POLL_MS, self._giveback_tick)
+        except Exception:                               # noqa: BLE001
+            pass
+        if (sys.platform != "win32" or not _probes_allowed()
+                or os.environ.get("PYTEST_CURRENT_TEST")):
+            return
+        t = getattr(self, "_giveback_thread", None)
+        if t is not None and t.is_alive():
+            return
+        self._giveback_thread = threading.Thread(
+            target=self._giveback_run, name="pad-shellx-giveback", daemon=True)
+        self._giveback_thread.start()
+
+    def _giveback_run(self):
+        try:
+            from ..core import disk_giveback
+            rec = disk_giveback.run_when_quiet(app_busy=self._app_busy)
+        except Exception:                               # noqa: BLE001
+            log.exception("disk give-back while open")
+            return None
+        if rec and rec.get("freed") and self._disk is not None:
+            text = space_keeper.summary()
+            self.ctx.loop.post(lambda: self._disk_view(auto_summary=text))
+        return rec
+
+    def _app_busy(self):
+        """What of the app's own is at work, for the give-back ([] = none).
+        Its emulators run through wsl.exe, which the give-back waits on
+        itself; this names what may only reach WSL later."""
+        why = []
+        try:
+            if self.window._is_running():
+                why.append("an extract, build or card write is running")
+        except Exception as e:                          # noqa: BLE001
+            why.append("the app's jobs could not be checked (%s)" % e)
+        d = self._disk
+        if d is not None and d.get("busy"):
+            why.append("Manage disk space is at work")
+        return why
 
     @rpc
     def disk_tidy_now(self):
@@ -424,8 +481,9 @@ class DiskMixin:
                 v["reclaimable"])
         return ("The WSL virtual disk occupies %s on your Windows drive.%s\n"
                 "Compacting shuts WSL down and takes a few minutes; no "
-                "Administrator needed. The app also does it by itself when "
-                "you close it, once a week at most." % (_fmt(v.get("size")), extra))
+                "Administrator needed. The app also does it by itself, when "
+                "you close it or leave the PC alone (see Automatic clean-up "
+                "above)." % (_fmt(v.get("size")), extra))
 
     def _disk_apply_scan(self, my_id, data):
         d = self._disk
@@ -602,13 +660,21 @@ class DiskMixin:
         self._disk_view(bars=self._bar_texts(), rows=self._disk_rows(),
                         reclaim_note=self._reclaim_text())
         total = wsl_freed + host_freed + emu_freed
+        # PAD-1600: a clean that freed more than the slack makes the
+        # give-back due now (cards on their own disk count: it is one of the
+        # disks given back), not at its next daily look
+        try:
+            space_keeper.owe_giveback(wsl_freed + emu_freed)
+        except Exception:                               # noqa: BLE001
+            pass
         if inside and inside >= total:
-            msg = ("Freed %s inside WSL: Windows gets it back with Reclaim "
-                   "space to Windows below." % _fmt(total))
+            msg = ("Freed %s inside WSL: it goes back to Windows by itself "
+                   "once nothing is running, or now with Reclaim space to "
+                   "Windows below." % _fmt(total))
         elif inside:
-            msg = ("Freed %s (%s inside WSL: Windows gets that back with "
-                   "Reclaim space to Windows below)." % (_fmt(total),
-                                                         _fmt(inside)))
+            msg = ("Freed %s (%s inside WSL: that goes back to Windows by "
+                   "itself once nothing is running, or now with Reclaim "
+                   "space to Windows below)." % (_fmt(total), _fmt(inside)))
         else:
             msg = "Freed %s." % _fmt(total)
         self._disk_busy(False, msg)

@@ -83,3 +83,40 @@ elevated (elevated, still diskpart), so it no longer asks for Administrator.
 
 `tools/spike2_emu/padcompact.ps1` stays David's own 04:00 task: it also
 compacts his default Ubuntu, which users' installs leave alone.
+
+## Sooner, and without closing the app (PAD-1600)
+
+The first rules were loose: 20 GB spare per disk file, a look at most weekly,
+and only at the close. With four disk files up to about 80 GB could sit on
+C:, and a user who never closes the app got nothing back.
+
+- **Slack**: 5 GB or 10% of the file, whichever is larger
+  (`space_keeper.giveback_slack`), each disk against its own.
+- **When**: a look at most daily, and at once after a clean-up that freed
+  more than 5 GB inside the app's Linux disks (the keeper's own runs, and
+  Manage disk space's deletes, mark `giveback_owed`; a look that finds
+  nothing, or gives back, clears it; a busy look keeps it).
+- **While open**: the shell checks every 5 minutes (`_giveback_tick`, a
+  worker thread, never the main one - PAD-1599) and calls
+  `disk_giveback.run_when_quiet` when one is due. It goes ahead only when
+  the PC has had no keyboard or mouse input for 10 minutes
+  (GetLastInputInfo), the app has no extract, build or card write running
+  and the disk window is idle, and every close-time check passes, with one
+  difference: the app's own wsl.exe (and the second wsl.exe each one starts)
+  are left out of the Windows check at first. WSL is then paused for the
+  app (no new wsl.exe from it), the app's own calls get 60 s to end - a
+  status poll does; an emulator does not, and that is a reason to wait -
+  and only then the last look and the compact. Silent, no Administrator.
+
+Proof (`C:/tmp/PAD-1600/e2e.py`, 2026-11-25, the real module from a worker
+thread): a scratch VHDX mounted into WSL, 10 GB of random data written (file
+10.82 GB), deleted, and `owe_giveback` called as the disk window's clean does;
+due went False -> True. The real distro check refused (David's Ubuntu
+running). With a stand-in emulator the app started (own wsl.exe, PAD_SLOT=9,
+cwd on the disk) the real Linux scan refused and the emulator kept running.
+With only an app status poll open, the run waited for it to end on its own
+(rc 0), then fstrim and compact: **10.82 GB -> 1.00 GB in 38 s**, "Gave back
+9.8 GiB to Windows just now.", owed cleared, and the disk mounted and wrote
+afterwards. Stood in: the distro list (Ubuntu runs on David's PC),
+`wsl --unmount` for the whole-WSL shutdown (other tickets' rigs), and busy
+lines from other tickets' work already on the PC before the proof began.

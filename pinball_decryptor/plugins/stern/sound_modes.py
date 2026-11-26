@@ -321,6 +321,9 @@ class Modes:
     #: PAD-1317: the co-op awards ceremony's music (a WAV, coop_play.ceremony_audio), on the intro's carrier (a build
     #: sets it; never saved)
     ceremony: str = ""
+    #: PAD-1611: the co-op character select's music (a WAV, coop_play.select_audio), on the intro's carrier (a build
+    #: sets it; never saved)
+    select: str = ""
     #: PAD-1589: the spoken scores' number words, ``[(word number, WAV)]`` (accessibility.WORDS), on a carrier of their
     #: own: its slot and the build's carrier ``{"request", "slot"}`` (a build sets them; never saved)
     speak: list = field(default_factory=list)
@@ -330,8 +333,8 @@ class Modes:
     @property
     def coop(self):
         """PAD-1123: whether a build carries a co-op sound: the intro's, a character's once picked or (PAD-1317) the
-        awards ceremony's music."""
-        return bool(self.intro or self.picks or self.ceremony)
+        awards ceremony's music or (PAD-1611) the character select's."""
+        return bool(self.intro or self.picks or self.ceremony or self.select)
 
     @property
     def any(self):
@@ -384,6 +387,7 @@ class Modes:
                 + ([(self.intro_rel, INTRO_MODE, self.intro)] if self.intro_rel and self.intro else [])
                 + ([(self.intro_rel, INTRO_MODE + int(n), f) for n, f in self.picks] if self.intro_rel else [])
                 + ([(self.intro_rel, CEREMONY_MODE, self.ceremony)] if self.intro_rel and self.ceremony else [])
+                + ([(self.intro_rel, SELECT_MODE, self.select)] if self.intro_rel and self.select else [])
                 + ([(self.speak_rel, speak_mode(k), f) for k, f in self.speak] if self.speak_rel else []))
 
     def level(self, rel, mode):
@@ -462,10 +466,14 @@ PICKED_MAX = 16
 CEREMONY_MODE = INTRO_MODE + PICKED_MAX + 1
 
 
+#: PAD-1611: the co-op character select's music is built under this one, on the same carrier
+SELECT_MODE = CEREMONY_MODE + 1
+
+
 def is_intro(mode):
     """The co-op intro's sound, or (PAD-1123) a co-op character's once picked, or (PAD-1317) the awards ceremony's
-    music: the sounds on the co-op intro's carrier."""
-    return INTRO_MODE <= int(mode) <= CEREMONY_MODE
+    music, or (PAD-1611) the character select's: the sounds on the co-op intro's carrier."""
+    return INTRO_MODE <= int(mode) <= SELECT_MODE
 
 
 #: PAD-1589: the spoken scores' word k (accessibility.WORDS, 0..SPEAK_MAX - 1) is built under SPEAK_BASE + k: above the
@@ -500,16 +508,23 @@ def is_ceremony(mode):
     return int(mode) == CEREMONY_MODE
 
 
+def is_select(mode):
+    """PAD-1611: the co-op character select's music."""
+    return int(mode) == SELECT_MODE
+
+
 def picked_of(mode):
     """PAD-1123: the co-op character a sound built under *mode* is for (1-based), 0 for the intro's (and the
-    ceremony's)."""
-    return int(mode) - INTRO_MODE if is_intro(mode) and not is_ceremony(mode) else 0
+    ceremony's, and the character select's)."""
+    return int(mode) - INTRO_MODE if INTRO_MODE <= int(mode) <= INTRO_MODE + PICKED_MAX else 0
 
 
 def _coop_what(mode):
     """The words for a sound on the co-op intro's carrier."""
     if is_ceremony(mode):
         return "the co-op awards ceremony's music"
+    if is_select(mode):
+        return "the co-op character select's music"
     return ("co-op character %d's sound once picked" % picked_of(mode) if picked_of(mode)
             else "the co-op intro's sound")
 
@@ -567,7 +582,8 @@ def turn_of(mode):
 def who(mode):
     """The log lines' heading for a file built under *mode*."""
     if is_intro(mode):
-        return "Co-op awards" if is_ceremony(mode) else "Co-op characters" if picked_of(mode) else "Co-op intro"
+        return ("Co-op awards" if is_ceremony(mode) else "Co-op characters" if picked_of(mode) or is_select(mode)
+                else "Co-op intro")
     if is_speak(mode):
         return "Spoken scores"
     if is_juke(mode):
@@ -628,6 +644,8 @@ def when(mode):
     """When the game plays a file built under *mode*: "while MUSIC MODE is 2", "every 2nd time"."""
     if is_ceremony(mode):
         return "as the award cards show at a co-op or team game's end"
+    if is_select(mode):
+        return "looped while a teammate picks a character"
     if is_intro(mode):
         return ("when a teammate picks co-op character %d" % picked_of(mode) if picked_of(mode)
                 else "as a co-op or team game's intro plays")
@@ -1345,7 +1363,8 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     own record's key, the sound's record key, its length in ms; pad_mode_runtime.c "the intro"). PAD-1123: its
     ``picks`` ``[(character number, record key, ms)]``, the co-op characters' sounds once picked on the same carrier: a
     ``cpick`` line each (with no ``host`` of the intro's, no ``cintro`` line). PAD-1317: its ``ceremony`` ``(record
-    key, ms)``, the co-op awards ceremony's music on the same carrier: a ``ccer`` line."""
+    key, ms)``, the co-op awards ceremony's music on the same carrier: a ``ccer`` line. PAD-1611: its ``select``
+    ``(record key, ms)``, the character select's music on the same carrier: a ``cselm`` line."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
@@ -1398,6 +1417,10 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
         host, ms = intro["ceremony"]
         lines.append("ccer\t%d\t%s\t%s\t%d" % (int(intro["request"]), bytes(intro["key"]).hex(), bytes(host).hex(),
                                                 int(ms)))
+    if (intro or {}).get("select"):                           # PAD-1611: the character select's music
+        host, ms = intro["select"]
+        lines.append("cselm\t%d\t%s\t%s\t%d" % (int(intro["request"]), bytes(intro["key"]).hex(), bytes(host).hex(),
+                                                 int(ms)))
     for k, host, ms in (speak or {}).get("words") or ():     # PAD-1589: a spoken score's word
         lines.append("sword\t%d\t%d\t%s\t%s\t%d" % (int(k), int(speak["request"]), bytes(speak["key"]).hex(),
                                                      bytes(host).hex(), int(ms)))

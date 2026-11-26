@@ -1963,6 +1963,8 @@ static void spk_sound_line(const char *ks, const char *rs, const char *cks, cons
 static volatile int cpk_live;
 static int ccer_lookup(pm_reg *r);        /* PAD-1317: the co-op awards ceremony's music */
 static volatile int ccer_live;
+static int cselm_lookup(pm_reg *r);       /* PAD-1611: the co-op character select's music */
+static volatile int cselm_live;
 #if PM_A64
 static int msw_lookup(pm_reg *r);         /* PAD-1324: a music mode's record for a stock sound (Spike 3) */
 static volatile int msw_live;
@@ -1974,6 +1976,7 @@ static void on_sound_lookup(pm_reg *r)
     if (att_live && r[1] && att_lookup(r)) return;   /* PAD-641: its carrier's record, swapped */
     if (gms_live && r[1] && gms_lookup(r)) return;   /* PAD-945: its carrier's record, swapped */
     if (ccer_live && r[1] && ccer_lookup(r)) return;   /* PAD-1317: the co-op awards ceremony's music */
+    if (cselm_live && r[1] && cselm_lookup(r)) return;   /* PAD-1611: the co-op character select's music */
     if (ci_live && r[1] && ci_lookup(r)) return;     /* PAD-1114: the co-op intro's sound */
     if (cpk_live && r[1] && cpk_lookup(r)) return;   /* PAD-1123: a co-op character's sound once picked */
     if (spk_live && r[1] && spk_lookup(r)) return;   /* PAD-1589: a spoken score's word */
@@ -21682,6 +21685,8 @@ static void coop_pick_say(void)
 static void coop_intro_begin(const char *why);   /* PAD-1114, below */
 static int ci_film_due(void);
 static void coop_picked_begin(int c);           /* PAD-1123, below */
+static void cselm_end(int fade, const char *how);   /* PAD-1611, below */
+static int cselm_picked_follows(int c);
 static void coop_lobby_now(int formed);         /* PAD-1316, below */
 static int ci_film_up(void);                    /* PAD-1114, below */
 static void coop_pick_open(unsigned t);
@@ -22536,6 +22541,7 @@ static void coop_pick_close(const char *how)
     } else {
         coop_turn_show();
     }
+    cselm_end(!cselm_picked_follows(c), "a character is taken");   /* PAD-1611: before its sound takes the carrier */
     if (coop_done.on) coop_picked_begin(c);                       /* PAD-1123: its sound now, its clip after the card */
     if (c >= 0 && !coop_classic()) coop_gift(&coop_ch[c]);          /* PAD-1065: Classic, no ability */
     if (c >= 0 && !coop_classic()) coop_counts_give(&coop_ch[c]);
@@ -24834,6 +24840,163 @@ static void coop_picked_tick(void)
     }
 }
 
+/* ---- PAD-1611: the co-op character select's own music ---------------------------------------------------------
+ * DoomWalrus666: "on the Modes - Characters menu in PAD I could select an audio/music track that plays while the
+ * character select menu is active. In game, when character select comes up, the assigned music should loop until a
+ * character is chosen, and then return to stock game music." sounds.cfg `cselm <request> <carrier key> <the music's
+ * key> <ms>`: the owner's track, a sound of the card's own on the co-op intro's carrier (the record lookup swapped as
+ * the intro's is). While a teammate's pick is open (cselm_tick follows pk.open) the game's sounds are faded (each once,
+ * CSELM_QUIET_MS; the music bus's kept to ask for again) and the carrier plays the track at the top priority, again each
+ * time it ends. When the pick closes the track stops (cut when the character's own sound once picked follows on the
+ * same carrier, else faded over CSELM_FADE_MS), the carrier's priority goes back and the game's music faded under it is
+ * asked for again, as the intro's end does (ci_played). */
+#define CSELM_QUIET_MS 250u
+#define CSELM_FADE_MS  1000u
+#define CSELM_QUIET_EVERY_MS 100ul
+#define CSELM_AGAIN_MS 300ul     /* a sound just asked for may not read active at once */
+#define CSELM_QUIET_N 12
+#define CSELM_PRIO_IDLE    3     /* as the intro's carrier (CI_PRIO_IDLE / CI_PRIO_PLAYING) */
+#define CSELM_PRIO_PLAYING 255
+static struct {
+    unsigned request, sound_ms;
+    unsigned char key[8], host[8];
+    volatile unsigned long swap_until;
+    volatile int looked;
+    int on;
+    unsigned long at, quiet_at, play_at;
+    unsigned plays;
+    unsigned quiet[CSELM_QUIET_N];
+    unsigned n_quiet;
+    unsigned music[CI_MUSIC];
+    unsigned n_music;
+} cselm;
+
+/* the record lookup (any thread): the carrier's own record takes the select music while it is asked for */
+static int cselm_lookup(pm_reg *r)
+{
+    const unsigned char *k = LOOKUP_KEY(r);
+    if (!cselm.request || (long)(cselm.swap_until - pm_ms()) <= 0 || !key_is(k, cselm.key)) return 0;
+    LOOKUP_TAKE(r, cselm.host);
+    if (!cselm.looked) {
+        cselm.looked = 1;
+        say("co-op characters: request %u looked up its record, took the character select's music", cselm.request);
+    }
+    return 1;
+}
+
+/* whether the select music plays now (tests lift it verbatim): the build gave one that is live, a pick is open and a
+ * co-op game is on */
+static int cselm_wanted(unsigned request, int live, int open, int teammates, int player)
+{
+    return request && live && open && teammates && player;
+}
+
+/* whether the track is due again (tests lift it verbatim): with the port's sound_active, once it reads idle (after
+ * CSELM_AGAIN_MS: a sound just asked for may not read active at once); without, once its own length has run */
+static int cselm_again(int has_active, int active, unsigned long since, unsigned sound_ms)
+{
+    if (has_active) return !active && since >= CSELM_AGAIN_MS;
+    return since >= (sound_ms ? sound_ms : 1000u);
+}
+
+/* the game's sounds playing now faded under the music, each once; the music bus's kept to ask for again */
+static void cselm_quiet(void)
+{
+    unsigned reqs[8], buses[8];
+    int n = pm_sound_playing(reqs, buses, 8), i;
+    unsigned k;
+    cselm.quiet_at = pm_ms();
+    for (i = 0; i < n && i < 8; i++) {
+        if (!reqs[i] || reqs[i] == cselm.request) continue;
+        for (k = 0; k < cselm.n_quiet && cselm.quiet[k] != reqs[i]; k++) ;
+        if (k < cselm.n_quiet) continue;                      /* faded already */
+        if (cselm.n_quiet < CSELM_QUIET_N) cselm.quiet[cselm.n_quiet++] = reqs[i];
+        if (buses[i] & BUS_MUSIC_BIT) {
+            for (k = 0; k < cselm.n_music && cselm.music[k] != reqs[i]; k++) ;
+            if (k == cselm.n_music && k < CI_MUSIC) cselm.music[cselm.n_music++] = reqs[i];
+        }
+        if (pm_sound_fade(reqs[i], CSELM_QUIET_MS))
+            say("co-op characters: the game's sound %u (bus 0x%x) faded under the character select's music", reqs[i],
+                buses[i]);
+    }
+}
+
+static void cselm_play(unsigned long now)
+{
+    if (pm_sound_active(cselm.request)) pm_sound_stop(cselm.request);
+    cselm.looked = 0;
+    cselm.play_at = now;
+    cselm.swap_until = now + cselm.sound_ms + 1000ul;
+    pm_sound_priority(cselm.request, CSELM_PRIO_PLAYING, 0);   /* raised BEFORE the play: the channel copies it */
+    pm_sound(cselm.request);
+    cselm.plays++;
+}
+
+static void cselm_begin(void)
+{
+    unsigned long now = pm_ms();
+    cselm.on = 1;
+    cselm.n_quiet = cselm.n_music = 0;
+    cselm.plays = 0;
+    cselm.at = now;
+    cselm_quiet();
+    cselm_play(now);
+    say("co-op characters: the character select's music (%u ms) loops on request %u while teammate %u picks",
+        cselm.sound_ms, cselm.request, pk.who);
+}
+
+/* the pick is over (or the game): the music off, the carrier's priority back, the game's music asked for again.
+ * *fade* 0 cuts it (the character's own sound once picked follows on the same carrier) */
+static void cselm_end(int fade, const char *how)
+{
+    unsigned k;
+    if (!cselm.on) return;
+    cselm.on = 0;
+    cselm.swap_until = 0;
+    if (pm_sound_active(cselm.request) && !(fade && pm_sound_fade(cselm.request, CSELM_FADE_MS)))
+        pm_sound_stop(cselm.request);
+    pm_sound_priority(cselm.request, CSELM_PRIO_IDLE, 0);
+    say("co-op characters: the character select's music %s after %lu ms (%u play(s)) - %s",
+        fade ? "fades out" : "stops", pm_ms() - cselm.at, cselm.plays, how);
+    for (k = 0; k < cselm.n_music; k++)
+        if (cselm.music[k] && !pm_sound_active(cselm.music[k])) {
+            pm_sound(cselm.music[k]);
+            say("co-op characters: the game's music %u asked for again", cselm.music[k]);
+        }
+    cselm.n_music = 0;
+}
+
+/* from coop_pick_close: whether character c's own sound once picked follows on the carrier (the music is cut, not
+ * faded: a fade's end would stop that sound) */
+static int cselm_picked_follows(int c)
+{
+    return coop_done.on && (cpk_has(c, 0, cpk.have_sound, cpk.request) & 2);
+}
+
+/* from coop_tick: the music follows the pick */
+static void cselm_tick(void)
+{
+    unsigned long now;
+    int want;
+    if (!cselm_live) return;
+    want = cselm_wanted(cselm.request, cselm_live, pk.open, coop_teammates() != 0, pm_player() != 0);
+    if (!cselm.on) {
+        if (want) cselm_begin();
+        return;
+    }
+    if (!want) {
+        cselm_end(1, pk.open ? "the game ended" : "the pick closed");
+        return;
+    }
+    now = pm_ms();
+    if (now - cselm.quiet_at >= CSELM_QUIET_EVERY_MS) cselm_quiet();
+    if (cselm_again(fn("sound_active") != 0, pm_sound_active(cselm.request), now - cselm.play_at, cselm.sound_ms)) {
+        cselm_play(now);
+        if (cselm.plays <= 6)
+            say("co-op characters: the character select's music ended - played again (play %u)", cselm.plays);
+    }
+}
+
 /* ---- PAD-1123: the teammate's character on their End of Ball Bonus --------------------------------------------------
  * DoomWalrus666: "At the end of a players ball, I would like to be able to display that players selected Character's
  * image or video in a window on the End of Ball screen, maybe to the right of the scores/username". The bonus's own
@@ -25353,6 +25516,7 @@ static void coop_tick(void)
     coop_intro_tick();                                        /* PAD-1114 */
     coop_chars_tick();                                        /* PAD-1031 */
     coop_picked_tick();                                       /* PAD-1123 */
+    cselm_tick();                                             /* PAD-1611 */
     if (coop_won_n && pm_in_game() && chg_game_now() != coop_won_game) {     /* PAD-1028: the next game's start */
         coop_won_n = 0;
         say("co-op: the last co-op game's awards are off the attract mode (a new game)");
@@ -30888,6 +31052,41 @@ static void ccer_sound_arm(void)
     say("co-op awards: the ceremony's music (%u ms) rides request %u", ccer.sound_ms, ccer.request);
 }
 
+/* PAD-1611: sounds.cfg `cselm <request> <carrier's key> <the music's key> <ms>` (the intro's carrier) */
+static int cselm_bad;
+static void cselm_sound_line(const char *rs, const char *ks, const char *hs, const char *mss)
+{
+    const char *p = rs;
+    int ok, ok2;
+    unsigned r = (unsigned)number(&p, &ok), ms;
+    p = mss;
+    ms = (unsigned)number(&p, &ok2);
+    if (!ok || !ok2 || !r || !key_hex(ks, cselm.key) || !key_hex(hs, cselm.host)) { cselm_bad++; return; }
+    cselm.request = r;
+    cselm.sound_ms = ms;
+}
+
+/* from sndm_arm: the record lookup's hook for the character select's music */
+static void cselm_sound_arm(void)
+{
+    if (cselm_bad) say("co-op characters: the character select's music line in sounds.cfg not read");
+    if (!cselm.request) return;
+    if (!fn("sound_play") || !fn("sound_lookup")) {
+        say("co-op characters: no select music - the port has no sound_play or sound_lookup for this build");
+        cselm.request = 0;
+        return;
+    }
+    if (!lookup_hooked && !(lookup_hooked = hook(fn("sound_lookup"), on_sound_lookup))) {
+        say("co-op characters: no select music - sound_lookup 0x%08" PMA " cannot be hooked", fn("sound_lookup"));
+        cselm.request = 0;
+        return;
+    }
+    if (pm_sound_priority(cselm.request, CSELM_PRIO_IDLE, 0) < 0)
+        say("co-op characters: the carrier's priority stays its own - the port has no request table");
+    cselm_live = 1;
+    say("co-op characters: the character select's music (%u ms) rides request %u", cselm.sound_ms, cselm.request);
+}
+
 /* from sndm_arm: the record lookup's hook for the intro's sound */
 static void ci_sound_arm(void)
 {
@@ -31558,6 +31757,10 @@ static void sndm_line(char *s)
         ci_sound_line(f[1], f[2], f[3], f[4]);
         return;
     }
+    if (n >= 5 && str_eq(f[0], "cselm")) {    /* PAD-1611: the co-op character select's music */
+        cselm_sound_line(f[1], f[2], f[3], f[4]);
+        return;
+    }
     if (n >= 5 && str_eq(f[0], "ccer")) {     /* PAD-1317: the co-op awards ceremony's music */
         ccer_sound_line(f[1], f[2], f[3], f[4]);
         return;
@@ -31933,6 +32136,7 @@ static void sndm_arm(void)
     ci_sound_arm();                           /* PAD-1114: nor the co-op intro's sound */
     cpk_sound_arm();                          /* PAD-1123: nor the co-op characters' sounds once picked */
     ccer_sound_arm();                         /* PAD-1317: nor the co-op awards ceremony's music */
+    cselm_sound_arm();                        /* PAD-1611: nor the co-op character select's music */
     juke_arm();                               /* PAD-685: nor the jukebox */
 #if PM_A64
     if (n_msw) {                              /* PAD-1324: Spike 3's music modes swap records, no descriptors */
@@ -31955,7 +32159,7 @@ static void sndm_arm(void)
     return;
 #endif
     if (!n_sndm) {
-        if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request || ccer.request) return;
+        if (n_sndt || n_bsid || att.n || n_jmode || gms.n || ci.request || cpk.request || ccer.request || cselm.request) return;
         say("music modes: %s has no sound line - nothing hooked", "sounds.cfg");
         return;
     }

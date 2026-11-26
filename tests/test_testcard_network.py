@@ -102,7 +102,8 @@ def test_set_network_saves_and_publishes():
     n = tc.shared().network
     assert n["room"] and n["room_gb"] == 4 and n["wifi"] is False and n["band5"] is False, \
         "5 GHz goes off with Wi-Fi"
-    assert tab.state["network"] == n and tab.state["room_mib"] == 4096 and tab.state["address"] == "192.168.1.50"
+    shown = {k: v for k, v in n.items() if k != "wifi_key"}       # 2026-11-26: the Wi-Fi key never reaches the page
+    assert tab.state["network"] == shown and tab.state["room_mib"] == 4096 and tab.state["address"] == "192.168.1.50"
 
 
 def test_the_build_asks_for_the_room_and_adds_remote_access(tmp_path, monkeypatch):
@@ -123,6 +124,8 @@ def test_the_build_asks_for_the_room_and_adds_remote_access(tmp_path, monkeypatc
 
     monkeypatch.setattr(mbc, "testcard_commands", fake)
     monkeypatch.setattr(ssh_card, "apply_to_build", apply)
+    from pinball_decryptor.core import menu_network            # 2026-11-26: the menu network goes on with it
+    monkeypatch.setattr(menu_network, "apply_to_build", lambda *a, **k: "menu network on")
     monkeypatch.setattr(card_extras, "with_pad_key", lambda text: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPAD pad")
     monkeypatch.setattr(card_extras, "validate_keys", lambda text: text)   # the key is a stand-in
     src = str(tmp_path / "stock.raw")

@@ -66,7 +66,9 @@ class TestCardTab(TabService):
                  s3=bool(source_ok and tc.is_spike3_source(lst.source)),
                  busy=self._busy, log=self._lines[-400:], pct=self._pct, step=self._step,
                  msg=list(self._msg), max=tc.MAX_ITEMS, full=len(lst.items) >= tc.MAX_ITEMS,
-                 network=dict(lst.network), room_mib=tc.room_mib(lst.network), address=self._address())
+                 network={k: v for k, v in lst.network.items() if k != "wifi_key"},
+                 wifi_open=bool(lst.network.get("wifi_name")) and not lst.network.get("wifi_key"),
+                 room_mib=tc.room_mib(lst.network), address=self._address())
 
     # ------------------------------------------------------------ network updates
     # Simon (2026-11-22): "we need the same feature on the test card... even more important" - a test card
@@ -86,10 +88,30 @@ class TestCardTab(TabService):
             return ""
 
     @rpc
+    def set_menu_wifi(self, name, password):
+        """The Wi-Fi the test card joins with no game running (core/menu_network.py): *name* and *password* -> the
+        name and its WPA key are kept, never the password; an empty *name* forgets it. Returns '' or why not."""
+        from ...core import menu_network
+        lst = tc.shared()
+        net = dict(lst.network)
+        name = (name or "").strip()
+        if not name:
+            net["wifi_name"], net["wifi_key"] = "", ""
+        else:
+            why = menu_network.check_wifi(name, password or "")
+            if why:
+                return why
+            net["wifi_name"], net["wifi_key"] = name, menu_network.wifi_key(name, password or "")
+        lst.network = tc.clean_network(net)
+        lst.save()
+        self._pub()
+        return ""
+
+    @rpc
     def set_network(self, key, value):
         """One of the tab's network settings: room / room_gb / ssh / wifi / band5."""
         lst = tc.shared()
-        if key not in tc.NETWORK_DEFAULTS:
+        if key not in tc.NETWORK_DEFAULTS or key in ("wifi_name", "wifi_key"):
             raise RpcError("no such setting: %s" % key)
         net = dict(lst.network)
         net[key] = value
@@ -321,6 +343,15 @@ class TestCardTab(TabService):
                     log=self._say, cancel=lambda: self._cancel)
                 if note:
                     self._say("test card: " + note)
+                # Simon (2026-11-26): reachable with no game running - the wired port, and the Wi-Fi given here
+                step = "The menu network"
+                self._step = "Adding the menu network"
+                self._pub_soon()
+                from ...core import menu_network
+                note = menu_network.apply_to_build(
+                    source, out, {"wifi_name": net["wifi_name"], "wifi_key": net["wifi_key"]},
+                    log=self._say, cancel=lambda: self._cancel)
+                self._say("test card: " + note)
             if net["wifi"]:
                 step = "Wi-Fi start-up"
                 self._step = "Adding Wi-Fi start-up"

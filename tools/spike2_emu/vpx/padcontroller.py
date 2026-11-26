@@ -872,13 +872,17 @@ class Rig:
             return False
         return True
 
-    def tables_dir(self, title, runner=None):
+    def tables_dir(self, title, runner=None, own=False):
         """dump/tables/<title> as Windows can read it: over the share, or a
         fresh copy fetched through WSL when the share cannot be opened. A
         Spike 3 run's is its slot's tables/game (s3run.sh: PAD_TABLES,
-        PAD_GAME=game), whatever the title."""
+        PAD_GAME=game), whatever the title: the switch list its bridge
+        writes. `own`: the title's own folder there instead, the card's
+        device_xy.txt and node directory (s3launch.sh), which tables/game
+        does not have (PAD-1560: Walking Dead's shaker and speaker light
+        strips never reached DOF)."""
         spike3 = getattr(self, "emu", "spike2") == "spike3"
-        if spike3:
+        if spike3 and not (own and title):
             title = "game"
         if self.share:
             if spike3:
@@ -2708,7 +2712,7 @@ class Bridge:
         """The cabinet's lights on this title's boards and the kit's cabinet
         settings (PAD-1304), read with the run's tables."""
         if tables_dir is None and hasattr(self.rig, "tables_dir"):
-            tables_dir = self.rig.tables_dir(self.native_title)
+            tables_dir = self.rig.tables_dir(self.native_title, own=True)
         if tables_dir is None:
             tables_dir = os.path.join(self.rig.dump, "tables", self.native_title or "")
         self.cab_leds = padcabinet.cabinet_leds(tables_dir)

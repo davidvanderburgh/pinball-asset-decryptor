@@ -1117,5 +1117,11 @@
    "TICKET DISPENSER"
   ]
  },
- "listed": true
+ "listed": true,
+ "repatch": [
+  {
+   "absent": "If CBRotZ <= 125.5 Then cbdir = 1",
+   "why": "the crossbow stood straight up between the flippers"
+  }
+ ]
 }

@@ -19,6 +19,10 @@ one is appended in front of the directory, its record re-pointed, the
 directory's CRC (the trailer's first word) and the header's two tail pointers
 moved, and the container goes onto the card whole.
 
+The Godot game's pictures and clips (Pokemon's, PAD-1621) are files of its
+resource pack: a changed one rebuilds the pack (:mod:`.spike3_godot`), which
+goes onto the card whole.
+
 A file that has to grow (a longer sound's container, a video larger than its
 slot) is copied over the card's own file through the Linux kernel's ext4
 driver on the volume opened with dm-crypt (:func:`.ext4_grow.grow_files`,
@@ -645,6 +649,15 @@ def write_card(original_path, assets_dir, output_path, log=None,
                                      cvd_setting=cvd_setting, spk_setting=spk_setting)
         sounds = plan_sounds(reader, assets_dir, baseline, work, log, check,
                              adds=mplan.sound_adds if mplan is not None else None)
+        # PAD-1621: the Godot game's changed pictures and clips, its pack rebuilt
+        from . import godot_pck, spike3_godot
+        try:
+            godot = spike3_godot.plan_write(assets_dir, reader, baseline,
+                                            os.path.join(work, "godot"), log,
+                                            cancel_fn)
+        except godot_pck.PckError as e:
+            raise PipelineError("Encode", "Godot pictures and clips: %s" % e) from None
+        check()
         n_audio = sum(p.n_fit + p.n_grown for p in sounds)
         for p in sounds:
             if p.padded:
@@ -661,8 +674,11 @@ def write_card(original_path, assets_dir, output_path, log=None,
                     % (p.folder, len(p.appended),
                        ", ".join(str(i) for i in p.appended)), "info")
         n_audio_c, n_video, n_image, n_text = tuple(counts)[:4]
+        if godot is not None:
+            n_video += godot.n_video
+            n_image += godot.n_image
         if not writes and not sounds and not (grow_plan or {}).get("jobs") \
-                and mplan is None and not mremove and menu is None and not allow_empty:
+                and godot is None and mplan is None and not mremove and menu is None and not allow_empty:
             raise engine.NothingToWrite(
                 "Nothing to write: no sound, video, image, scene or text in "
                 "this project differs from the card it was extracted from.")
@@ -681,6 +697,8 @@ def write_card(original_path, assets_dir, output_path, log=None,
                 out.write(b)
             out_reader = Ext4Reader(out, 0, out.size)
             jobs = list((grow_plan or {}).get("jobs") or [])
+            if godot is not None:
+                jobs += godot.jobs        # PAD-1621: rebuilt Godot packs, whole
             if mplan is not None:
                 jobs += mplan.jobs        # the title's scenes the modes' screens and clips rewrite
             if menu is not None:

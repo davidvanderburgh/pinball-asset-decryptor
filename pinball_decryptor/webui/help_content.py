@@ -1044,7 +1044,10 @@ HELP_CONTENT = {
          "and the like |\n"
          "| Glyph | one letter cut out of a font (see [Fonts](#fonts)) |\n"
          "| Boot screen | the picture shown while the machine starts (SternLogo.png); "
-         "an older extract needs Extract again |\n\n"
+         "an older extract needs Extract again |\n"
+         "| Godot | a picture of the screens a game draws with the Godot engine "
+         "(Pokemon's pokedex, battles and arenas); an older extract needs Extract "
+         "again |\n\n"
          "The **Source** dropdown narrows the list to one kind; click the Source "
          "header to sort by it."),
         ("Size limits", [

@@ -9,6 +9,9 @@ Spike 2 extractors run over it unchanged, so a Spike 3 project is laid out
 exactly as a Spike 2 one: ``video/`` (named from the scenes), ``images/``
 (with ``scene_textures/`` and the scene layouts the Scenes tab draws),
 ``text/strings.tsv``, and the ``.checksums.md5`` baseline Write diffs against.
+A Godot game's resource pack (Pokemon's ``assets/godot/main.pck``) gives its
+pictures and clips too, under ``images/godot/`` and ``video/godot/``
+(:mod:`.spike3_godot`, PAD-1621).
 
 Sounds are plain PCM (:mod:`.spike3_sound`), one ``image.bin`` per sound set:
 the game's go to ``audio/idxNNNN.wav`` (Spike 2's folder), another set to
@@ -411,6 +414,20 @@ class Spike3ExtractPipeline(BasePipeline):
                  log=log, progress=prog, cancel=cancel)
             counts["images"] = _count_files(os.path.join(out, "images"),
                                             (".png",), skip=("scene_textures",))
+            self._check_cancel()
+        if self._want("images") or self._want("video"):
+            # PAD-1621: the Godot game's pictures and clips (Pokemon's pokedex,
+            # battles, arenas), in its resource pack, not the Spike 2 tree
+            from . import spike3_godot
+            packs = [(p, spike3_godot.node_reader(reader, n))
+                     for p, n in step("Godot pack search",
+                                      spike3_godot.card_packs, reader) or ()]
+            got = step("Godot extraction", spike3_godot.extract_packs, packs,
+                       out, want_images=self._want("images"),
+                       want_video=self._want("video"), log=log, progress=prog,
+                       cancel=cancel) or (0, 0)
+            counts["images"] += got[0]
+            counts["video"] += got[1]
             self._check_cancel()
         if self._want("scenes"):
             self._set_phase(4)

@@ -222,6 +222,21 @@ class Spike3SpkExtractPipeline(BasePipeline):
         if want_i:
             self._set_phase(3)
             counts["images"] = self._copy(arc, images, "images")
+        if want_i or want_v:
+            # PAD-1621: the Godot game's pictures and clips (spike3_godot)
+            from . import spike3_godot
+
+            def pack_read(fobj):
+                return lambda off, n: arc._read(
+                    fobj.offset + off, max(0, min(n, fobj.size - off)))
+            packs = [(f.path, pack_read(f)) for f in arc.files
+                     if f.path.lower().endswith(".pck") and f.size >= 0x60]
+            got = spike3_godot.extract_packs(
+                packs, self.output_dir, want_images=want_i, want_video=want_v,
+                log=self._log, progress=self._progress,
+                cancel=lambda: self._cancelled)
+            counts["images"] += got[0]
+            counts["video"] += got[1]
         if want_s:
             self._set_phase(4)
             counts["scenes"] = self._copy(arc, scenes, "scenes")

@@ -124,6 +124,8 @@ KEYS = collections.OrderedDict([
     ("start_on", "events"), ("start_after", "after"), ("start_score", "int"),
     ("start_combo", "switches"), ("combo_seconds", "int"),
     ("start_count_reset", ("game", "ball")), ("start_once", ("no", "ball", "game")),
+    # PAD-1623: a challenge of its own on the game's START BUTTON HOLD setting (glue_pc.cs)
+    ("start_hold", ("no", "yes")),
     # PAD-1424: the game's lamps on a layer of ours, its coils, its balls (MODES.md "Balls and coils")
     ("lamps", "lamps"), ("lamp_color", "rgb"), ("lamp_blink", "int"),
     ("multiball", "multiball"), ("multiball_on", "switches"), ("add_ball", "add_ball"), ("ball_save", "ball_save"),
@@ -154,6 +156,10 @@ PENALTY_ENGINES = ("proc",)
 #: mode queue does (game.modes.add); Unity's, Godot's and pinHeck's runtimes only see a game mode
 #: once it is running
 IN_PLACE_ENGINES = ("proc",)
+#: start_hold = yes (PAD-1623) needs a game whose held Start button plays a one-ball game of the
+#: mode its START BUTTON HOLD setting names (Halloween's and Ultraman's machineMode); Texas
+#: Chainsaw's and Evil Dead's hold restarts a running game, and the other titles have none
+START_HOLD_FRAMEWORKS = ("pinballController",)
 #: keys a mode file may give on several lines, and how many the runtimes take
 REPEATABLE = dict(MJ.REPEATABLE, penalty=8)
 #: what each engine's runtime plays from a file of the mode's own: Unity's AudioClip loader and
@@ -263,6 +269,8 @@ def keys_not_here(port):
         out.add("penalty")
     if port is not None and engine(port) not in IN_PLACE_ENGINES:
         out.add("in_place_of")
+    if port is not None and port.get("framework") not in START_HOLD_FRAMEWORKS:
+        out.add("start_hold")
     return out
 
 
@@ -270,7 +278,13 @@ def _not_here(k, port, v=""):
     """Why the title's runtime cannot do *k* (= *v*), or None."""
     if k not in keys_not_here(port):
         return None
+    if k == "start_hold" and (v or "").strip().lower() != "yes":
+        return None                               # "no" is every title's
     t = port.get("title", "this game")
+    if k == "start_hold":
+        return ("start_hold is not on %s: holding its Start button does not play a game of a mode "
+                "it can be given; start, start_on, start_after, start_score or start_combo can start "
+                "it in the normal game" % t)
     if k == "in_place_of":
         return ("in_place_of is not on %s: its runtime sees a game mode only once it runs, so ours cannot "
                 "start in its place; start_after starts a mode when one ends" % t)
@@ -462,7 +476,7 @@ def check_modes(mode_dir, port=None):
         m["file"] = fn
         problems.extend(MJ.spike2_rule_problems(fn, m, mode_dir))
         m.setdefault("name", fn[:-5])
-        if not any(m.get(k) for k in MJ.START_RULES):
+        if not any(m.get(k) for k in MJ.START_RULES) and (m.get("start_hold") or "").lower() != "yes":
             problems.append("%s: no start rule (start, start_on, start_after, start_score or start_combo): "
                             "the mode would never start" % fn)
         if m.get("start_combo") and len(MJ._names(m["start_combo"])) < 2:

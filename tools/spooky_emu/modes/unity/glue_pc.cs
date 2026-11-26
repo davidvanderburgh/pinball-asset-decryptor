@@ -39,7 +39,16 @@ public class Hook : Mode {
 
 #if !TCM
     public override bool sw_any(int sw, string name, int state) {
-        try { if (state == 1) Loader.Runtime.OnSwitch(sw); } catch (Exception e) { Loader.Log("sw_any: " + e); }
+        try {
+            if (state == 1 && name == "startButton") Glue.StartPressed();
+            if (state == 1) Loader.Runtime.OnSwitch(sw);
+        } catch (Exception e) { Loader.Log("sw_any: " + e); }
+        return true;
+    }
+
+    // ours is first in _modes, so this runs before skillshotMode's evt_ball_started reads GameMode
+    public bool evt_ball_started(string msg) {
+        try { Glue.ChallengeBall(); } catch (Exception e) { Loader.Log("evt_ball_started: " + e); }
         return true;
     }
 #endif
@@ -143,6 +152,9 @@ public static class Glue {
 
     public static void Poll(PadRuntime r) {
         var g = G;
+#if !TCM
+        try { HoldPoll(r, g); } catch (Exception e) { Loader.Log("start hold: " + e); }
+#endif
 #if TCM
         r.Track(g.gameStarted, g.current_player_number, g.ball, g.tiltmode != null && g.tiltmode.tilted);
 #else
@@ -150,6 +162,117 @@ public static class Glue {
             g.tiltmode != null && g.tiltmode.tilted);
 #endif
     }
+
+#if !TCM
+    // ------------------------------------------------------------ START BUTTON HOLD (PAD-1623)
+    // Halloween and Ultraman have no mode-select menu: holding Start 3 s in attract (free play)
+    // plays a one-ball wizard game, the one the START BUTTON HOLD feature setting names
+    // (machineMode.StartButtonWasHeld: GameMode = GetGameModeFromString(start_hold_game_mode.value),
+    // any name it does not know is Normal).  Each start_hold mode of ours is one more choice of that
+    // setting; holding Start with it chosen starts a game, and ours makes it the wizard kind
+    // (GameMode TheNightUltraBrothers: one ball, the stock rules, skill shot and ball save off),
+    // takes the stock wizard out the frame skillshotMode adds it (before its 0.6 s set-up) and has
+    // the runtime play just that mode.  The game builds its settings afresh at boot and whenever the
+    // service menu closes (LoadSettingsFromFiles: a new Game_Features, values matched by name, an
+    // unknown one OFF, saved straight back), so a choice of ours would come back OFF: the runtime
+    // keeps it (pad_start_hold_choice.txt) and puts it back on each new setting object.
+    static readonly Dictionary<string, CMode> holdOpts = new Dictionary<string, CMode>();
+    static bool holdIdle, holdSeen, holdDecided;
+    static string holdLast;
+    static setting_options holdOf;     // the setting object ours were added to
+
+    static setting_options HoldSetting() {
+        var f = G.game_features;
+        return f == null ? null : f.start_hold_game_mode;
+    }
+
+    static string HoldValue(setting_options s) {
+        if (s == null || s.options == null || s.which < 0 || s.which >= s.options.Count) return null;
+        return Convert.ToString(s.options[(int)s.which]);
+    }
+
+    // beside the game's own settings (staticVars.safe_location: /game/ on a machine), so an update
+    // or the rig's fresh pad/ folder each boot does not lose it
+    public static string HoldChoiceFile(PadRuntime r) {
+        string d = staticVars.safe_location;
+        if (string.IsNullOrEmpty(d) || !Directory.Exists(d)) d = r.Dir ?? ".";
+        return Path.Combine(d, "pad_start_hold_choice.txt");
+    }
+
+    static void HoldPoll(PadRuntime r, pinballController g) {
+        var s = HoldSetting();
+        if (s == null || s.options == null) return;
+        foreach (var m in r.All) {
+            if (!m.Challenge) continue;
+            string name = holdOpts.Where(kv => kv.Value == m).Select(kv => kv.Key).FirstOrDefault();
+            if (name == null) {
+                name = (m.Title ?? "").Trim().ToUpperInvariant();
+                if (name.Length == 0) name = m.Name.ToUpperInvariant();
+                if (name.Length > 20) name = name.Substring(0, 20).Trim();
+                string b = name;
+                for (int i = 2; s.options.Contains(name) || holdOpts.ContainsKey(name); i++) name = b + " " + i;
+                holdOpts[name] = m;
+                Loader.Log(m.Name + ": START BUTTON HOLD choice \"" + name + "\" (Feature Settings)");
+            }
+            if (!s.options.Contains(name)) s.options.Add(name);
+        }
+        if (holdOpts.Count == 0) return;
+        string now = HoldValue(s);
+        if (!ReferenceEquals(s, holdOf)) {             // the game's settings, (re)loaded
+            holdOf = s;
+            string want = null;
+            try { if (File.Exists(HoldChoiceFile(r))) want = File.ReadAllText(HoldChoiceFile(r)).Trim(); } catch (Exception) { }
+            Loader.Log("START BUTTON HOLD (re)loaded: " + now + "; ours kept " + (want ?? "nothing") +
+                       " (" + HoldChoiceFile(r) + ")");
+            if (want != null && holdOpts.ContainsKey(want) && now != want && s.which == 0) {
+                s.which = s.options.IndexOf(want);
+                Loader.Log("START BUTTON HOLD back to " + want + " (the game reloads a choice it does not know as OFF)");
+                now = want;
+            }
+            holdLast = now;
+        } else if (now != holdLast) {
+            holdLast = now;
+            try { File.WriteAllText(HoldChoiceFile(r), now ?? ""); } catch (Exception e) { Loader.Log("pad_start_hold_choice.txt: " + e.Message); }
+            Loader.Log("START BUTTON HOLD is now " + now);
+        }
+        var mm = g.machinemode;
+        if (mm != null && mm.startButtonWasHeld) holdSeen = true;
+        if (!g.gameStarted) holdDecided = false;
+        if (r.Challenge != null && g.gameStarted) {
+            if (g.theNightUltraBros != null) { DropStock(g, g.theNightUltraBros); g.theNightUltraBros = null; }
+            if (g.wizardmode != null) { DropStock(g, g.wizardmode); g.wizardmode = null; }
+        }
+    }
+
+    static void DropStock(pinballController g, Mode m) {
+        delaySystem.cancel_delayed("", m.Name, true);
+        g.remove_mode(m);
+        Loader.Log("challenge game: the stock wizard " + m.GetType().Name + " taken out");
+    }
+
+    public static void StartPressed() {
+        var g = G;
+        holdIdle = g.freeplay && !g.gameStarted;
+        holdSeen = false;
+    }
+
+    // the game's first ball: a challenge game of ours, or a normal one
+    public static void ChallengeBall() {
+        var g = G; var r = Loader.Runtime;
+        if (holdDecided || !g.gameStarted) return;
+        holdDecided = true;
+        r.Challenge = null;
+        bool held = holdIdle && (holdSeen || (g.machinemode != null && g.machinemode.startButtonWasHeld));
+        holdIdle = holdSeen = false;
+        if (!held) return;
+        string v = HoldValue(HoldSetting());
+        CMode m;
+        if (v == null || !holdOpts.TryGetValue(v, out m)) return;
+        g.GameMode = modeConfig.GameModes.TheNightUltraBrothers;
+        r.Challenge = m;
+        Loader.Log("Start held with START BUTTON HOLD " + v + ": a challenge game of " + m.Name + " (one ball, only it plays)");
+    }
+#endif
 
     public static List<Sw> Switches() {
         if (sw != null && sw.Count > 0) return sw;

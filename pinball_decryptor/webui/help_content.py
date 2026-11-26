@@ -4647,6 +4647,11 @@ SPOOKY_MODES_HELP = [
         "ball's first playfield switch, a ball save, an extra ball, a multiball ending), after one "
         "of the game's own modes ends, at a score, or on switches hit in order; it can also run "
         "at most once a ball or a game.",
+        "**A challenge of its own (hold Start)** (Halloween and Ultraman) keeps a mode out of the "
+        "normal game. It becomes one more choice of the game's **START BUTTON HOLD** setting "
+        "(Feature Settings in the service menu). With it chosen and free play on, holding Start "
+        "for 3 seconds at the attract screen plays a one-ball game of just that mode: the game's "
+        "own rules, skill shot and wizard stay out of it. Make several and pick one there.",
         "**Lamps** lights the game's own lamps in your colour while the mode runs, flashing if "
         "you like, and hands them back after. The game's ball-save light still shows its save.",
         "**Balls** adds balls: a multiball of up to 6 balls with its own ball save (it ends when "

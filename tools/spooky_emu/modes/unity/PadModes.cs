@@ -105,6 +105,9 @@ public class CMode {
     public HashSet<string> StartOn = new HashSet<string>(), StartAfter = new HashSet<string>();
     public string Once = "no";
     public bool ResetEachBall;
+    // start_hold = yes (PAD-1623): a challenge of its own on the game's START BUTTON HOLD setting
+    // (Ultraman, Halloween): never in a normal game; holding Start plays one ball of just this mode
+    public bool Challenge;
     // state
     public int Hits, Made, ComboAt;
     public long Total;
@@ -155,6 +158,9 @@ public class PadRuntime {
     public List<CMode> All = new List<CMode>();
     public Dictionary<string, string> Title = new Dictionary<string, string>();
     public long Scale = 1;
+    // the start-hold challenge this game is (PAD-1623): the glue sets it at the game's first ball,
+    // null in a normal game
+    public CMode Challenge;
     bool traceLamps;          // PAD-1508 proof runs: what a lamp_pattern puts, in the log
     bool ballLive;
     float ballAt;
@@ -204,6 +210,7 @@ public class PadRuntime {
             foreach (var w in Words(m.Get("start_after", ""))) m.StartAfter.Add(w.ToLowerInvariant());
             m.Once = m.Get("start_once", "no");
             m.ResetEachBall = m.Get("start_count_reset", "game") == "ball";
+            m.Challenge = m.Get("start_hold", "no").ToLowerInvariant() == "yes";
             LampsCoilsBalls(m);
             Spike2Rules(m);
             All.Add(m);
@@ -401,6 +408,10 @@ public class PadRuntime {
             m.RanThisBall = false; m.ComboAt = 0;
             if (m.ResetEachBall) { m.Hits = 0; foreach (var a in m.StartAlso) a.Got = 0; }
         }
+        if (Challenge != null && !Challenge.Running) {
+            Loader.Log(Challenge.Name + ": the challenge game's ball - it starts now");
+            StartMode(Challenge);
+        }
         GameEvent("ball_start");
         if (ball == 1) GameEvent("first_ball");
         if (ball > 0 && of > 0 && ball >= of && Glue.ExtraBallsLeft() <= 0) GameEvent("last_ball");
@@ -415,6 +426,8 @@ public class PadRuntime {
     // Why m may not start (or count toward a start) now, or null: start_once, and Spike 2's
     // start_max, cooldown and start_needs (PAD-1508).
     string Blocked(CMode m) {
+        if (Challenge != null && m != Challenge) return "this is " + Challenge.Name + "'s challenge game: only it plays";
+        if (Challenge == null && m.Challenge) return "a start-hold challenge: it plays only in its own game (hold Start)";
         if (m.Once == "ball" && m.RanThisBall) return "already ran this ball (start_once)";
         if (m.Once == "game" && m.RanThisGame) return "already ran this game (start_once)";
         if (m.StartMax > 0 && m.RunsGame >= m.StartMax) return "started " + m.RunsGame + " time(s) this game, its start_max";
@@ -537,6 +550,8 @@ public class PadRuntime {
     public void OnGameEnd() {
         ballLive = false;
         foreach (var m in All) Stop(m, "the game ended");
+        if (Challenge != null) Loader.Log("challenge game of " + Challenge.Name + " over");
+        Challenge = null;
     }
 
     // For the titles that do not announce a game or a ball (Evil Dead), or announce them with

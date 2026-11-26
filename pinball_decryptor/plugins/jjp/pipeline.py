@@ -1288,6 +1288,90 @@ def fit_png_to_size(content, target, log=None):
     return out if len(out) == target else None
 
 
+_JPEG_COM_MAX = 65535 - 2         # a COM segment's payload, at most
+
+
+def fit_jpeg_to_size(content, target):
+    """Make a JPEG exactly *target* bytes without touching a pixel.
+
+    The JPEG sibling of :func:`fit_png_to_size` (PAD-1612): a COM (comment)
+    segment holds bytes every decoder skips, so the slack goes into comment
+    segments right after the SOI marker.  A segment is 4 bytes of framing
+    plus up to 65,533 of payload, so any shortfall of 4 bytes or more can be
+    made up.  Returns the padded JPEG, or None when it is bigger than
+    *target* or 1-3 bytes short (no segment that small exists).
+    """
+    import struct as _st
+    if len(content) == target:
+        return content
+    if not content.startswith(b"\xff\xd8"):
+        return None
+    delta = target - len(content)
+    if delta < 4:
+        return None
+    segs = []
+    while delta:
+        # leave a remainder of 0 or at least 4: never strand 1-3 bytes
+        take = min(delta, _JPEG_COM_MAX + 4)
+        if 0 < delta - take < 4:
+            take = delta - 4
+        body = b" " * (take - 4)
+        segs.append(b"\xff\xfe" + _st.pack(">H", len(body) + 2) + body)
+        delta -= take
+    out = content[:2] + b"".join(segs) + content[2:]
+    return out if len(out) == target else None
+
+
+#: what a squeezed picture is aimed under its slot by, so the pad always
+#: has room for its smallest chunk (a PNG tEXt needs 16 bytes, a COM 4)
+_SQUEEZE_HEADROOM = 64
+
+
+def fit_picture_to_size(content, target, ext, log=None):
+    """A PNG or JPEG replacement exactly *target* bytes (a pinned slot).
+
+    Pads it onto the slot when it is smaller (no pixel changes).  When it
+    came out bigger, as an edited or re-saved picture often does, it is
+    squeezed first (PNG: maximum compression, then fewer colours; JPEG: lower
+    quality, see :func:`core.image.recompress_image_to_size`) and the result
+    padded.  Returns None when it cannot be made to fit at all.
+    """
+    ext = ext.lower()
+    fit = fit_png_to_size if ext == ".png" else fit_jpeg_to_size
+    out = fit(content, target)
+    if out is not None:
+        return out
+    import shutil as _shutil
+    import tempfile as _tempfile
+    from ...core.image import recompress_image_to_size
+    work = _tempfile.mkdtemp(prefix="pad_jjp_pic_")
+    try:
+        src = os.path.join(work, "in" + ext)
+        dst = os.path.join(work, "out" + ext)
+        with open(src, "wb") as fh:
+            fh.write(content)
+        ok, detail = recompress_image_to_size(
+            src, dst, max(1, target - _SQUEEZE_HEADROOM))
+        if not ok:
+            if log:
+                log("  Could not make the picture small enough (%s)"
+                    % detail, "info")
+            return None
+        with open(dst, "rb") as fh:
+            squeezed = fh.read()
+    except (OSError, ValueError) as e:
+        if log:
+            log("  Could not make the picture small enough (%s)" % e, "info")
+        return None
+    finally:
+        _shutil.rmtree(work, ignore_errors=True)
+    out = fit(squeezed, target)
+    if out is not None and log:
+        log("  Squeezed from %d to %d bytes, then padded onto the slot's %d"
+            % (len(content), len(squeezed), target), "info")
+    return out
+
+
 def _validate_replacement(content, path):
     """Reject a replacement whose own header would walk a reader off its end.
 
@@ -1481,9 +1565,11 @@ def _encrypt_one(scheme, entry, content, game_name, read_original,
             # replacement that is merely the wrong size is still usable.
             fitted = None
             ext = os.path.splitext(entry.path)[1].lower()
-            if ext == ".png":
+            if ext in (".png", ".jpg", ".jpeg"):
+                # PAD-1612: a Replace Images pick (or a hand edit) re-saved
+                # bigger than the slot is squeezed down, then padded on
                 target = len(_d3(original, f1, entry.path, game_name))
-                fitted = fit_png_to_size(content, target)
+                fitted = fit_picture_to_size(content, target, ext, log=log)
             elif ext in _PINNED_VIDEO_EXTS:
                 orig_content = _d3(original, f1, entry.path, game_name)
                 fitted = fit_video_to_size(content, len(orig_content),

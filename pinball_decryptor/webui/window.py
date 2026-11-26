@@ -536,7 +536,7 @@ class WebWindow:
             "Replace Images": g("replace_image"),
             "Replace Text": g("replace_text"),
             # not for a display of shades of one color (Stern SAM's DMD)
-            "Scenes": g("replace_image") and not g("dmd_shades"),
+            "Scenes": g("scenes") and not g("dmd_shades"),
             "Color Profile": ((g("replace_image") or g("replace_video"))
                               and not g("dmd_shades")),
             "Write": g("write"),

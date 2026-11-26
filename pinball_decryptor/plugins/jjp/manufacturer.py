@@ -227,6 +227,13 @@ class JJPManufacturer(Manufacturer):
         # generic changed-file repack re-encrypts like any other asset, so a
         # swapped clip round-trips with no special handling.
         replace_video=True,
+        # PAD-1612: the pictures are loose files too (graphics/, ecoredata/),
+        # so the Replace Images tab stages a pick over the extracted file and
+        # the same changed-file repack re-encrypts it.  On a Sonic-era image
+        # the slot's byte size is pinned; the encrypt step pads a PNG or JPEG
+        # onto it, squeezing it first when it came out bigger.  No scenes:
+        # JJP's pictures are not laid out in scene trees the app can read.
+        replace_image=True,
         # "Flash" surface — for JJP this is NOT a dd write: the machine
         # boots the stick's own Clonezilla live system (syslinux or EFI),
         # which runs the installer from its FAT volume, so a raw-imaged
@@ -374,6 +381,26 @@ class JJPManufacturer(Manufacturer):
             return None, ("a .ogv or .avi clip must be the slot's exact size "
                           "on this machine"), False
         return super().video_size_limit(assets_dir, rel, slot)
+
+    def image_slot_dirs(self, assets_dir):
+        # PAD-1612: every folder the extract wrote game assets into
+        # (graphics/, ecoredata/, ...), not system/: the File System dump is
+        # the machine's own OS (icons, themes), not the game's pictures.
+        try:
+            names = sorted(os.listdir(assets_dir))
+        except OSError:
+            return None
+        roots = [os.path.join(assets_dir, n) for n in names
+                 if not n.startswith(".") and n.lower() != "system"
+                 and os.path.isdir(os.path.join(assets_dir, n))]
+        return roots or None
+
+    def image_note(self):
+        return ("Replacements are scaled to the original picture's size in "
+                "pixels. Assign a picture to a slot, then build the install "
+                "ISO on the Write tab. On Sonic-era games every file keeps "
+                "its byte size: a picture that comes out bigger is "
+                "compressed to fit.")
 
     def video_pins_byte_size(self, assets_dir=None):
         # Sonic-era images (asset scheme 3) hold every clip to its original

@@ -746,7 +746,7 @@ export default function ImagesTab() {
       <${Button} icon="search" onClick=${() => call("images.originals_open")} disabled=${running} title=${ORIGINALS_TIP}>Find originals…<//>
       <${Button} icon="compare" cls="img-cmp-open" onClick=${() => openCompare(compareRels())} disabled=${!compareRels().length}
         title=${COMPARE_TIP}>Compare<//>
-      ${s.shades_only ? null : html`<${Button} kind="ghost" icon="text" onClick=${() => call("images.open_fonts")} title=${FONTS_TIP}>Fonts…<//>`}
+      ${s.shades_only || !s.scenes ? null : html`<${Button} kind="ghost" icon="text" onClick=${() => call("images.open_fonts")} title=${FONTS_TIP}>Fonts…<//>`}
       <${Button} kind="ghost" icon="more" label="More" title=${colorCol ? MORE_TIP.replace("Export CSV, ", "Export CSV, Save pictures with their color profiles…, ") : MORE_TIP}
         onClick=${(e) => openMenu(e.currentTarget, [
           { label: "Export CSV", icon: "download", title: CSV_TIP, onClick: () => call("images.export_csv") },
@@ -777,7 +777,7 @@ export default function ImagesTab() {
         <span class="img-seg" ...${tip(SHOW_TIP)}>
           <${Seg} value=${s.show || "All"} options=${s.shows || []} onChange=${(v) => call("images.set_show", v)} />
         </span>
-        ${s.shades_only ? null : html`<${Check} checked=${!!s.grouped} onChange=${(v) => call("images.set_grouped", v)} label="Group by scene" title=${GROUP_TIP} />`}
+        ${s.shades_only || !s.scenes ? null : html`<${Check} checked=${!!s.grouped} onChange=${(v) => call("images.set_grouped", v)} label="Group by scene" title=${GROUP_TIP} />`}
         <${SetPicker} />
         <span class="sp"></span>
       </div>

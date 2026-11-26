@@ -70,6 +70,7 @@ The advanced **"Decrypt using the game's HASP dongle"** checkbox on the Extract 
 | `direct_ssd` | True | Read/write the physical game SSD directly — surfaces the "From ISO / From SSD" radio on Extract + Write |
 | `dongle_extract` | True | Advanced "Decrypt using the game's HASP dongle" Extract checkbox — runs the game under an `LD_PRELOAD` shim so it decrypts itself via the plugged-in key (works for a title whose cipher isn't RE'd yet, e.g. Sonic). Windows/WSL only. See *Dongle-decrypt extract* above |
 | `asset_filters` | True | Graphics / Sounds / File System checkboxes → `extract_graphics` / `extract_sounds` / `full_dump` |
+| `replace_image` | True | Replace-Images tab (PAD-1612) over every extract folder but `system/` (`image_slot_dirs`). No `scenes`: the Scenes tab, Fonts… and Group by scene stay Stern's. On a pinned (scheme 3) slot `fit_picture_to_size` pads a PNG (tEXt) or JPEG (COM segments), squeezing it with `core.image.recompress_image_to_size` first when it is bigger |
 | `replace_audio` | True | Replace-Audio tab scans the extract for loose `.wav`/`.ogg` slots |
 | `jjp_modes` | True | The Modes tab's JJP editor (PAD-1350, `webui/modes_jjp.py` + `plugins/jjp/custom_modes.py`): custom modes for the JJP mode SDK per title, every name picked from the title's port report, checked as the build checks, built into the stock install ISO by `tools/jjp_emu/mkjjpmodes.py build` as root in WSL. See `tools/jjp_emu/MODES.md` |
 

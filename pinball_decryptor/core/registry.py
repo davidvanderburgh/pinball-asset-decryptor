@@ -284,6 +284,13 @@ class Capabilities:
     # loose files Write round-trips — e.g. Stern Spike 2 (loose .png on the SD
     # card, patched in place size-neutral).
     replace_image: bool = False
+    # The Scenes tab (and the Images tab's scene tools: Fonts…, Group by
+    # scene; Replace Text's scene actions): only where the pictures sit in
+    # scene trees the app can lay out - Stern Spike 2 and Spike 3.  Its own
+    # switch since PAD-1612 gave JJP a Replace Images tab: JJP's pictures are
+    # loose files with no scenes, and the Scenes tab used to follow
+    # replace_image alone.
+    scenes: bool = False
     # The pictures are shades of one color (Stern SAM's 16-shade DMD,
     # PAD-583): there is nothing for a color profile to do and no scenes to
     # lay them out in, so the Scenes and Color Profile tabs and the Images

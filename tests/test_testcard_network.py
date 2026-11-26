@@ -22,6 +22,7 @@ RIG = os.path.join(os.path.dirname(HERE), "tools", "spike2_emu")
 @pytest.fixture(autouse=True)
 def _store(tmp_path, monkeypatch):
     monkeypatch.setenv("PAD_TESTCARD_STORE", str(tmp_path / "store" / "testcard.json"))
+    monkeypatch.setenv("PAD_MENU_WIFI_STORE", str(tmp_path / "store" / "menu_wifi.json"))
     tc._SHARED[:] = []
     yield
     tc._SHARED[:] = []
@@ -102,8 +103,7 @@ def test_set_network_saves_and_publishes():
     n = tc.shared().network
     assert n["room"] and n["room_gb"] == 4 and n["wifi"] is False and n["band5"] is False, \
         "5 GHz goes off with Wi-Fi"
-    shown = {k: v for k, v in n.items() if k != "wifi_key"}       # 2026-11-26: the Wi-Fi key never reaches the page
-    assert tab.state["network"] == shown and tab.state["room_mib"] == 4096 and tab.state["address"] == "192.168.1.50"
+    assert tab.state["network"] == dict(n, wifi_name="") and tab.state["room_mib"] == 4096   # + the saved Wi-Fi's name and tab.state["address"] == "192.168.1.50"
 
 
 def test_the_build_asks_for_the_room_and_adds_remote_access(tmp_path, monkeypatch):

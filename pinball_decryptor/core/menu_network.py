@@ -20,8 +20,11 @@ then written in."""
 
 import binascii
 import hashlib
+import json
+import os
 import stat
 import struct
+import threading
 from pathlib import Path
 
 from . import ssh_card
@@ -76,6 +79,89 @@ exit 0
 '''
 NOT_SPIKE2 = 'The menu network needs a Stern Spike 2 card.'
 NO_TOOLS = "This card has no wpa_supplicant or udhcpc where the menu network expects them."
+
+
+# ---- the owner's Wi-Fi, saved once for the Test card and Multi-boot tabs --------------------------------------------
+_LOCK = threading.Lock()
+SAVED_DEFAULTS = {"wifi_name": "", "wifi_key": "", "multiboot": False}
+
+
+def store_path():
+    """Beside the app's settings (PAD_MENU_WIFI_STORE for the tests)."""
+    forced = os.environ.get("PAD_MENU_WIFI_STORE")
+    if forced:
+        return forced
+    from . import config
+    return os.path.join(os.path.dirname(config.SETTINGS_FILE), "menu_wifi.json")
+
+
+def _clean(d):
+    out = dict(SAVED_DEFAULTS)
+    if isinstance(d, dict):
+        name, key = d.get("wifi_name"), d.get("wifi_key")
+        if isinstance(name, str) and 1 <= len(name.encode("utf-8")) <= 32 and isinstance(key, str) and (
+                key == "" or (len(key) == 64 and all(c in "0123456789abcdef" for c in key))):
+            out["wifi_name"], out["wifi_key"] = name, key
+        if isinstance(d.get("multiboot"), bool):
+            out["multiboot"] = d["multiboot"]
+    return out
+
+
+def saved():
+    """``{"wifi_name", "wifi_key", "multiboot"}``: the Wi-Fi the menu and the test card join (the name and its WPA
+    key, never the password), and whether a multi-boot card gets the menu network."""
+    with _LOCK:
+        try:
+            with open(store_path(), encoding="utf-8") as f:
+                return _clean(json.load(f))
+        except (OSError, ValueError):
+            return dict(SAVED_DEFAULTS)
+
+
+def save(**changes):
+    """Change the saved settings (keys of :data:`SAVED_DEFAULTS`); returns them."""
+    now = saved()
+    now.update({k: v for k, v in changes.items() if k in SAVED_DEFAULTS})
+    now = _clean(now)
+    with _LOCK:
+        path = store_path()
+        os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+        tmp = path + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(now, f)
+        os.replace(tmp, path)
+    return now
+
+
+def set_wifi(name, password):
+    """Save the Wi-Fi *name* with the key of *password* (``''`` *name* forgets it): ``''`` or why not."""
+    name = (name or "").strip()
+    if not name:
+        save(wifi_name="", wifi_key="")
+        return ""
+    why = check_wifi(name, password or "")
+    if why:
+        return why
+    save(wifi_name=name, wifi_key=wifi_key(name, password or ""))
+    return ""
+
+
+def shown():
+    """What a page may show of the saved Wi-Fi: its name and whether it is open - never the key."""
+    s = saved()
+    return {"name": s["wifi_name"], "open": bool(s["wifi_name"]) and not s["wifi_key"], "multiboot": s["multiboot"]}
+
+
+def has_remote_access(image):
+    """Whether the card image *image* starts an SSH server (core/ssh_card.py): the menu network is for reaching it."""
+    try:
+        with open(image, 'rb') as f:
+            p2 = next((p for p in ssh_card._partitions(f) if p[0] == 2 and p[1] == 0x83), None)
+            if p2 is None:
+                return False
+            return ssh_card._node(Ext4Reader(f, p2[2], p2[3]), ssh_card.HOOK) is not None
+    except (OSError, ValueError, Ext4Error, struct.error, ExtrasError):
+        return False
 
 
 def check_wifi(name, password):

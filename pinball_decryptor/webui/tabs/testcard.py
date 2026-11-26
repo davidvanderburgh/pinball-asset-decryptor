@@ -60,14 +60,15 @@ class TestCardTab(TabService):
                          "problem": tc.item_problem(it)})
         rows.sort(key=lambda r: KIND_ORDER[r["kind"]])        # stable: each list in its own order
         source_ok = bool(lst.source) and os.path.isfile(lst.source)
+        from ...core import menu_network
+        _wifi = menu_network.shown()
         self.set(rows=rows, counts=lst.counts(), source=lst.source,
                  source_ok=source_ok, out=lst.out,
                  # PAD-1586: the card it is made from is a Spike 3 one: its own words and route
                  s3=bool(source_ok and tc.is_spike3_source(lst.source)),
                  busy=self._busy, log=self._lines[-400:], pct=self._pct, step=self._step,
                  msg=list(self._msg), max=tc.MAX_ITEMS, full=len(lst.items) >= tc.MAX_ITEMS,
-                 network={k: v for k, v in lst.network.items() if k != "wifi_key"},
-                 wifi_open=bool(lst.network.get("wifi_name")) and not lst.network.get("wifi_key"),
+                 network=dict(lst.network, wifi_name=_wifi["name"]), wifi_open=_wifi["open"],
                  room_mib=tc.room_mib(lst.network), address=self._address())
 
     # ------------------------------------------------------------ network updates
@@ -88,6 +89,20 @@ class TestCardTab(TabService):
             return ""
 
     @rpc(loop=False)
+    def menu_wifi(self):
+        """The saved Wi-Fi as a page may show it (name, open, multiboot - never the key), and the machine's address
+        for a scan from it: for the Multi-boot tab's Menu settings, which share it."""
+        from ...core import menu_network
+        return dict(menu_network.shown(), address=self._address())
+
+    @rpc
+    def set_menu_multiboot(self, on):
+        """Multi-boot cards get the menu network (Menu settings)."""
+        from ...core import menu_network
+        menu_network.save(multiboot=bool(on))
+        return True
+
+    @rpc(loop=False)
     def scan_wifi(self, where):
         """The Wi-Fi networks in reach (core/wifi_scan.py), from this computer (*where* "pc") or from the machine
         ("machine", over remote access): ``{"ok", "why", "networks", "current"}``. Off the UI loop: a scan takes
@@ -102,26 +117,15 @@ class TestCardTab(TabService):
         """The Wi-Fi the test card joins with no game running (core/menu_network.py): *name* and *password* -> the
         name and its WPA key are kept, never the password; an empty *name* forgets it. Returns '' or why not."""
         from ...core import menu_network
-        lst = tc.shared()
-        net = dict(lst.network)
-        name = (name or "").strip()
-        if not name:
-            net["wifi_name"], net["wifi_key"] = "", ""
-        else:
-            why = menu_network.check_wifi(name, password or "")
-            if why:
-                return why
-            net["wifi_name"], net["wifi_key"] = name, menu_network.wifi_key(name, password or "")
-        lst.network = tc.clean_network(net)
-        lst.save()
+        why = menu_network.set_wifi(name, password)     # one Wi-Fi for the Test card and Multi-boot tabs
         self._pub()
-        return ""
+        return why
 
     @rpc
     def set_network(self, key, value):
         """One of the tab's network settings: room / room_gb / ssh / wifi / band5."""
         lst = tc.shared()
-        if key not in tc.NETWORK_DEFAULTS or key in ("wifi_name", "wifi_key"):
+        if key not in tc.NETWORK_DEFAULTS:
             raise RpcError("no such setting: %s" % key)
         net = dict(lst.network)
         net[key] = value
@@ -358,9 +362,8 @@ class TestCardTab(TabService):
                 self._step = "Adding the menu network"
                 self._pub_soon()
                 from ...core import menu_network
-                note = menu_network.apply_to_build(
-                    source, out, {"wifi_name": net["wifi_name"], "wifi_key": net["wifi_key"]},
-                    log=self._say, cancel=lambda: self._cancel)
+                note = menu_network.apply_to_build(source, out, menu_network.saved(),
+                                                   log=self._say, cancel=lambda: self._cancel)
                 self._say("test card: " + note)
             if net["wifi"]:
                 step = "Wi-Fi start-up"

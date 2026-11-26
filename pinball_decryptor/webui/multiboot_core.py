@@ -12456,12 +12456,56 @@ class MultibootPanel:
         # what that dialog's menu-only write is for.
         after = ((lambda: self._flash(fresh=action != "apply"))
                  if do_flash else None)
+        after = self._with_menu_network(after)
         if action == "apply":
             self.apply_to_card(after=after)
         elif action == "update":
             self.update_card(after=after)
         else:
             self._build_card(after=after)
+
+    def _with_menu_network(self, after):
+        """Simon (2026-11-26): a multi-boot card on the network while its menu shows, as a test card is
+        (core/menu_network.py): when the Menu settings ask for it and the finished card has remote access (its
+        first game's), the wired port and the saved Wi-Fi go on it after the write and before *after* (the
+        flash), so a card written to an SD card carries them.  A card with no remote access is left as it is,
+        with a line saying why: nothing could reach it."""
+        def step():
+            from ..core import menu_network as MN
+            want = MN.saved()
+            out = self._out_var.get().strip().strip('"')
+            if (not want["multiboot"] or not out or not os.path.isfile(out)
+                    or getattr(backend_for(self.form()), "key", "") != "stern"):
+                return after() if after is not None else None
+            if self._card_device:
+                self._write("[card] menu network: not added - the menu was written straight onto the SD card")
+                return after() if after is not None else None
+            if not MN.has_remote_access(out):
+                self._write("[card] menu network: left off - this card has no remote access (give its first "
+                            "game remote access on the Network tab, and Write it)")
+                return after() if after is not None else None
+            self._ok("Adding the menu network to %s\u2026" % out)
+
+            def log(text, level="info"):
+                self._ui(lambda: self._log_sink("[card] " + text))
+
+            def run():
+                try:
+                    note = MN.apply_to_build(out, out, want, log=log)
+                except Exception as exc:                    # noqa: BLE001 - reported, never lost
+                    err = str(exc)
+                    self._ui(lambda: self._error("The menu network could not be added to %s: %s" % (out, err)))
+                    return
+
+                def fin():
+                    self._ok(note)
+                    if after is not None:
+                        after()
+                self._ui(fin)
+
+            threading.Thread(target=run, daemon=True).start()
+            self._drain()
+        return step
 
     # ------------------------------------------------------------------
     # the preview

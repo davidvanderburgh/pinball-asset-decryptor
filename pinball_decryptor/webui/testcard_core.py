@@ -42,10 +42,9 @@ _LOCK = threading.RLock()
 #: size they want, completely unfettered"), and remote access / Wi-Fi start-up go on it as on a
 #: game card (Network tab), so Send to machine can reach it.
 ROOM_GB_DEFAULT = 2
-NETWORK_DEFAULTS = {"room": False, "room_gb": ROOM_GB_DEFAULT, "ssh": False, "wifi": False, "band5": False,
-                    # Simon (2026-11-26): the test card on the network with no game - the Wi-Fi it joins
-                    # (core/menu_network.py): its name and WPA key, never the password
-                    "wifi_name": "", "wifi_key": ""}
+NETWORK_DEFAULTS = {"room": False, "room_gb": ROOM_GB_DEFAULT, "ssh": False, "wifi": False, "band5": False}
+# Simon (2026-11-26): the Wi-Fi the test card joins with no game is core/menu_network.saved() - one for the Test card
+# and Multi-boot tabs
 
 
 def clean_network(d):
@@ -55,10 +54,6 @@ def clean_network(d):
         for k in ("room", "ssh", "wifi", "band5"):
             if isinstance(d.get(k), bool):
                 out[k] = d[k]
-        name, key = d.get("wifi_name"), d.get("wifi_key")
-        if isinstance(name, str) and 1 <= len(name.encode("utf-8")) <= 32 and isinstance(key, str) and (
-                key == "" or (len(key) == 64 and all(c in "0123456789abcdef" for c in key))):
-            out["wifi_name"], out["wifi_key"] = name, key
         try:
             gb = float(d.get("room_gb", ROOM_GB_DEFAULT))
             if gb > 0:

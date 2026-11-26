@@ -117,7 +117,7 @@ def test_scan_machine_says_why_not():
 def test_the_tab_offers_both_and_still_takes_a_typed_name():
     src = open(os.path.join(ROOT, "pinball_decryptor", "webui", "tabs", "testcard.py"), encoding="utf-8").read()
     assert "@rpc(loop=False)\n    def scan_wifi(self, where):" in src
-    js = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "testcard.js"),
+    js = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "core", "menu_wifi.js"),
               encoding="utf-8").read()
     assert 'label: "From this computer", onClick: () => doScan("pc")' in js
     assert 'label: "From the machine", onClick: () => doScan("machine")' in js

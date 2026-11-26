@@ -26,6 +26,7 @@ LE116 = os.path.join(CARDS, "godzilla_le-1_16_0_spike2.Release.8G.sdcard.raw")
 @pytest.fixture(autouse=True)
 def _store(tmp_path, monkeypatch):
     monkeypatch.setenv("PAD_TESTCARD_STORE", str(tmp_path / "store" / "testcard.json"))
+    monkeypatch.setenv("PAD_MENU_WIFI_STORE", str(tmp_path / "store" / "menu_wifi.json"))
     tc._SHARED[:] = []
     yield
     tc._SHARED[:] = []
@@ -97,25 +98,29 @@ def _tab():
     return t
 
 
-def test_the_tab_keeps_the_name_and_key_and_never_shows_the_key(monkeypatch):
+def test_one_saved_wifi_the_name_and_key_never_the_password():
     tab = _tab()
     assert "8 to 63" in tab.set_menu_wifi("Home", "short")
     assert tab.set_menu_wifi("Home", "a-good-password") == ""
-    n = tc.shared().network
-    assert n["wifi_name"] == "Home" and n["wifi_key"] == MN.wifi_key("Home", "a-good-password")
-    assert "a-good-password" not in open(tc.store_path(), encoding="utf-8").read()
-    assert tab.set_menu_wifi("", "") == "" and tc.shared().network["wifi_name"] == ""
-    with pytest.raises(Exception):
-        tab.set_network("wifi_key", "f" * 64)                          # only set_menu_wifi sets them
-    src = open(os.path.join(ROOT, "pinball_decryptor", "webui", "tabs", "testcard.py"), encoding="utf-8").read()
-    assert 'network={k: v for k, v in lst.network.items() if k != "wifi_key"}' in src
+    got = MN.saved()
+    assert got["wifi_name"] == "Home" and got["wifi_key"] == MN.wifi_key("Home", "a-good-password")
+    assert "a-good-password" not in open(MN.store_path(), encoding="utf-8").read()
+    assert MN.shown() == {"name": "Home", "open": False, "multiboot": False}, "a page never gets the key"
+    assert tab.state["network"]["wifi_name"] == "Home" and "wifi_key" not in tab.state["network"]
+    assert tab.menu_wifi()["name"] == "Home" and "wifi_key" not in tab.menu_wifi()
+    tab.set_menu_multiboot(True)
+    assert MN.saved()["multiboot"] is True and MN.saved()["wifi_name"] == "Home"
+    assert tab.set_menu_wifi("", "") == "" and MN.saved()["wifi_name"] == "" and MN.saved()["multiboot"] is True
+    assert "wifi_name" not in tc.NETWORK_DEFAULTS, "kept once, for the Test card and Multi-boot tabs"
 
 
-def test_clean_network_takes_only_a_real_key():
-    good = tc.clean_network({"wifi_name": "Home", "wifi_key": "b" * 64})
-    assert (good["wifi_name"], good["wifi_key"]) == ("Home", "b" * 64)
-    assert tc.clean_network({"wifi_name": "Home", "wifi_key": "password"})["wifi_name"] == ""
-    assert tc.clean_network({"wifi_name": "x" * 40, "wifi_key": ""})["wifi_name"] == ""
+def test_the_saved_store_takes_only_a_real_key(tmp_path):
+    MN.save(wifi_name="Home", wifi_key="b" * 64)
+    assert MN.saved()["wifi_key"] == "b" * 64
+    MN.save(wifi_name="Home", wifi_key="password")
+    assert MN.saved()["wifi_name"] == "", "not a key PAD made: nothing kept"
+    open(MN.store_path(), "w").write("not json")
+    assert MN.saved() == MN.SAVED_DEFAULTS
 
 
 def test_the_build_adds_it_with_remote_access(tmp_path, monkeypatch):
@@ -136,10 +141,10 @@ def test_the_build_adds_it_with_remote_access(tmp_path, monkeypatch):
     src = str(tmp_path / "stock.raw")
     open(src, "wb").write(b"x")
     tab = _tab()
-    net = dict(tc.NETWORK_DEFAULTS, ssh=True, wifi_name="Home", wifi_key="c" * 64)
-    tab._run(src, str(tmp_path / "t.raw"), [], net)
+    MN.save(wifi_name="Home", wifi_key="c" * 64)
+    tab._run(src, str(tmp_path / "t.raw"), [], dict(tc.NETWORK_DEFAULTS, ssh=True))
     assert tab.state["msg"][0] == "ok", tab.state["msg"]
-    assert seen == ["ssh", ("net", {"wifi_name": "Home", "wifi_key": "c" * 64})]
+    assert seen == ["ssh", ("net", {"wifi_name": "Home", "wifi_key": "c" * 64, "multiboot": False})]
     seen.clear()
     tab._run(src, str(tmp_path / "t2.raw"), [], dict(tc.NETWORK_DEFAULTS))
     assert seen == [], "no remote access, no menu network"
@@ -180,3 +185,65 @@ def test_it_goes_on_godzilla_116s_system_partition(tmp_path):
         r = Ext4Reader(f, 0, part.stat().st_size)
         assert ssh_card._node(r, MN.WPA) is None and MN._read(r, MN.INIT, 1 << 20) == MN.SCRIPT
     assert hashlib.md5(MN.SCRIPT).hexdigest()
+
+
+# ---- the Multi-boot tab ---------------------------------------------------------------------------------------------
+def test_multi_boot_puts_it_on_after_the_write_and_before_the_flash():
+    """Simon (2026-11-26): "Add to Multi-boot tab". After a build, update or menu-only apply, when the Menu settings
+    ask for it and the card has remote access; then the flash."""
+    import inspect
+    from pinball_decryptor.webui import multiboot_core as mbc
+    src = inspect.getsource(mbc.MultibootPanel._do_build_flash)
+    i = src.index("after = self._with_menu_network(after)")
+    assert src.index("self._flash(fresh=") < i < src.index("self.apply_to_card(after=after)")
+    step = inspect.getsource(mbc.MultibootPanel._with_menu_network)
+    assert 'want["multiboot"]' in step and "MN.has_remote_access(out)" in step
+    assert 'getattr(backend_for(self.form()), "key", "") != "stern"' in step, "Spike 2 cards only"
+    assert "MN.apply_to_build(out, out, want, log=log)" in step
+    assert step.index("MN.apply_to_build") < step.index("after()", step.index("def fin"))
+
+
+def test_multi_boot_step_runs_then_flashes(tmp_path, monkeypatch):
+    from pinball_decryptor.webui import multiboot_core as mbc
+    out = tmp_path / "card.raw"
+    out.write_bytes(b"x")
+    calls = []
+
+    class P:
+        _card_device = None
+        _out_var = type("V", (), {"get": lambda self: str(out)})()
+        form = lambda self: type("F", (), {"platform": "stern"})()
+        _write = lambda self, t: calls.append(("say", t))
+        _ok = lambda self, t: calls.append(("ok", t))
+        _error = lambda self, t: calls.append(("err", t))
+        _log_sink = lambda self, t: None
+        _ui = lambda self, fn: fn()
+        _drain = lambda self: None
+    monkeypatch.setattr(mbc, "backend_for", lambda f: type("B", (), {"key": "stern"})())
+    monkeypatch.setattr(mbc.threading, "Thread", lambda target, daemon: type("T", (), {"start": lambda s: target()})())
+    monkeypatch.setattr(MN, "has_remote_access", lambda p: True)
+    monkeypatch.setattr(MN, "apply_to_build", lambda o, d, cfg, log=None: calls.append(("net", cfg["wifi_name"])) or "on")
+    step = mbc.MultibootPanel._with_menu_network(P(), lambda: calls.append("flash"))
+    step()
+    assert calls == ["flash"], "not asked for in the Menu settings: straight to the flash"
+    MN.save(multiboot=True, wifi_name="Home", wifi_key="d" * 64)
+    calls.clear()
+    step()
+    assert ("net", "Home") in calls and calls[-1] == "flash"
+    monkeypatch.setattr(MN, "has_remote_access", lambda p: False)
+    calls.clear()
+    step()
+    assert calls[0][0] == "say" and "no remote access" in calls[0][1] and calls[-1] == "flash"
+
+
+def test_the_multi_boot_menu_settings_offer_it():
+    js = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "tabs", "multiboot.js"),
+              encoding="utf-8").read()
+    assert '${w.menu_network ? html`<${MbNetwork} />` : null}' in js
+    assert 'label="Start the network while the menu shows (the card needs remote access)"' in js
+    assert 'import { MenuWifi } from "../core/menu_wifi.js";' in js
+    panel = open(os.path.join(ROOT, "pinball_decryptor", "webui", "multiboot_panel.py"), encoding="utf-8").read()
+    assert '"menu_network": be.key == "stern",' in panel
+    shared = open(os.path.join(ROOT, "pinball_decryptor", "webui", "static", "js", "core", "menu_wifi.js"),
+                  encoding="utf-8").read()
+    assert 'call("testcard.scan_wifi", where)' in shared and 'placeholder="network name"' in shared

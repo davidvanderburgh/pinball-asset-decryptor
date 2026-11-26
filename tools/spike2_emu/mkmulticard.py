@@ -3739,6 +3739,80 @@ def ensure_menu_hook(p2_image, stage_dir):
     return True
 
 
+UPDATE_SCRIPT = "/etc/init.d/update"
+
+
+def _updateguard():
+    """The update guard's block (updateguard.py beside this file), imported when first needed."""
+    here = os.path.dirname(os.path.abspath(__file__))
+    if here not in sys.path:
+        sys.path.insert(0, here)
+    import updateguard
+    return updateguard
+
+
+def ensure_update_guard(p2_image, stage_dir):
+    """PAD-1585: guard Stern's /etc/init.d/update on the rootfs image *p2_image* (updateguard.py), so a Stern
+    update on a USB stick or from Insider Connected is never installed over this card - on a multi-boot card it
+    would land in whichever game booted, and on a compact card in every game through the shared files.  Already
+    guarded: nothing written.  An updater that is not Stern's is left alone and said.  -> True when guarded."""
+    ug = _updateguard()
+    try:
+        upath = p2_file(p2_image, UPDATE_SCRIPT)
+    except Refused:
+        say("no %s on p2: nothing to guard" % UPDATE_SCRIPT)
+        return False
+    old = debugfs_cat(p2_image, upath)
+    if ug.has_guard(old):
+        return True
+    try:
+        guarded = ug.guard_script(old)
+    except ug.NotStern as e:
+        say("%s - a Stern update on this card would install over it" % e)
+        return False
+    p = os.path.join(stage_dir, "update.guarded")
+    with open(p, "wb") as f:
+        f.write(guarded.encode("utf-8"))
+    st = debugfs_stat(p2_image, upath)
+    q = dq(upath)
+    mode = (st.get("mode") or 0o755) & 0o7777
+    cmds = ["rm " + q, "write %s %s" % (dq(p), q),
+            "set_inode_field %s mode 0%o" % (q, statmod.S_IFREG | mode),
+            "set_inode_field %s uid %d" % (q, st.get("uid", 0)), "set_inode_field %s gid %d" % (q, st.get("gid", 0))]
+    cmds += ["set_inode_field %s %s @%d" % (q, k, st[k]) for k in ("atime", "ctime", "mtime") if k in st]
+    debugfs_write_script(p2_image, cmds)
+    if debugfs_cat(p2_image, upath) != guarded.encode("utf-8"):
+        raise Refused("%s read back differs from the guarded copy" % upath)
+    say("%s guarded: a Stern update on a USB stick or from Insider Connected is not installed over this card"
+        % UPDATE_SCRIPT)
+    return True
+
+
+def _unguarded_rec(path, offset, size, rec):
+    """The manifest record of the card's /etc/init.d/update as Stern's own script (the guard taken out), so
+    p2_digest reads a guarded card as its unguarded source.  *rec* back unchanged when it is not guarded."""
+    ug = _updateguard()
+    _v, _s, ext4, _a = _stern_plugins()
+    try:
+        with open(path, "rb") as f:
+            r = ext4.Ext4Reader(f, offset, size)
+            node = r.read_inode(2)
+            for name in UPDATE_SCRIPT.strip("/").split("/"):
+                ino = next((i for nm, i, _t in r._iter_dir(node) if nm == name), None)
+                if ino is None:
+                    return rec
+                node = r.read_inode(ino)
+            if not statmod.S_ISREG(node["mode"]) or node["size"] > 256 * 1024:
+                return rec
+            text = r.read_file_bytes(node)
+    except Exception:
+        return rec
+    if not ug.has_guard(text):
+        return rec
+    plain = ug.strip_guard(text).encode("utf-8")
+    return rec._replace(sha256=hashlib.sha256(plain).hexdigest(), size=len(plain))
+
+
 def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=None, replace_media=False,
                    manifests=None, mode_sets=None):
     """Modify an extracted rootfs image in place: /usr/local/codeselect/* (+ media/, + the JSON
@@ -3787,6 +3861,7 @@ def inject_into_p2(p2_image, selector_dir, conf_text, stage_dir, media_files=Non
         inject_mode_sets(p2_image, mode_sets, mdir)
     if any(c == MENU_SO for (_s, c, _m) in items):
         ensure_menu_hook(p2_image, stage_dir)
+    ensure_update_guard(p2_image, stage_dir)                # PAD-1585
     rc, txt = e2fsck(p2_image)
     if rc != 0:
         raise Refused("p2 is not clean after injection (e2fsck rc=%d):\n%s" % (rc, txt))
@@ -5159,8 +5234,13 @@ def p2_digest(path, cache_dir=None):
     # the hooked script is the file a linked game script leads to (PAD-742); the link stays
     game = resolve_link_path("/" + P2_SKIP[1],
                              lambda p: getattr(man.tree.symlinks.get(p.lstrip("/")), "target", None)).lstrip("/")
+    files = dict(man.tree.files)
+    upd = resolve_link_path(UPDATE_SCRIPT,
+                            lambda p: getattr(man.tree.symlinks.get(p.lstrip("/")), "target", None)).lstrip("/")
+    if upd in files:                   # PAD-1585: a guarded updater counts as Stern's own
+        files[upd] = _unguarded_rec(path, st * SECTOR, cnt * SECTOR, files[upd])
     keep = ts.TreeManifest(
-        {k: v for k, v in man.tree.files.items() if not k.startswith(P2_SKIP[0]) and k not in (P2_SKIP[1], game)},
+        {k: v for k, v in files.items() if not k.startswith(P2_SKIP[0]) and k not in (P2_SKIP[1], game)},
         {k: v for k, v in man.tree.symlinks.items() if not k.startswith(P2_SKIP[0])},
         {k: v for k, v in man.tree.dirs.items() if not k.startswith(P2_SKIP[0])})
     return hashlib.sha256(json.dumps(keep.to_dict(), sort_keys=True, separators=(",", ":")).encode()).hexdigest()

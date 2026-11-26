@@ -611,12 +611,13 @@ class SternWritePipeline(BasePipeline):
                     except OSError:
                         pass  # pending marker continues to refuse flashes
                 raise PipelineError(step, str(e)) from e
+        guard_note = _guard_updater_on(self) if not self._cancelled else ''
         if summary == 'no changes' and (ssh_note or wifi_note or buttons_note or bluetooth_note):
             named = [name for name, said in (('remote access (SSH)', ssh_note), ('Wi-Fi start-up', wifi_note),
                                              ('remote buttons', buttons_note),
                                              ('Bluetooth headphones', bluetooth_note)) if said]
             summary = named[0] if len(named) == 1 else ', '.join(named[:-1]) + ' and ' + named[-1]
-        for extra in (wifi_note, buttons_note, bluetooth_note):
+        for extra in (wifi_note, buttons_note, bluetooth_note, guard_note):
             if extra:
                 ssh_note = (ssh_note + '\n' + extra) if ssh_note else extra
         if recovering_ssh and not extras_on:
@@ -699,6 +700,47 @@ class SternDirectSsdExtractPipeline(BasePipeline):
                    open_disk=lambda: RawDeviceFile(self.device_path, writable=False))
         self._done(True, _extract_summary(n, self.output_dir, flags,
                                           source=" from the SD card"))
+
+
+def _guard_updater_on(pipe):
+    """PAD-1585: Stern's own updater guarded on the image *pipe* built (core/update_guard.py), so a Stern update
+    on a USB stick or from Insider Connected never installs over the owner's work. Every Spike 2 image build gets
+    it (a Spike 3 card's system partition is encrypted: not this step). The same checked rewrite of the system
+    partition as remote access: a failure part way quarantines the image. -> the summary's line, or ''."""
+    from ...core import ssh_card, update_guard
+    from ...core.card_extras import ExtrasError
+    out = pipe.output_path
+    if not out or is_device_path(str(out)) or not os.path.isfile(out) or os.path.islink(out):
+        return ''
+    try:
+        before = update_guard.state(out)
+    except (ExtrasError, OSError, ValueError) as e:
+        pipe._log("Stern's updater could not be read on this image (%s), so it was left as it is." % e, 'warning')
+        return ''
+    if before == 'guarded':
+        pipe._log(update_guard.GUARD_TEXT, 'info')
+        return update_guard.GUARD_TEXT
+    if before != 'open':
+        return update_guard.apply_to_build(pipe.original_path, out, log=pipe._log)  # says why it is left alone
+    marker = str(ssh_card.pending_marker(out))
+    try:
+        with open(marker, 'w', encoding='utf-8') as mark:
+            mark.write('Incomplete system partition preparation; do not flash this image.\n')
+        note = update_guard.apply_to_build(pipe.original_path, out, log=pipe._log,
+                                           cancel=lambda: pipe._cancelled)
+        rec = engine.read_build_manifest(out) if engine is not None else None
+        if rec:
+            rec['output'] = engine._file_stamp(out)          # the record still vouches for the file
+            engine._write_build_manifest(out, rec)
+        os.remove(marker)
+        return note
+    except Exception as e:
+        try:
+            os.replace(out, out + '.ssh-incomplete')
+        except OSError:
+            pass                                             # the pending marker goes on refusing flashes
+        raise PipelineError('Update guard', str(e)) from e
+
 
 
 class SternDirectSsdWritePipeline(BasePipeline):

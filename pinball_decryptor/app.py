@@ -4751,6 +4751,274 @@ class App:
         threading.Thread(target=self._run_port_chain, args=(project, jobs),
                          daemon=True).start()
 
+    def _start_machine_update(self, mid, project, card, on_built=None, on_multi=None):
+        """PAD-1585: "Update to 1.0.1" on My machines - the machine's project
+        carried onto Stern's newer build by the app, never by Stern's updater
+        (which a card the app built refuses).  The owner points at the new
+        stock card image (the app downloads none); it must be the same game
+        and a newer build.  Then the one-click port's chain for that one
+        image (extract, transfer, stage, build), stopping after the transfer
+        is planned to say what can NOT be carried
+        (core/game_update.carry_report) before anything is built.  The new
+        extract and the build go beside the project folder.
+        *on_built(build, workspace, raw)* on the UI thread after a build.
+
+        A MULTI-BOOT card (several images) is :meth:`_start_multiboot_update`:
+        every image of that game on it, the rest left as they are;
+        *on_multi(card, replaced, plan)* on the UI thread once the card is
+        updated."""
+        from .core import game_update, mod_port
+        if not getattr(self._current_mfr.capabilities, "mod_transfer", False):
+            return False
+        if self.window._running:
+            messagebox.showinfo("Update", "Finish or cancel the current operation first.")
+            return False
+        raw = filedialog.askopenfilename(
+            title="The new card image from Stern, for this machine",
+            initialdir=os.path.dirname(card) if card else None,
+            filetypes=[("Card images", "*.raw *.img *.bin"), ("All files", "*.*")])
+        if not raw:
+            return False
+        raw = os.path.normpath(raw)
+        if card and self._card_is_multiboot(card):
+            return self._start_multiboot_update(card, raw, on_multi)
+        try:
+            old_label, new_label = game_update.check_new_card(card, raw)
+        except game_update.UpdateRefused as e:
+            messagebox.showwarning("Update", str(e))
+            return False
+        job = mod_port.plan_ports(project, [raw], os.path.dirname(os.path.abspath(project)))[0]
+        # beside the project folder, named for it: the new build's extract is
+        # the project going forward, next to the old one (never inside it,
+        # and never shared by two projects of one folder)
+        job.update(workspace=game_update.workspace_for(project, new_label), project=project)
+        if not messagebox.askyesno(
+                "Update to %s?" % new_label,
+                "This machine's project:\n    %s\n\nis carried onto %s%s:\n"
+                "    %s\n\nThe new image is extracted first%s. Before anything "
+                "is built you are told what can't be carried, and choose.\n\n"
+                "The update is built as:\n    %s\n\nStart?"
+                % (project, new_label, (" (from %s)" % old_label) if old_label else "",
+                   raw, "" if not mod_port.has_baseline(job["workspace"])
+                   else " (an earlier extract of it is reused)", job["output"])):
+            return False
+
+        def after(results):
+            built = [j for j, st, _d in results if st == "ok"]
+            if built and on_built is not None:
+                on_built(built[0]["output"], built[0]["workspace"], built[0]["raw"])
+
+        self._run_update_jobs([job], raw, new_label, after)
+        return True
+
+    @staticmethod
+    def _card_is_multiboot(card):
+        """True when the card image *card* carries more than one game image."""
+        try:
+            from .plugins.stern import multiimage
+            return len(multiimage.images_for_path(card)) > 1
+        except Exception:                               # noqa: BLE001
+            return False
+
+    def _update_gate(self, projects, raw, new_label):
+        """The question an update asks after each job's transfer is planned
+        and before anything is applied or built (see _run_port_chain's
+        *gate*): what can't be carried, the modes checked by shot name.
+        *projects* maps each job's workspace to its project."""
+        from .core import game_update, mod_port, mod_transfer
+        mfr = self._current_mfr
+
+        def gate(ws, plan):
+            from .plugins.stern.mode_project import list_modes
+            project = projects.get(ws)
+            modes_line, blocked = "", False
+            try:
+                has_modes = bool(list_modes(project)[0])
+            except Exception:                           # noqa: BLE001
+                has_modes = False
+            if has_modes and hasattr(mfr, "mode_news"):
+                modes_line = mfr.mode_news(raw, project=project,
+                                           cancel=lambda: self._cancel_requested)
+                blocked = "can't run" in modes_line or "could not be read" in modes_line
+            carry, modes_left = ([], []) if blocked else game_update.modes_check(project, ws)
+
+            def post(ws2):
+                return game_update.carry_modes(project, ws2, carry, log=lambda t, l="info":
+                                               self.msg_queue.put(LogMsg(t, l)))
+
+            report = game_update.carry_report(
+                plan, mod_transfer.plan_detail_lines(plan), modes_line, blocked, new_label,
+                modes_left=modes_left)
+            title, message = game_update.question(report)
+            if report["clean"]:
+                return post
+            if len(projects) > 1:
+                title = "%s (%s)" % (title, os.path.basename(os.path.normpath(project)))
+            if not self._ask_on_ui(title, message):
+                raise mod_port.PortSkip("stopped before building: nothing was written")
+            return post
+        return gate
+
+    def _ask_on_ui(self, title, message):
+        """messagebox.askyesno from a worker thread: asked on the UI loop,
+        the worker waits for the answer."""
+        box, done = {}, threading.Event()
+
+        def _q():
+            try:
+                box["yes"] = messagebox.askyesno(title, message)
+            finally:
+                done.set()
+        self.msg_queue.put(UiCallMsg(_q))
+        done.wait()
+        return bool(box.get("yes"))
+
+    def _run_update_jobs(self, jobs, raw, new_label, after):
+        """Start the port chain for an update's *jobs* (each naming its own
+        ``project``), the question asked per job; *after(results)* on the UI
+        thread at the end."""
+        gate = self._update_gate({j["workspace"]: j["project"] for j in jobs}, raw, new_label)
+        self._record_path_history(write_output=os.path.dirname(jobs[0]["output"]))
+        self._save_settings()
+        self._active_mode = "write"
+        self._port_active = True
+        self._port_words = ("Update", "Updated")
+        self._cancel_requested = False
+        self._chain_flash_after_build = None
+        self._staging_failures = []
+        self.window.set_running(True, mode="write")
+        self.window.reset_steps(mode="write")
+        threading.Thread(target=self._run_port_chain, args=(jobs[0]["project"], jobs),
+                         kwargs={"gate": gate, "after": after}, daemon=True).start()
+
+    def _start_multiboot_update(self, card, raw, on_done=None):
+        """PAD-1585: Update on a machine whose card is MULTI-BOOT.  The card is
+        read into the Multi-boot tab (its layout, titles, pictures and the
+        stores its settings and scores live in), and every row of the new
+        image's game is planned (core/game_update.multiboot_plan): a build of
+        a project the app still has is updated onto the new build the
+        one-game way (its own question about what can't be carried), Stern's
+        own image of that game becomes the new image as it is, and every
+        other row - another game, a random card, a build made elsewhere - is
+        left as it is.  The results go in with Replace image (each row keeps
+        its place and its settings and scores) and the card is updated IN
+        PLACE (only what changed is written; a compact card's shared files
+        once).  *on_done(card, replaced, plan)* on the UI thread after."""
+        from .core import game_update, mod_port
+        panel = getattr(self.window, "_multiboot_panel", None)
+        if panel is None or not hasattr(panel, "load_card"):
+            messagebox.showwarning("Update", "The Multi-boot tab is not available, so this multi-boot "
+                                   "card cannot be updated here.")
+            return False
+        if not panel.load_card(card):
+            return False                                # the tab said why
+        try:
+            self.window.select_tab("multiboot")
+        except Exception:                               # noqa: BLE001
+            pass
+        say = lambda t, l="info": self.msg_queue.put(LogMsg(t, l))
+
+        def ui(fn):
+            self.msg_queue.put(UiCallMsg(fn))
+
+        def work():
+            t0, norm = time.time(), os.path.normcase(os.path.normpath(card))
+            while time.time() - t0 < 1800:
+                loaded = getattr(panel, "_loaded_card", "") or ""
+                if not getattr(panel, "_busy", False) and loaded \
+                        and os.path.normcase(os.path.normpath(loaded)) == norm:
+                    break
+                time.sleep(0.5)
+            else:
+                ui(lambda: messagebox.showwarning("Update", "The Multi-boot tab did not finish reading "
+                                                  "%s, so nothing was changed." % card))
+                return
+            from .webui.multiboot_core import is_group
+            rows = [(i, r.path, is_group(r)) for i, r in enumerate(panel._rows)]
+            try:
+                new_label, plan = game_update.multiboot_plan(rows, raw)
+            except game_update.UpdateRefused as e:
+                ui(lambda: messagebox.showwarning("Update", str(e)))
+                return
+            names = {i: (panel._rows[i].title or os.path.basename(panel._rows[i].path or "")
+                         or "image %d" % (i + 1)) for i, _p, _g in rows}
+            jobs, stock = [], []
+            for i, kind, what in plan:
+                if kind == "project":
+                    job = mod_port.plan_ports(what, [raw], os.path.dirname(os.path.abspath(what)))[0]
+                    job.update(workspace=game_update.workspace_for(what, new_label), project=what, row=i)
+                    jobs.append(job)
+                elif kind == "stock":
+                    stock.append(i)
+            lines = []
+            for i, kind, what in plan:
+                lines.append("  %s: %s" % (names[i], {
+                    "project": "its project is carried onto %s (%s)" % (new_label, what),
+                    "stock": "becomes Stern's %s as it is%s" % (new_label, (
+                        " (the app has no record of its release to check it is Stern's own: if it carries "
+                        "changes of its own, they are not kept)") if what == "unchecked" else ""),
+                }.get(kind, "stays as it is: " + what)))
+            if not jobs and not stock:
+                ui(lambda: messagebox.showinfo("Update", "Nothing on this card is updated:\n\n" + "\n".join(lines)))
+                return
+            first = any(i == 0 and kind in ("project", "stock") for i, kind, _w in plan)
+            how = ("the card is then built again beside the old one: its first image becomes a new release, "
+                   "whose system an in-place update cannot carry" if first else
+                   "the card is then updated in place: only what changed is written")
+            if not self._ask_on_ui(
+                    "Update the card to %s?" % new_label,
+                    "%s is a multi-boot card. Each image of %s's game on it:\n\n%s\n\nThe images that change "
+                    "go in with Replace image, so each keeps its place in the menu, its title, its picture "
+                    "and its settings and high scores, and %s.\n\nStart?"
+                    % (os.path.basename(card), new_label, "\n".join(lines), how)):
+                return
+
+            def finish(results):                        # UI thread
+                replaced = {j["row"]: j["output"] for j, st, _d in results if st == "ok"}
+                for i in stock:
+                    replaced[i] = raw
+                failed = [names[j["row"]] for j, st, _d in results if st != "ok"]
+                for i, path in sorted(replaced.items()):
+                    panel.replace_image(path, i)
+                if failed:
+                    say("Not updated on the card (see above): %s." % ", ".join(failed), "warning")
+                if not replaced:
+                    return
+                if 0 in replaced:
+                    # THE FIRST IMAGE CHANGED RELEASE: the card's system partition (kernel and rootfs) is
+                    # the first image's, a new release brings its own, and an in-place update cannot carry
+                    # that (mkmulticard refuses it). So a fresh card, beside the old one, named for the
+                    # build; the machine's settings and scores stay on the machine (Send keeps them, a
+                    # card write keeps them with Keep the card's own settings)
+                    stem = os.path.basename(card)
+                    for ext in (".multi.raw", ".raw", ".img"):
+                        if stem.lower().endswith(ext):
+                            stem = stem[:-len(ext)]
+                            break
+                    out = os.path.join(os.path.dirname(card), "%s (%s).multi.raw" % (stem, new_label))
+                    say("Building %s: the first image is now %s, whose system partition an in-place update "
+                        "cannot carry." % (out, new_label), "info")
+                    panel._out_var.set(out)
+                    ok = panel._build_card(after=(lambda: on_done(out, replaced, plan)) if on_done else None)
+                else:
+                    say("Updating %s in place: %s." % (card, ", ".join(names[i] for i in sorted(replaced))),
+                        "info")
+                    ok = panel.update_card(after=(lambda: on_done(card, replaced, plan)) if on_done else None)
+                if not ok:
+                    # the tab refused before writing (its own words are in its status line)
+                    messagebox.showwarning(
+                        "Update", "The card was not updated: %s\n\nNothing on it was written. The updated "
+                        "images are in the Multi-boot tab's list; fix what it says there, then update the "
+                        "card from the tab." % (getattr(panel, "_msg", "") or "the Multi-boot tab refused it"))
+
+            if jobs:
+                ui(lambda: self._run_update_jobs(jobs, raw, new_label, finish))
+            else:
+                ui(lambda: finish([]))
+
+        threading.Thread(target=work, daemon=True).start()
+        return True
+
     def _port_targets(self):
         """``(raws, out_dir)`` for the one-click port and What's new (PAD-1388):
         the Mod Pack form's "New card image(s)" and "Build into" fields, and
@@ -4859,6 +5127,56 @@ class App:
                          args=(os.path.normpath(project), jobs),
                          daemon=True).start()
 
+    def _record_extract_facts(self, in_path, out_path, mfr, say):
+        """What a finished extract records about its card beside the project
+        (worker thread: the probes open the multi-GB image): the card's own
+        version in the sidecar (read from its update index, so version chips
+        built on this extract are fact, not filename guesses), whether it is
+        the card Stern released (PAD-426) and the project's revision history
+        from its fingerprint (PAD-427).  PAD-1585: the one-click port's and
+        an update's extracts record the same, so the new project knows its
+        card (its modes are checked and carried against it)."""
+        try:
+            ver, exact = mfr.card_version(in_path)
+            if ver and exact:
+                from .core.extract_source import (
+                    amend_extract_source)
+                amend_extract_source(out_path, card_version=ver)
+        except Exception:
+            pass
+        # Was this the card Stern released?  The project keeps
+        # the answer, so its baseline is known to be stock or
+        # known to be someone's build (PAD-426).  Every file's
+        # bytes are hashed: a card built elsewhere can keep
+        # Stern's records for files it replaced.
+        try:
+            check = getattr(mfr, "stock_check", None)
+            stock = check(in_path, deep=True) if check else None
+            if stock and stock["status"] in ("official",
+                                             "modified"):
+                from .core.extract_source import (
+                    amend_extract_source)
+                amend_extract_source(out_path, stock={
+                    k: stock[k] for k in ("status", "label",
+                                          "sidx", "text")})
+                say(
+                    "Source card: " + stock["text"],
+                    "success" if stock["status"] == "official"
+                    else "warning")
+        except Exception:
+            stock = None
+        # The project's revision history starts (or carries on)
+        # from this card's fingerprint (PAD-427).
+        try:
+            from .core import lineage
+            info = lineage.card_print(in_path, measure=True)
+            if info:
+                lineage.note_extract(
+                    out_path, os.path.basename(in_path), info,
+                    (stock or {}).get("status") or "")
+        except Exception:
+            pass
+
     def _port_sub_runner(self):
         """``(log_cb, progress_cb, extract, run_sub)`` for a port worker:
         *extract(raw, ws)* runs the plugin's full extract as ``self.pipeline``
@@ -4887,6 +5205,9 @@ class App:
             if hasattr(p, "set_log_line_cb"):
                 p.set_log_line_cb(self._post_log_line)
             run_sub(p)
+            # PAD-1585: the new extract knows its card, as an Extract does
+            write_extract_source(ws, raw)
+            self._record_extract_facts(raw, ws, self._current_mfr, log_cb)
 
         run_sub.step_done = step_done
         return log_cb, progress_cb, extract, run_sub
@@ -4978,12 +5299,19 @@ class App:
             "couldn't" in h for h in heads)
         self.msg_queue.put(DoneMsg(ok, "\n".join(heads) or "Canceled"))
 
-    def _run_port_chain(self, project, jobs):
+    def _run_port_chain(self, project, jobs, gate=None, after=None):
         """Worker-thread body of the one-click port: bind the app's extract /
         transfer / stage / write services and hand the sequencing to
         :func:`core.mod_port.run_ports`.  Every sub-pipeline is installed as
         ``self.pipeline`` while it runs, so the ordinary Stop button cancels
-        the live step and the chain stops at the next boundary."""
+        the live step and the chain stops at the next boundary.
+
+        PAD-1585: *gate(ws, plan)* runs after the transfer is planned and
+        before anything is applied or built (an update's "what can't be
+        carried" question; it raises PortSkip to stop) and may return
+        *post(ws)*, run after the transfer is applied (the update's modes)
+        and returning words for the summary; *after(results)* runs on the UI
+        thread once the chain is done."""
         from .core import mod_port, mod_transfer
 
         log_cb, progress_cb, extract, run_sub = self._port_sub_runner()
@@ -4993,12 +5321,16 @@ class App:
 
         def transfer(ws):
             # What the new version adds, before the mods go onto it (PAD-1388)
+            # PAD-1585: an update's jobs each name their own project (every
+            # image of a multi-boot card's game)
+            src = (by_ws.get(ws) or {}).get("project") or project
             if ws in by_ws:
-                self._report_news(project, by_ws[ws], log_cb, progress_cb)
-            plan = mod_transfer.plan_transfer(project, ws, log_cb=log_cb)
+                self._report_news(src, by_ws[ws], log_cb, progress_cb)
+            plan = mod_transfer.plan_transfer(src, ws, log_cb=log_cb)
             for level, line in mod_transfer.plan_detail_lines(plan):
                 log_cb(line, level)
             totals = plan["totals"]
+            post = gate(ws, plan) if gate is not None else None
             if totals["transfer"] == 0:
                 raise mod_port.PortSkip(
                     "none of the project's mods have a matching slot or "
@@ -5008,9 +5340,10 @@ class App:
                        "sound were skipped (the safe default; assign those "
                        "by hand on the Replace tab if you want them)."
                        % totals["flagged"], "warning")
-            res = mod_transfer.apply_transfer(project, ws, plan,
+            res = mod_transfer.apply_transfer(src, ws, plan,
                                               include_flagged=False)
-            return ("%d audio, %d video, %d image, %d text transferred%s%s"
+            more = post(ws) if callable(post) else ""
+            return ("%d audio, %d video, %d image, %d text transferred%s%s%s"
                     % (res["audio"], res["video"], res["image"],
                        res["text"],
                        ("; %d slot(s) with random clips"
@@ -5018,7 +5351,8 @@ class App:
                        if res.get("video_variants") else "",
                        ("; %d sound(s) with music mode files"
                         % res["sound_modes"])
-                       if res.get("sound_modes") else ""))
+                       if res.get("sound_modes") else "",
+                       ("; " + more) if more else ""))
 
         def stage(ws):
             pend_a = self._stage_pending_audio(ws)
@@ -5071,6 +5405,8 @@ class App:
             self._apply_card_size_env(self._card_size_setting())
         ok = bool(results) and all(s == "ok" for _j, s, _d in results)
         self.msg_queue.put(DoneMsg(ok, mod_port.summarize(results)))
+        if after is not None:
+            self.msg_queue.put(UiCallMsg(lambda: after(results)))
 
     def _run_pipeline_with_audio(self, assets_dir, original=None):
         """Worker-thread entry for a Write run: apply any Replace-Audio,
@@ -6066,54 +6402,15 @@ class App:
         if is_extract and success and self._last_extract_io:
             in_path, out_path = self._last_extract_io
             write_extract_source(out_path, in_path)
-            # Stamp the card's OWN version into the sidecar (read from its
-            # update index — survives renamed files), so version chips built
-            # on this extract are fact, not filename guesses.  Off-thread:
-            # the probe opens the multi-GB image, and this is the UI thread.
             mfr = self._current_mfr
-            if hasattr(mfr, "card_version") and os.path.isfile(in_path):
-                def _stamp(in_path=in_path, out_path=out_path, mfr=mfr):
-                    try:
-                        ver, exact = mfr.card_version(in_path)
-                        if ver and exact:
-                            from .core.extract_source import (
-                                amend_extract_source)
-                            amend_extract_source(out_path, card_version=ver)
-                    except Exception:
-                        pass
-                    # Was this the card Stern released?  The project keeps
-                    # the answer, so its baseline is known to be stock or
-                    # known to be someone's build (PAD-426).  Every file's
-                    # bytes are hashed: a card built elsewhere can keep
-                    # Stern's records for files it replaced.
-                    try:
-                        check = getattr(mfr, "stock_check", None)
-                        stock = check(in_path, deep=True) if check else None
-                        if stock and stock["status"] in ("official",
-                                                         "modified"):
-                            from .core.extract_source import (
-                                amend_extract_source)
-                            amend_extract_source(out_path, stock={
-                                k: stock[k] for k in ("status", "label",
-                                                      "sidx", "text")})
-                            self.window.append_log(
-                                "Source card: " + stock["text"],
-                                "success" if stock["status"] == "official"
-                                else "warning")
-                    except Exception:
-                        stock = None
-                    # The project's revision history starts (or carries on)
-                    # from this card's fingerprint (PAD-427).
-                    try:
-                        from .core import lineage
-                        info = lineage.card_print(in_path, measure=True)
-                        if info:
-                            lineage.note_extract(
-                                out_path, os.path.basename(in_path), info,
-                                (stock or {}).get("status") or "")
-                    except Exception:
-                        pass
-                threading.Thread(target=_stamp, daemon=True).start()
+            if os.path.isfile(in_path):
+                # Off-thread: the probes open the multi-GB image, and this
+                # is the UI thread.
+                threading.Thread(
+                    target=self._record_extract_facts,
+                    args=(in_path, out_path, mfr,
+                          lambda t, l: self.window.append_log(t, l)),
+                    daemon=True).start()
             # The assets folder was pointed at this output dir at extract START
             # (before it held any files), so any Replace-tab scan triggered in
             # the meantime stamped a stale/empty cache for this exact path.

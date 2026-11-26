@@ -394,6 +394,7 @@ function TopBar({ shell }) {
   const sx = useNs("shellx");
   const working = shell.view === "mfr";
   const gsOpen = !!(sx.getting_started && sx.getting_started.open);
+  const machOpen = !!(sx.machines && sx.machines.open);
   const dots = shell.gear_dots || {};
   const connectedNow = useConnected();
   const [connected, setShown] = useState(true);
@@ -431,6 +432,10 @@ function TopBar({ shell }) {
         onClick=${() => call(gsOpen ? "shellx.getting_started_close" : "shellx.getting_started_open")}
         ...${tip("Short videos and steps for the common jobs: extract a card, swap a song, build and flash, multi-boot.")} aria-label="Getting started">
         <${Icon} name="play" /><span class="hide-narrow">Getting started</span></button>
+    <button type="button" class=${cx("btn sm sx-mach-open", machOpen && "on")}
+        onClick=${() => call(machOpen ? "shellx.machines_close" : "shellx.machines_open")}
+        ...${tip(MACH.header(sx.machines || {}))} aria-label="My machines">
+        <${Icon} name="sd" /><span class="hide-narrow">My machines</span>${(sx.machines || {}).newer_count ? html`<span class="sx-mach-badge">${sx.machines.newer_count}</span>` : null}</button>
     <button type="button" class="btn sm sx-discord-btn" onClick=${() => call("shellx.open_discord")}
         ...${tip("Join the PAD Discord server: ask questions, share what you made and hear about new releases.")} aria-label="Join our Discord">
         <${Icon} name="discord" /><span class="hide-narrow">Discord</span></button>
@@ -924,10 +929,27 @@ const MACH = {
   add: "Pick the file a machine runs: the .raw or .img of a Stern SD card, a Jersey Jack full-install .iso or a Barrels of Fun .fun update. PAD reads which game and build it is; nothing in the file changes.",
   watch: { head: "Check for new game code", lines: ["Off until you tick it. Ticked, PAD reads the makers' public game-code pages once a day (Stern's, and the pages of your Jersey Jack and Barrels of Fun titles) and shows here when a machine's game has a newer build, with a link to that page.", "Nothing is ever downloaded: you click through to the maker yourself.", "Only the makers you have a machine of here."] },
   newer: (r) => ({ head: r.maker + " has " + r.title + " " + r.build_next + " out", lines: ["This machine's " + r.noun + " is " + r.build + ". Click to open " + r.page_words.replace(/pages$/, "page") + "; nothing is downloaded.",
-    r.transfer ? "Once you have the new card image: Transfer Mods carries this project's changes onto it." : "Once you have the new " + r.noun + ": export this project's Mod Pack, extract the new one and import the pack into it."] }),
+    r.transfer ? "Once you have the new card image: Update to " + r.build_next + " carries this project's changes onto it and builds the update." : "Once you have the new " + r.noun + ": export this project's Mod Pack, extract the new one and import the pack into it."] }),
+  update: (r) => ({ head: "Update to " + r.newer, lines: [r.multi ? "A multi-boot card: every image of this game on it is updated onto " + r.maker + "'s " + r.newer + " card image (each image's own project carried; Stern's own image replaced by the new one), the other games left as they are, and the card updated in place. Pick the new image (download it from " + r.maker + " first; nothing is downloaded here)." : "Carries this machine's project onto " + r.maker + "'s " + r.newer + " card image and builds the update: pick the new image (download it from " + r.maker + " first; nothing is downloaded here).", "Before anything is built it says what can't be carried, and you choose.", "Then Send to machine or Build / flash SD card puts it on the machine, keeping its settings, audits and high scores."] }),
   transfer: { head: "Transfer Mods", lines: ["Opens this machine's project and the Mod Pack tab's transfer, with this project as the one whose mods move.", "Pick the new code's card image there."] },
   modpack: { head: "Mod Pack", lines: ["Opens this machine's project on the Mod Pack tab: export its changes as a pack, to import into a project of newer code."] },
   noProject: (r) => "No project of this " + r.noun + " yet. Extract opens the Extract tab with it picked; the project you make from it joins this row.",
+  lede: "The pinball machines you own, each by the file it runs. PAD shows the build and project of each, tells you when the maker has newer code, and updates your work onto it.",
+  emptyHead: "Add the machines you own",
+  emptyText: "One row per machine: the card image or install file it runs. Any machine can be added, with or without remote access.",
+  wayCard: "From its card image",
+  wayCardText: "The .raw or .img of a Stern SD card (Save card as image on Select card reads one), a Jersey Jack install ISO or a Barrels of Fun .fun.",
+  wayNet: "Found on your network",
+  wayNetText: "A Stern machine with remote access (Network tab) shows up here once Find my machine finds it. Add it with the card image it runs, and Update's Send to machine goes straight to it.",
+  wayNetNone: "None found yet: set up remote access on the Network tab, then Find my machine.",
+  netHead: "Found on your network",
+  netText: "Remote access found these machines. Add one with the card image it runs to update it from here.",
+  netAdd: (n) => ({ head: "Add " + (n.title || "this machine"), lines: ["Pick the card image the machine at " + n.address + " runs: My machines knows a machine by its card.", "It stays linked to " + n.address + ", so Update's Send to machine goes to it."] }),
+  address: (r, on) => ({ head: on === true ? "Online" : on === false ? "Not answering" : "On your network", lines: [
+    on === true ? r.name + " answers at " + r.address + " right now (remote access)." : on === false ? "Nothing answers at " + r.address + " right now: the machine is off, or on another network." : r.name + " is reached at " + r.address + " (remote access, Network tab); checking whether it is on…",
+    "Update sends to this machine. The light is checked every 30 seconds while this page is open."] }),
+  online: (n, on) => on === true ? n.address + " answers right now: the machine is on." : on === false ? "Nothing answers at " + n.address + " right now." : "Checking " + n.address + "…",
+  header: (m) => ({ head: "My machines", lines: [(m.rows || []).length ? (m.rows.length + " machine" + (m.rows.length === 1 ? "" : "s")) + (m.newer_count ? ": newer game code is out for " + m.newer_count + "." : ".") : "The pinball machines you own: add one to see its build, hear about new code and update your work onto it."] }),
   // PAD-1588: settings and score backups by themselves
   backup: { head: "Back up settings and scores by itself", lines: ["For each machine here that this computer reaches over remote access: once a day, while it is on, PAD copies its adjustments, audits and high scores to this computer when they changed. It only reads them: the game goes on.", "Also before a Send to the machine, and before a whole card for its game is written.", "A card written whole loses them; Restore (the row's More menu) puts a kept backup back."] },
   keep: "How many backups each machine keeps; older ones are deleted.",
@@ -936,7 +958,13 @@ const MACH = {
   none: { head: "No settings backup yet", lines: ["PAD takes one by itself the next time it finds the machine on your network, unless the switch above is off. More > Back up settings now takes one at once."] },
 };
 
-function MachineRow({ r }) {
+// PAD-1585 (David: "if the game was detected online we'd show a green light next to it"): green when the
+// machine's remote access answers right now, grey when nothing does, none while it is being checked.
+function Light({ on }) {
+  return html`<span class=${cx("mach-dot", on === true && "on", on === false && "off")} aria-hidden="true"></span>`;
+}
+
+function MachineRow({ r, on }) {
   const more = (e) => openShellMenu(e.currentTarget, [
     { label: "Show the " + r.noun, icon: "folder", disabled: r.card_missing, onClick: () => call("shellx.machines_show_card", r.id) },
     { label: r.noun === "card image" ? "Change card…" : "Change " + r.noun + "…", icon: "sd", onClick: () => call("shellx.machines_rebind", r.id) },
@@ -958,6 +986,7 @@ function MachineRow({ r }) {
         <span class="notr">${r.title}${r.edition ? html` <span class="muted">${r.edition}</span>` : null}</span>
         ${r.build ? html`<${Chip} kind="info" sm>${r.build}<//>` : null}
         <${Chip} sm kind=${r.lineage === "Stock" ? "" : "warn"}>${r.lineage}<//>
+        ${r.address ? html`<${Chip} sm kind=${on === true ? "ok" : ""} title=${MACH.address(r, on)}><${Light} on=${on} />${r.address}<//>` : null}
         ${r.newer ? html`<button type="button" class="mach-newer" onClick=${() => call("shellx.machines_open_page", r.id)}
             ...${tip(MACH.newer({ ...r, build_next: r.newer }))}><${Icon} name="star" />${r.newer} is out<${Icon} name="external" /></button>` : null}
       </div>
@@ -973,21 +1002,37 @@ function MachineRow({ r }) {
     <div class="row mach-acts">
       ${proj ? html`<${Button} size="sm" icon="folder" onClick=${() => call("shellx.machines_open_project", r.id)}>Open project<//>`
         : html`<${Button} size="sm" icon="extract" disabled=${r.card_missing} title=${MACH.noProject(r)} onClick=${() => call("shellx.machines_extract", r.id)}>Extract<//>`}
-      <${Button} size="sm" kind=${r.newer && proj ? "primary" : ""} icon="modpack" disabled=${!proj} title=${r.transfer ? MACH.transfer : MACH.modpack} onClick=${() => call("shellx.machines_transfer", r.id)}>${r.transfer ? "Transfer Mods" : "Mod Pack"}<//>
+      ${r.newer && (proj || r.multi) && r.transfer ? html`<${Button} size="sm" kind="primary" icon="star" disabled=${r.card_missing} title=${MACH.update(r)} onClick=${() => call("shellx.machines_update", r.id)}>Update to ${r.newer}<//>` : null}
+      <${Button} size="sm" kind=${r.newer && proj && !r.transfer ? "primary" : ""} icon="modpack" disabled=${!proj} title=${r.transfer ? MACH.transfer : MACH.modpack} onClick=${() => call("shellx.machines_transfer", r.id)}>${r.transfer ? "Transfer Mods" : "Mod Pack"}<//>
       <${Button} size="sm" icon="write" disabled=${!proj} onClick=${() => call("shellx.machines_write", r.id)}>Write<//>
       <${Button} size="sm" kind="ghost" icon="more" title="More" onClick=${more} />
     </div>
   </div>`;
 }
 
-function MyMachines({ running }) {
+// PAD-1585: My machines is a page of its own, opened from the top bar (David: "it's out of place on the
+// manufacturer page"), as Getting started is.
+function MyMachines({ shell }) {
   const sx = useNs("shellx");
   const m = sx.machines || { rows: [] };
+  const running = shell.running;
   useEffect(() => { call("shellx.machines_refresh"); }, []);
   const rows = m.rows || [];
-  return html`<section class="mach">
-    <div class="row wrap" style="align-items:center;gap:8px 16px">
-      <h2 class="h1 grow" style="margin:0;font-size:24px">My machines</h2>
+  const net = m.network || [];
+  const online = m.online || {};
+  const working = shell.view === "mfr";
+  const found = net.map((n) => html`<div class="mach-row mach-net" key=${n.address}>
+    <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="globe" /></span>
+    <div class="stack grow" style="gap:2px"><span class="t">${n.title || "A Stern machine"}</span>
+      <span class="muted small mono" ...${tip(MACH.online(n, online[n.address]))}><${Light} on=${online[n.address]} />${n.address}${online[n.address] === true ? " · online" : ""}</span></div>
+    <${Button} size="sm" icon="plus" disabled=${running} title=${MACH.netAdd(n)} onClick=${() => call("shellx.machines_add_network", n.address)}>Add with its card image…<//>
+  </div>`);
+  const add = html`<${Button} drop icon="plus" kind=${rows.length ? "" : "primary"} disabled=${running} title=${MACH.add}
+      onClick=${() => call("shellx.machines_add")}>${rows.length ? "Add machine…" : "Add a card image…"}<//>`;
+  return html`<div class="picker sx-mach-page"><div class="inner">
+    <div class="row wrap" style="align-items:flex-end;gap:12px 24px">
+      <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">My machines</h1>
+        <p class="dim" style="margin:6px 0 0">${MACH.lede}</p></div>
       ${rows.length ? html`<${Check} checked=${m.watch === true} title=${MACH.watch} label="Check for new game code once a day"
         onChange=${(v) => call("shellx.machines_set_watch", v)} />` : null}
       ${rows.length ? html`<div class="row" style="gap:6px;align-items:center">
@@ -997,12 +1042,28 @@ function MyMachines({ running }) {
           options=${[1, 3, 5, 10, 20, 50].map((n) => ({ value: String(n), label: "keep " + n }))}
           onChange=${(v) => call("shellx.machines_set_backup", null, parseInt(v, 10))} />
       </div>` : null}
-      <${Button} drop icon="plus" disabled=${running} title=${MACH.add} onClick=${() => call("shellx.machines_add")}>Add machine…<//>
+      ${rows.length ? add : null}
+      <${Button} cls="sx-mach-close" onClick=${() => call("shellx.machines_close")}>${working && shell.mfr ? "Back to " + shell.mfr.display : "Choose a manufacturer"}<//>
     </div>
-    ${rows.length ? html`<div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} />`)}</div>
-      ${m.watch_text ? html`<div class="muted small">${m.watch_text}</div>` : null}`
-      : html`<p class="dim" style="margin:0">${MACH.intro}</p>`}
-  </section>`;
+    ${rows.length ? html`<section class="mach"><div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} on=${online[r.address]} />`)}</div>
+      ${m.watch_text ? html`<div class="muted small">${m.watch_text}</div>` : null}</section>`
+      : html`<section class="mach-empty">
+        <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="sd" /></span>
+        <div class="stack grow" style="gap:12px">
+          <div><h2 class="h2" style="margin:0">${MACH.emptyHead}</h2><p class="dim" style="margin:4px 0 0">${MACH.emptyText}</p></div>
+          <ol class="mach-ways">
+            <li><div class="grow"><b>${MACH.wayCard}</b><div class="dim small">${MACH.wayCardText}</div></div>${add}</li>
+            <li class=${cx(net.length && "has-list")}><div class="row" style="align-items:center;gap:16px">
+                <div class="grow"><b>${MACH.wayNet}</b><div class="dim small">${net.length ? MACH.wayNetText : MACH.wayNetNone}</div></div>
+                ${net.length ? null : html`<${Button} icon="globe" onClick=${() => call("shellx.machines_go_network")}>Network tab<//>`}</div>
+              ${net.length ? html`<div class="mach-list">${found}</div>` : null}</li>
+          </ol>
+        </div>
+      </section>`}
+    ${rows.length && net.length ? html`<section class="mach">
+      <div><h2 class="h2" style="margin:0">${MACH.netHead}</h2><p class="dim small" style="margin:2px 0 0">${MACH.netText}</p></div>
+      <div class="mach-list">${found}</div></section>` : null}
+  </div></div>`;
 }
 
 // --------------------------------------------------------------- picker
@@ -1014,7 +1075,6 @@ function Picker({ shell }) {
   const sx = useNs("shellx");
   const cards = sx.picker && sx.picker.length ? sx.picker : (shell.mfrs || []).map((m) => ({ ...m, stats: "", letter: "", peek: "" }));
   return html`<div class="picker"><div class="inner">
-    <${MyMachines} running=${shell.running} />
     <div class="row" style="align-items:flex-end;gap:16px">
       <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">Choose a manufacturer</h1>
         <p class="dim" style="margin:6px 0 0">Pick the maker of the game you are working on. You can switch at any time from the manufacturer menu in the top bar.</p>
@@ -1136,6 +1196,7 @@ export function Shell() {
   const shell = useNs("shell");
   const sx = useNs("shellx");
   const gsOpen = !!(sx.getting_started && sx.getting_started.open);
+  const machOpen = !!(sx.machines && sx.machines.open);
   const [logOpen, setLogOpen] = useState(() => { try { return localStorage.getItem("pad.log.open") !== "0"; } catch (e) { return true; } });
   const [logH, setLogH] = useState(() => { try { return Number(localStorage.getItem("pad.log.h")) || 150; } catch (e) { return 150; } });
   useEffect(() => { try { localStorage.setItem("pad.log.open", logOpen ? "1" : "0"); localStorage.setItem("pad.log.h", String(Math.round(logH))); } catch (e) {} }, [logOpen, logH]);
@@ -1188,7 +1249,7 @@ export function Shell() {
   return html`<div class="app">
     <${TopBar} shell=${shell} />
     <${Banners} shell=${shell} />
-    ${gsOpen ? html`<${GettingStarted} shell=${shell} />` : shell.view === "picker" ? html`<${Picker} shell=${shell} />` : html`
+    ${gsOpen ? html`<${GettingStarted} shell=${shell} />` : machOpen ? html`<${MyMachines} shell=${shell} />` : shell.view === "picker" ? html`<${Picker} shell=${shell} />` : html`
       <${Prereqs} shell=${shell} />
       <div class="body">
         <${Rail} shell=${shell} />

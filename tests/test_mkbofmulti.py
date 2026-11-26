@@ -115,6 +115,60 @@ def test_update_sh_runs_the_install_step_first():
         mb.patch_update_sh(mb.patch_update_sh(UPDATE_SH))
 
 
+#: the shape of Labyrinth's updater (PAD-1585): it empties extracted/ before anything else
+UPDATECODE_SH = "#!/bin/bash\n\nrm -rf /home/pinball/extracted/*\nmkdir /home/pinball/extracted/decrypt\nsync\n"
+
+
+def test_updatecode_carries_the_update_guard_before_it_empties_extracted():
+    """PAD-1585: a normal update over a PAD multi-boot install would empty extracted/ (the menu and every build);
+    the guard goes in before that line."""
+    out = mb.patch_updatecode(UPDATECODE_SH).splitlines()
+    assert out[0] == "#!/bin/bash"
+    assert out.index(mb.GUARD_BEGIN) < next(i for i, ln in enumerate(out) if ln.startswith("rm -rf /home/pinball"))
+    body = "\n".join(out)
+    assert mb.PADSELECT_DIR in body and "'^%s'" % mb.GUARD_PASS in body and "'^%s/'" % mb.PADSELECT in body
+    assert "exit 0" in body and mb.GUARD_NOTE in body
+    crlf = mb.patch_updatecode(UPDATECODE_SH.replace("\n", "\r\n"))
+    assert "\r\n" in crlf and mb.GUARD_BEGIN in crlf
+    with pytest.raises(Refused, match="has not been read"):
+        mb.patch_updatecode("#!/bin/bash\nsync\n")
+    with pytest.raises(Refused, match="already carries"):
+        mb.patch_updatecode(mb.patch_updatecode(UPDATECODE_SH))
+
+
+@pytest.mark.skipif(sys.platform == "win32" or not shutil.which("bash"), reason="runs the guard under bash")
+def test_the_guard_refuses_a_normal_update_and_lets_a_pad_one_or_the_pass_file_in(tmp_path):
+    """The guard block run for real; a stand-in gpg hands tar a tarball of the names given."""
+    home, stick, bin_ = tmp_path / "home", tmp_path / "stick", tmp_path / "bin"
+    pad = home / "extracted" / "decrypt" / "padselect"
+    pad.mkdir(parents=True)
+    stick.mkdir()
+    bin_.mkdir()
+    (stick / "lab.fun").write_text("x")
+    script = mb.patch_updatecode(UPDATECODE_SH).replace("/home/pinball", str(home))
+    (tmp_path / "updatecode.sh").write_text(script)
+    listing = tmp_path / "listing.tgz"
+    gpg = bin_ / "gpg"
+    gpg.write_text("#!/bin/bash\ncat %s\n" % listing)
+    gpg.chmod(0o755)
+
+    def run(names):
+        with tarfile.open(listing, "w:gz") as t:
+            for n in names:
+                t.addfile(tarfile.TarInfo(n), io.BytesIO())
+        env = dict(os.environ, PATH="%s:%s" % (bin_, os.environ["PATH"]))
+        subprocess.run(["bash", str(tmp_path / "updatecode.sh"), str(stick)], env=env, check=False)
+        return pad.exists()
+    assert run(["GDCraze.x86_64", "update/update.sh"]) is True            # refused: the menu stays
+    assert "was not installed" in (stick / mb.GUARD_NOTE).read_text()
+    (stick / mb.GUARD_NOTE).unlink()
+    assert run(["padselect/images.conf", "GDCraze.x86_64"]) is False      # PAD's own: it goes through
+    pad.mkdir(parents=True)
+    (stick / "BOF-UPDATE-OK.txt").write_text("")
+    assert run(["GDCraze.x86_64"]) is False                               # the pass file: it goes through
+    assert not (stick / mb.GUARD_NOTE).exists()
+
+
 # ---------------------------------------------------------------------------- the conf
 def test_conf_names_the_programs_and_the_switches():
     sw = mb.TITLES["labyrinth"]["switches"]
@@ -361,7 +415,7 @@ def _fun(path, program, data, profile=PROFILE, update=UPDATE_SH):
     buf = io.BytesIO()
     with tarfile.open(fileobj=buf, mode="w:gz") as tf:
         for name, body, mode in (("update/.bash_profile", profile, 0o644), ("update/update.sh", update, 0o755),
-                                 ("update/updatecode.sh", "#!/bin/bash\n", 0o755), (program, data, 0o755)):
+                                 ("update/updatecode.sh", UPDATECODE_SH, 0o755), (program, data, 0o755)):
             body = body.encode() if isinstance(body, str) else body
             ti = tarfile.TarInfo(name)
             ti.size, ti.mode = len(body), mode

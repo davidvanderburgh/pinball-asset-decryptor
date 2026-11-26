@@ -11,7 +11,9 @@ the row links to the page.
 
 ``shellx.machines``::
 
-    {"rows": [...], "watch": bool, "watch_text": str, "checking": bool}
+    {"rows": [...], "watch": bool, "watch_text": str, "checking": bool,
+     "open": bool (PAD-1585: its own page, from the top bar), "network": [...] (machines remote access found
+     that no row runs), "newer_count": int}
 """
 
 import datetime
@@ -65,8 +67,13 @@ class MachinesMixin:
     def _machines_init(self):
         self._mach_token = 0
         self._mach_checking = False
+        self._mach_open = False
+        self._mach_last = ([], False, [])
+        self._mach_online = {}          # PAD-1585: address -> True (answers now) / False; absent = not checked yet
+        self._mach_probing = False
         self.set(machines={"rows": [], "watch": False, "watch_text": "",
-                           "checking": False})
+                           "checking": False, "open": False, "network": [], "newer_count": 0,
+                           "online": {}})
         self.ctx.loop.after(0, self._machines_refresh)
         self.ctx.loop.after(WATCH_FIRST_MS, self._machines_tick)
         self._backing_up = False
@@ -101,25 +108,135 @@ class MachinesMixin:
             except Exception:                           # noqa: BLE001
                 log.exception("My machines rows")
                 built = []
-            self.ctx.loop.post(self._machines_publish, token, built, on)
+            network = _network_machines()
+            self.ctx.loop.post(self._machines_publish, token, built, on, network)
 
         threading.Thread(target=work, name="pad-machines", daemon=True).start()
 
-    def _machines_publish(self, token, rows, on):
-        from ..core import machine_backups
+    def _machines_publish(self, token, rows, on, network=()):
         if token != self._mach_token:
             return
         if on:
             self._tell_newer(rows)
+        rows, unlinked = link_network(rows, network)
+        self._mach_last = (rows, on, unlinked)
+        self._machines_set()
+        if self._mach_open:
+            self._machines_probe()
+
+    def _machines_set(self):
+        from ..core import machine_backups
+        rows, on, unlinked = self._mach_last
         settings = self._mach_settings() or {}
         self.set(machines={"rows": rows, "watch": on,
                            "watch_text": self._watch_text(rows, on),
                            "checking": self._mach_checking,
+                           "open": bool(self._mach_open), "network": unlinked,
+                           "newer_count": sum(1 for r in rows if r.get("newer")),
+                           "online": dict(self._mach_online),
                            # PAD-1588: settings and score backups by themselves
                            "backup": {"auto": machine_backups.auto_on(settings),
                                       "keep": machine_backups.keep_of(settings),
                                       "busy": bool(getattr(self, "_backing_up", False)),
                                       "any": any(r.get("backup_machines") for r in rows)}})
+
+    # -- the green light (PAD-1585): which machines answer on the network right now ------------------------
+    def _mach_addresses(self):
+        rows, _on, unlinked = self._mach_last
+        return sorted({r["address"] for r in rows if r.get("address")} | {n["address"] for n in unlinked})
+
+    def _machines_probe(self):
+        """Ask every address the page shows whether its SSH server answers (the banner only, all at once, off
+        the loop); the page shows a green light for those that do."""
+        addresses = self._mach_addresses()
+        if not addresses or self._mach_probing:
+            return
+        self._mach_probing = True
+
+        def work():
+            from ..core import machine_scan
+            got = {}
+            # a screen capture (PAD_UI_CAPTURE) names its "online" machines: it has no machine to ask
+            shot = (os.environ.get("PAD_SHOT_ONLINE") or "").split(",") \
+                if os.environ.get("PAD_UI_CAPTURE") else None
+
+            def one(a):
+                if shot is not None:
+                    got[a] = a in shot
+                    return
+                try:
+                    got[a] = bool(machine_scan.online(a))
+                except Exception:                       # noqa: BLE001
+                    got[a] = False
+            threads = [threading.Thread(target=one, args=(a,), daemon=True) for a in addresses]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join(5)
+            self.ctx.loop.post(self._machines_probed, got)
+
+        threading.Thread(target=work, name="pad-machines-online", daemon=True).start()
+
+    def _machines_probed(self, got):
+        self._mach_probing = False
+        self._mach_online = got
+        self._machines_set()
+
+    def _machines_online_tick(self):
+        """While the page is open, the lights are checked again every :data:`ONLINE_EVERY_MS`."""
+        if not self._mach_open:
+            self._mach_online_ticking = False
+            return
+        self._machines_probe()
+        self.ctx.loop.after(ONLINE_EVERY_MS, self._machines_online_tick)
+
+    # -- the page (PAD-1585: its own place, from the top bar) ----------------------
+    @rpc
+    def machines_open(self):
+        """My machines' own page; Getting started closes (one page over the app at a time)."""
+        self._mach_open = True
+        if getattr(self, "_gs_open", False):
+            self.getting_started_close()
+        self._machines_set()
+        self._machines_refresh()
+        if not getattr(self, "_mach_online_ticking", False):
+            self._mach_online_ticking = True
+            self.ctx.loop.after(ONLINE_EVERY_MS, self._machines_online_tick)
+        return True
+
+    @rpc
+    def machines_close(self):
+        self._mach_open = False
+        self._machines_set()
+        return True
+
+    @rpc
+    def machines_go_network(self):
+        """The empty page's way to remote access: Stern's Network tab (Find my machine)."""
+        if not self._enter("stern"):
+            return False
+        try:
+            self.window.select_tab("network")
+        except Exception:                               # noqa: BLE001
+            return False
+        return True
+
+    @rpc
+    def machines_add_network(self, address):
+        """A machine remote access found: the card image it runs is picked (My machines knows a machine by its
+        card), and the machine is linked to *address*, so Update's Send to machine goes to it."""
+        from ..core import machines
+        found = next((n for n in _network_machines() if n["address"] == address), None)
+        what = found["title"] if found and found.get("title") else "the machine"
+        path = self._pick_card("Pick the card image %s at %s runs" % (what, address))
+        if not path:
+            return None
+        mid = self.machines_add(path, name=None)
+        if mid:
+            machines.set_address(self.app._settings, mid, address)
+            self._mach_save()
+            self._machines_refresh()
+        return mid
 
     def _tell_newer(self, rows):
         """Newer code for a machine is said once, wherever the owner is (the
@@ -135,8 +252,8 @@ class MachinesMixin:
         if not fresh:
             return
         for r in fresh:
-            text = ("%s has %s %s out; %s runs %s. My machines (manufacturer "
-                    "menu) links to %s."
+            text = ("%s has %s %s out; %s runs %s. My machines (top bar) "
+                    "updates it, and links to %s."
                     % (r["maker"], r["title"], r["newer"], r["name"],
                        r["build"], r["page_words"]))
             self.window.append_log(text, "info")
@@ -168,7 +285,11 @@ class MachinesMixin:
                "project_name": os.path.basename(found[0][0]) if found else "",
                "project_missing": bool(found) and not os.path.isdir(found[0][0]),
                "more_projects": [f for f, _w, _l in found[1:]],
-               "newer": "", "newer_url": ""}
+               "newer": "", "newer_url": "",
+               # PAD-1585: the game it runs (to find it on the network) and the address remote access reaches it at
+               "game": (info or {}).get("key") or "", "address": m.get("address") or "",
+               # PAD-1585: Update on a multi-boot card updates every image of the game on it
+               "multi": mfr == "stern" and os.path.isfile(card) and _multi(card)}
         row.update(self._backup_fields(m))
         if info and code_watch.has_source(mfr):
             newest = code_watch.newest(mfr, info["key"])
@@ -609,6 +730,9 @@ class MachinesMixin:
     def _enter(self, mfr_key):
         """Switch to the machine's manufacturer (Spike 2 era) as a click on
         its picker card does.  False when it is not loaded or a run is on."""
+        if getattr(self, "_mach_open", False):          # PAD-1585: the working view, not the page over it
+            self._mach_open = False
+            self._machines_set()
         if self.window._is_running():
             return False
         mfr = next((m for m in self.window.manufacturers
@@ -673,12 +797,131 @@ class MachinesMixin:
         return True
 
     @rpc
+    def machines_update(self, mid):
+        """PAD-1585: Update to <newer build> - this machine's project carried onto Stern's new card image by the
+        app (app._start_machine_update), told first what can't be carried.  Built, the machine is shown on the
+        update and the Write tab is set to put it on the machine: Send to machine (over the network, its
+        settings, audits and high scores stay) or Build / flash SD card."""
+        r = self._row(mid)
+        if not r or not r.get("transfer") or r["card_missing"]:
+            return False
+        if r.get("multi"):
+            # every image of the game on the card, each with its own project: none is opened
+            if not self._enter(r["mfr"]):
+                return False
+        else:
+            r = self._open_machine_project(mid)
+            if r is None:
+                return False
+
+        def updated(card, replaced, plan):
+            if os.path.isfile(card):
+                self.machines_rebind(mid, card)
+            n = "%d image%s of the game" % (len(replaced), "" if len(replaced) == 1 else "s")
+            if _same(card, r["card"]):
+                how = ("%s's card is updated in place: %s replaced, every other image and the menu as they "
+                       "were." % (r["name"] or "The machine", n))
+            else:
+                how = ("%s's card is built again beside the old one, because its first image is now a new "
+                       "release, whose system an in-place update cannot carry: %s replaced, every other image "
+                       "and the menu as they were." % (r["name"] or "The machine", n))
+            compat.messagebox.showinfo(
+                "Card updated",
+                "%s\n    %s\n\nPut it on the machine: Send to machine sends only what changed and keeps the "
+                "machine's settings, audits and high scores; a card write keeps them with Keep the card's own "
+                "settings." % (how, card))
+
+        def built(build, workspace, raw):
+            if r.get("address"):
+                # PAD-1585: the machine remote access reaches this one at is the one Send to machine uses
+                try:
+                    from ..core import pad_ssh_key
+                    pad_ssh_key.select_machine(r["address"])
+                except Exception:                       # noqa: BLE001
+                    log.exception("select the machine for Send")
+            w = self.window
+            w.write_upd_var.set(raw)
+            w.write_assets_var.set(workspace)
+            w.write_output_var.set(os.path.dirname(build))
+            w.write_filename_var.set(os.path.basename(build))
+            # the update's extract is the machine's project from now on: known to the app, so the
+            # row (which finds a machine's project among the known ones) still names one
+            touch = getattr(self.app, "_registry_touch", None)
+            if touch is not None:
+                touch(workspace)
+                self.app._save_settings()
+            if os.path.isfile(build):
+                self.machines_rebind(mid, build)
+            w.select_tab("write")
+            compat.messagebox.showinfo(
+                "Update built",
+                "%s is built:\n    %s\n\nPut it on the machine from the Write tab: Send to machine sends only "
+                "what changed over your network and keeps the machine's settings, audits and high scores. Or "
+                "Build / flash SD card writes a card; tick Keep the card's own settings there to keep them "
+                "when you write over the machine's card." % (r["name"] or "The update", build))
+
+        return bool(self.app._start_machine_update(mid, r["project"], r["card"], on_built=built,
+                                                   on_multi=updated))
+
+    @rpc
     def machines_write(self, mid):
         r = self._open_machine_project(mid)
         if r is None:
             return False
         self.window.select_tab("write")
         return True
+
+
+#: how often the open page checks again which machines answer
+ONLINE_EVERY_MS = 30000
+
+
+def _network_machines():
+    """PAD-1585: the machines remote access found (Network tab, remote_access/machines.json), each
+    ``{"address", "game", "title"}``; [] when it has none or the file cannot be read."""
+    try:
+        from ..core import pad_ssh_key
+        found = pad_ssh_key.machines()
+    except Exception:                                   # noqa: BLE001
+        return []
+    out = []
+    for m in found:
+        game = m.get("game") or ""
+        title = ""
+        if game:
+            try:
+                from ..core import machines
+                rel = machines.release_info({"manufacturer": "stern", "sidx": game + "-0_00_0.sidx"}) or {}
+                title = " ".join(x for x in (rel.get("title"), (rel.get("edition") or "").split(" /")[0]) if x)
+            except Exception:                           # noqa: BLE001
+                title = ""
+        out.append({"address": m["address"], "game": game, "title": title or game.replace("_", " ").title()})
+    return out
+
+
+def link_network(rows, network):
+    """*rows* with each one's network address - the one it was linked to, else the one machine remote access found
+    running its game (several of the same game: none is guessed) - and the found machines no row runs.
+    -> ``(rows, unlinked)``."""
+    rows = [dict(r) for r in rows]
+    taken = {r["address"] for r in rows if r.get("address")}
+    for r in rows:
+        if r.get("address") or not r.get("game"):
+            continue
+        same = [n for n in network if n["game"] == r["game"] and n["address"] not in taken]
+        if len(same) == 1:
+            r["address"] = same[0]["address"]
+            taken.add(r["address"])
+    return rows, [n for n in network if n["address"] not in taken]
+
+
+def _multi(card):
+    """True when the card image *card* carries more than one game image (cached on the file's identity)."""
+    try:
+        from ..plugins.stern import multiimage
+        return len(multiimage.images_for_path(card)) > 1
+    except Exception:                                   # noqa: BLE001
+        return False
 
 
 def _and(words):

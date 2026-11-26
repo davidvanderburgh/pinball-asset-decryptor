@@ -536,6 +536,49 @@ def patch_update_sh(text):
     return nl.join(lines)
 
 
+#: PAD-1585: the update guard - a file on the stick whose name starts so lets a normal update in (the way back)
+GUARD_PASS = "bof-update-ok"
+#: the note the guard leaves on the stick when it refuses an update
+GUARD_NOTE = "PAD-UPDATE-NOT-INSTALLED.txt"
+GUARD_BEGIN = "# >>> PAD update guard (PAD-1585) >>>"
+GUARD_END = "# <<< PAD update guard <<<"
+GUARD_BLOCK = [
+    GUARD_BEGIN,
+    "# This machine runs a PAD multi-boot update. A normal update empties /home/pinball/extracted, where the",
+    "# menu and its builds live, so a lab.fun that is not a PAD multi-boot update is not installed (a note on",
+    "# the stick says why) unless the stick holds a file named %s*." % GUARD_PASS,
+    'if [ -f "$1/lab.fun" ] && [ -d %s ] && ! ls "$1" 2>/dev/null | grep -qi \'^%s\'; then'
+    % (PADSELECT_DIR, GUARD_PASS),
+    '    if ! gpg --output - --yes --batch --passphrase=funkey "$1/lab.fun" 2>/dev/null | tar -tz 2>/dev/null \\',
+    "            | grep -q '^%s/'; then" % PADSELECT,
+    "        printf 'This update was not installed: this machine runs a multi-boot update made with PAD, and\\r\\n"
+    "installing it would remove the menu and every build on it. Update the builds with PAD and put its\\r\\n"
+    "lab.fun on the stick instead. To install this update anyway (the menu goes), add a file named\\r\\n"
+    "%s.txt to the stick beside it.\\r\\n' > \"$1/%s\" 2>/dev/null" % (GUARD_PASS, GUARD_NOTE),
+    '        echo "$(date) refused $1/lab.fun" >> /home/pinball/pad-update-guard.log 2>/dev/null',
+    "        sync",
+    "        exit 0",
+    "    fi",
+    "fi",
+    GUARD_END,
+]
+
+
+def patch_updatecode(text):
+    """PAD-1585: the vendor's update/updatecode.sh (which update.sh copies over the machine's updater) with the
+    update guard before its first command - before it empties /home/pinball/extracted, where the menu lives."""
+    nl = "\r\n" if "\r\n" in text else "\n"
+    lines = text.split(nl)
+    if GUARD_BEGIN in lines:
+        raise Refused("update/updatecode.sh already carries the PAD update guard: build from the stock .fun")
+    if not any(ln.strip().startswith("rm -rf /home/pinball/extracted") for ln in lines):
+        raise Refused("update/updatecode.sh does not empty /home/pinball/extracted as the guard expects: "
+                      "this updater has not been read")
+    at = 1 if lines and lines[0].startswith("#!") else 0
+    lines[at:at] = [""] + GUARD_BLOCK
+    return nl.join(lines)
+
+
 def check_update_dir(u):
     for n in (".bash_profile", "update.sh"):
         if not os.path.isfile(os.path.join(u.update, n)):
@@ -853,8 +896,11 @@ def build_fun(a):
                 _link_or_copy(src, os.path.join(stage, name))
         for junk in [n for n in os.listdir(os.path.join(stage, "update")) if n.startswith("._")]:
             os.unlink(os.path.join(stage, "update", junk))
-        for n, fn in ((".bash_profile", patch_profile), ("update.sh", patch_update_sh)):
+        for n, fn in ((".bash_profile", patch_profile), ("update.sh", patch_update_sh),
+                      ("updatecode.sh", patch_updatecode)):
             p = os.path.join(stage, "update", n)
+            if n == "updatecode.sh" and not os.path.isfile(p):
+                continue                       # an update that does not replace the updater: nothing to guard
             with open(p, "r", encoding="utf-8", newline="") as f:
                 text = f.read()
             mode = os.stat(p).st_mode & 0o777
@@ -1143,6 +1189,9 @@ def verify_fun(a):
         bad.append("update/.bash_profile's self-repair copy has no rm -f in front of it")
     if INSTALL_LINE not in upd:
         bad.append("update/update.sh does not run the install step")
+    code = got.get("update/updatecode.sh", b"").decode("utf-8", errors="replace")
+    if code and GUARD_BEGIN not in code:
+        bad.append("update/updatecode.sh carries no update guard")
     for name in [n for n, (_m, req) in SELECTOR_FILES.items() if req or n == "font.ttf"] \
             + ["images.conf", PROGRAMS]:
         if PADSELECT + "/" + name not in got:

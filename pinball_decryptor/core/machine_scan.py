@@ -200,6 +200,12 @@ def _banner(host, port, timeout):
     return line if line.startswith("SSH-") else None
 
 
+def online(host, port=PORT, timeout=1.5):
+    """PAD-1585: True when *host*'s SSH server answers right now (My machines' green light). It reads the banner
+    only: nothing logs in, nothing is remembered."""
+    return _banner(host, port, timeout) is not None
+
+
 def game_of(describe_out):
     """The game a machine runs, from ``SshMachine.describe()``'s first line: the ``/games/game`` link, which
     names ``<game>/game`` (Spike 2 links it relative) or ``/games/<game>/game``."""

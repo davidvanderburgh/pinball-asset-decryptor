@@ -5249,6 +5249,11 @@ def media_specs_changed(before, after):
     reaches the card through images.conf, which the inject writes."""
     if len(before.images) != len(after.images):
         return True
+    # the TEST CARD entry's files ride in the media set, and the Test card tab's list may have changed since the
+    # card was written: with the entry on, the media is always made again (first real update, 2026-11-26: the entry
+    # went on with no files)
+    if getattr(after, "test_entry", False):
+        return True
     return any(f in MEDIA_FIELDS for f in _menu_fields(before, after))
 
 

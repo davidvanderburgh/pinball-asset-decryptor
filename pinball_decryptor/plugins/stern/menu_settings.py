@@ -89,7 +89,7 @@ COLOUR_BLIND = "colour_blind"
 #: PAD-1589: spoken scores: Off/On (stored 0, 1), Off to start with
 SPOKEN_SCORES = "spoken_scores"
 #: Simon (2026-11-25): BOOT MENU FLIPPER (:mod:`.boot_flip`): a multi-boot card's right flipper hold back to the boot menu,
-#: 1 Off, 2 after 20 s, 3 after 60 s with no game on - read by padmenu.so inside the game, not by the mode runtime
+#: seconds with no game on before the hold counts, 0 Off (2026-11-26) - read by padmenu.so, not by the runtime
 BOOT_FLIP = "boot_flip"
 #: each setting of ours: the adjustment it takes over, its descriptor caption, its row caption and
 #: the menu category whose page lists it. EDITION sits on Attract Mode (16), beside the game's own
@@ -168,6 +168,9 @@ DEPRECATED = "DEPRECATED"
 MAX_VALUES = 8
 #: the most any setting of ours offers
 VALUES_CEILING = 9
+#: Simon (2026-11-26): BOOT MENU FLIPPER is a plain number of seconds, 0 (Off) to 120, stepped with +/- like the
+#: game's own timed adjustments - the one setting of ours past the ceiling
+WIDE_VALUES = {"boot_flip": 121}
 #: a category table record: {category, kind, id}; kind 3 is an adjustment row
 REC = 12
 KIND_ADJUSTMENT = 3
@@ -1183,7 +1186,7 @@ def plan(table, key, values, names=(), ad=None, default=1, help_text=None, onoff
     if ad is None:
         raise MenuSettingError("the game has no spare setting left for %s" % caption)
     values = int(values)
-    ceiling = MAX_VALUES if help_text is None else VALUES_CEILING
+    ceiling = WIDE_VALUES.get(key) or (MAX_VALUES if help_text is None else VALUES_CEILING)
     if not 2 <= values <= ceiling:
         raise MenuSettingError("a setting of ours offers 2 to %d values, not %d" % (ceiling, values))
     if not 1 <= int(default) <= values:
@@ -1508,7 +1511,7 @@ def plan_shared(table, rows):
     share, refused = [], {}
     for key, values, names, opts in [r for r in rows if r[0] not in NOT_SHARED]:
         values, default = int(values), int(opts.get("default", 1))
-        ceiling = MAX_VALUES if opts.get("help_text") is None else VALUES_CEILING
+        ceiling = WIDE_VALUES.get(key) or (MAX_VALUES if opts.get("help_text") is None else VALUES_CEILING)
         try:
             if key not in SETTINGS:
                 raise MenuSettingError("no such setting: %s" % key)

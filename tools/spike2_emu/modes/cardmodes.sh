@@ -248,7 +248,7 @@ fi
 # BOOT MENU FLIPPER (2026-11-25): padmenu.cfg (where the service menu row's value is, for padmenu.so) is a reason of
 # its own too - a card whose only change is that row has nothing else beside the object
 FLIPROW=0
-[ -f "$S/padmenu.cfg" ] && FLIPROW=$(grep -c "^flip_row	" "$S/padmenu.cfg" 2>/dev/null)
+[ -f "$S/padmenu.cfg" ] && FLIPROW=$(grep -c "^flip_secs	" "$S/padmenu.cfg" 2>/dev/null)
 case "$FLIPROW" in ''|*[!0-9]*) FLIPROW=0 ;; esac
 if [ "$FLIPROW" != 0 ]; then
     if [ "$N" = 0 ] && [ "$CLIPS" = 0 ] && [ "$SOUNDS" = 0 ] && [ "$PICTURE" = 0 ] && [ "$ATTRACT" = 0 ] && [ "$COOP" = 0 ] && [ "$IDLE" = 0 ] && [ "$HAND" = 0 ] && [ "$CABS" = 0 ] && [ "$COMP" = 0 ] && [ "$FEED" = 0 ] && [ "$REC" = 0 ] && [ "$SCENES" = 0 ] && [ "$ACC" = 0 ]; then WHAT="the BOOT MENU FLIPPER row"

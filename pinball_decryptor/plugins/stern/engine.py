@@ -12862,25 +12862,26 @@ class _SpokenScoresMenu(_MusicModeMenu):
 
 class _BootFlipMenu(_MusicModeMenu):
     """Simon (2026-11-25, on the table: "there is no way to enable or disable the right flipper action"): BOOT MENU
-    FLIPPER in the game's own service menu (:mod:`.boot_flip`): 1 Off, 2 after 20 s, 3 after 60 s - how a multi-boot
-    card's right flipper hold back to the boot menu behaves. padmenu.so reads it (``padmenu.cfg``), not the runtime."""
+    FLIPPER in the game's own service menu (:mod:`.boot_flip`): seconds with no game on before a multi-boot card's
+    right flipper hold back to the boot menu counts, 0 Off. padmenu.so reads it (``padmenu.cfg``), not the runtime."""
 
     KEY = "boot_flip"
 
     def __init__(self, log):
         from . import boot_flip as _BF
-        super().__init__(len(_BF.MENU_NAMES), _BF.MENU_NAMES, log)
+        super().__init__(_BF.MENU_VALUES, (), log)
 
     def wanted(self):
         from . import boot_flip as _BF
-        return self.KEY, self.count, self.names, {"default": _BF.MENU_DEFAULT, "help_text": _BF.MENU_HELP}
+        return self.KEY, self.count, self.names, {"default": _BF.MENU_DEFAULT, "help_text": _BF.MENU_HELP,
+                                                  "from_zero": True}
 
     def done(self):
         self.ok = True
-        self.log("Boot menu flipper: BOOT MENU FLIPPER is in the operator menu (%s), 2 (20 s) to start with. On a "
-                 "multi-boot card it sets the right flipper hold back to the boot menu: 1 Off, 2 or 3 once the "
-                 "flippers have been off 20 s or 60 s; it wins over the Multi-boot tab's setting." % self.setting.where,
-                 "info")
+        self.log("Boot menu flipper: BOOT MENU FLIPPER is in the operator menu (%s), 15 to start with. On a "
+                 "multi-boot card it sets the right flipper hold back to the boot menu: 0 Off, else the seconds the "
+                 "flippers must have been off (no game on) first; it wins over the Multi-boot tab's setting."
+                 % self.setting.where, "info")
 
     def fail(self, why):
         if self.why or self.ok:
@@ -13044,7 +13045,7 @@ def _boot_flip_cfg(flip_menu, work):
     os.makedirs(_lp(work), exist_ok=True)
     path = os.path.join(work, _BF.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
-        f.write(_BF.cfg_text(flip_menu.setting.live, flip_menu.KEY, flip_menu.setting.default))
+        f.write(_BF.cfg_text(flip_menu.setting.live, flip_menu.KEY, flip_menu.setting.default))   # from_zero: seconds
     return path
 
 

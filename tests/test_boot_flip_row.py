@@ -49,24 +49,26 @@ def test_a_ticked_row_is_wanted_by_the_write(project, monkeypatch):
     assert not [w for w in SM.wanted(path) if w[0] == "boot_flip"]
     SM.save(path, {"on": ["boot_flip"]})
     got = [w for w in SM.wanted(path) if w[0] == "boot_flip"]
-    assert got == [("boot_flip", 3, list(BF.MENU_NAMES), {"default": 2, "help_text": BF.MENU_HELP})]
+    assert got == [("boot_flip", 121, [], {"default": 16, "help_text": BF.MENU_HELP, "from_zero": True})]
 
 
 def test_the_values_and_help():
     from pinball_decryptor.plugins.stern import boot_flip as BF
     from pinball_decryptor.plugins.stern import menu_settings as MS
-    assert BF.MENU_NAMES == ("Off", "20 s", "60 s") and BF.MENU_DEFAULT == 2
-    assert BF.GUARD_S == {1: 0, 2: 20, 3: 60}
+    # Simon (2026-11-26): "we let the user set the values" - seconds, 0 Off, 15 to start with
+    assert (BF.MAX_SECONDS, BF.MENU_VALUES, BF.DEFAULT_SECONDS, BF.MENU_DEFAULT) == (120, 121, 15, 16)
+    assert MS.WIDE_VALUES == {"boot_flip": 121}
     assert len(BF.MENU_HELP) <= 63                          # the spare help lines' room
     assert MS.SETTINGS[MS.BOOT_FLIP][1:] == ("BOOT MENU FLIPPER", "Boot Menu Flipper", 16)
 
 
 def test_the_cfg_line_padmenu_reads():
     from pinball_decryptor.plugins.stern import boot_flip as BF
-    assert BF.cfg_text(0x1234abcd, "boot_flip") == "flip_row\t0x1234abcd\tboot_flip\t2\n"
-    assert BF.cfg_text(0xFADE0008, "boot_flip", 3) == "flip_row\t0xfade0008\tboot_flip\t3\n"
+    assert BF.cfg_text(0x1234abcd, "boot_flip") == "flip_secs\t0x1234abcd\tboot_flip\t15\n"
+    assert BF.cfg_text(0xFADE0008, "boot_flip", 0) == "flip_secs\t0xfade0008\tboot_flip\t0\n"
     src = open(os.path.join(ROOT, "tools", "spike2_emu", "codeselect", "padmenu.c"), encoding="utf-8").read()
-    assert '"/usr/local/padmode/padmenu.cfg"' in src and "flip_row %lx %39s %d" in src
+    assert '"/usr/local/padmode/padmenu.cfg"' in src and "flip_secs %lx %39s %d" in src
+    assert "quiet = v * 1000L;" in src and "if (v == 0)" in src
     assert '"/dump/pad_settings.state"' in src                 # the runtime's file for a MORE SETTINGS word
     assert "flip_row_ok()" in src                              # an address the game has not mapped is never read
 
@@ -89,12 +91,12 @@ def test_the_cfg_file_from_a_planned_row(tmp_path):
     from pinball_decryptor.plugins.stern import engine as E
 
     class _S:
-        live, default = 0x00a1b2c4, 2
+        live, default = 0x00a1b2c4, 15
     job = E._BootFlipMenu(lambda *a, **k: None)
     job.setting = _S()
     path = E._boot_flip_cfg(job, str(tmp_path))
     assert os.path.basename(path) == "padmenu.cfg"
-    assert open(path, encoding="utf-8").read() == "flip_row\t0x00a1b2c4\tboot_flip\t2\n"
+    assert open(path, encoding="utf-8").read() == "flip_secs\t0x00a1b2c4\tboot_flip\t15\n"
 
 
 def test_the_service_menu_tab_offers_it(project, monkeypatch):
@@ -111,12 +113,12 @@ def test_it_plans_on_godzilla_116_with_the_other_rows():
     from pinball_decryptor.plugins.stern import menu_settings as MS
     from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
     t = AdjustmentTable(_program(LE116))
-    row = ("boot_flip", 3, list(BF.MENU_NAMES), {"default": 2, "help_text": BF.MENU_HELP})
+    row = ("boot_flip", 121, (), {"default": 16, "help_text": BF.MENU_HELP, "from_zero": True})
     settings, _w, _c, refused = MS.plan_many(t, [row])
     assert not refused, refused
     s = next(s for s in settings if s.key == "boot_flip")
-    assert not MS.is_shared(s) and s.live and s.default == 2 and s.help == BF.MENU_HELP
-    assert (s.low, s.values) == (1, 3)
+    assert not MS.is_shared(s) and s.live and s.default == 15 and s.help == BF.MENU_HELP
+    assert (s.low, s.values) == (0, 121)
     # with five more rows the spare ones run out: it shares MORE SETTINGS and its word is the runtime's
     from pinball_decryptor.plugins.stern import coop_play as CP, handicap as HC
     from pinball_decryptor.plugins.stern import service_menu as SM
@@ -187,5 +189,5 @@ def test_the_emulator_runs_a_multi_boot_cards_own_runtime_files():
     and ran neither the card's runtime nor its padmenu.cfg."""
     src = open(os.path.join(ROOT, "tools", "spike2_emu", "modes", "cardmodes.sh"), encoding="utf-8").read()
     assert 'grep -qF -e "$HOOK" -e "PADPRE:}$CARD_DIR/mode.so"' in src
-    assert 'FLIPROW=$(grep -c "^flip_row\t" "$S/padmenu.cfg"' in src
+    assert 'FLIPROW=$(grep -c "^flip_secs\t" "$S/padmenu.cfg"' in src
     assert '[ "$SCENES" = 0 ] && [ "$FLIPROW" = 0 ]; }; then' in src

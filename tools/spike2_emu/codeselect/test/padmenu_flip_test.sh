@@ -21,12 +21,12 @@
 #   conf-off  no PADMENU_FLIP_MS, the card says boot_menu=menu         -> none
 #   conf-on   no PADMENU_FLIP_MS, boot_menu=flipper flip_hold=1 flip_guard=0 -> one restart
 # THE SERVICE MENU ROW (BOOT MENU FLIPPER, padmenu.cfg; Simon 2026-11-25) - it wins over images.conf:
-#   row-off       its own row (the driver's row_word) reads 1 Off, the card says flipper  -> none
-#   row-on        it reads 2, the card says boot_menu=menu                                -> one restart
-#   row-fresh     it reads 0 (a store not loaded yet): the cfg's default, 2                -> one restart
-#   row-guard     it reads 2 and no test guard: 20 s with no game on, the run is shorter   -> none
+#   row-off       its own row (the driver's row_word) reads 0 Off, the card says flipper  -> none
+#   row-on        it reads 15, the card says boot_menu=menu                               -> one restart
+#   row-bad       it reads 9999 (not a value the row holds): the cfg's default, 15        -> one restart
+#   row-guard     it reads 15 and no test guard: 15 s with no game on, the run is shorter  -> none
 #   row-unmapped  an address the process has not mapped: never read, the default         -> one restart
-#   shared-off    a MORE SETTINGS word, pad_settings.state says "boot_flip 1"             -> none
+#   shared-off    a MORE SETTINGS word, pad_settings.state says "boot_flip 0"             -> none
 #   shared-none   the same, no state file yet: the default                                -> one restart
 set -e
 ROOT=$1
@@ -184,15 +184,15 @@ run conf-off 1600 0 -E PADMENU_CONF="$T/conf-off"
 run conf-on  1800 1 -E PADMENU_CONF="$T/conf-on"
 ADDR=$(nm "$T/driver" | awk '$3 == "row_word" { print $1 }')
 [ -n "$ADDR" ] || { echo "padmenu_flip_test: no row_word in the driver"; exit 1; }
-printf 'flip_row\t0x%s\tboot_flip\t2\n' "$ADDR" > "$T/row.cfg"
-printf 'flip_row\t0x00000010\tboot_flip\t2\n' > "$T/row-unmapped.cfg"
-printf 'flip_row\t0xfade0004\tboot_flip\t2\n' > "$T/shared.cfg"
-printf 'more_select 3\nboot_flip 1\n' > "$T/state-off"
+printf 'flip_secs\t0x%s\tboot_flip\t15\n' "$ADDR" > "$T/row.cfg"
+printf 'flip_secs\t0x00000010\tboot_flip\t15\n' > "$T/row-unmapped.cfg"
+printf 'flip_secs\t0xfade0004\tboot_flip\t15\n' > "$T/shared.cfg"
+printf 'more_select 3\nboot_flip 0\n' > "$T/state-off"
 ROWFAST="-E PADMENU_FLIP_MS=400 -E PADMENU_FLIP_GUARD_MS=0"
-ROWV=1 run row-off      1200 0 $ROWFAST -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG="$T/row.cfg"
-ROWV=2 run row-on       1200 1 $ROWFAST -E PADMENU_CONF="$T/conf-off" -E PADMENU_ROW_CFG="$T/row.cfg"
-ROWV=0 run row-fresh    1200 1 $ROWFAST -E PADMENU_CONF="$T/conf-off" -E PADMENU_ROW_CFG="$T/row.cfg"
-ROWV=2 run row-guard    1600 0 -E PADMENU_FLIP_MS=400 -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG="$T/row.cfg"
+ROWV=0 run row-off      1200 0 $ROWFAST -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG="$T/row.cfg"
+ROWV=15 run row-on       1200 1 $ROWFAST -E PADMENU_CONF="$T/conf-off" -E PADMENU_ROW_CFG="$T/row.cfg"
+ROWV=9999 run row-bad  1200 1 $ROWFAST -E PADMENU_CONF="$T/conf-off" -E PADMENU_ROW_CFG="$T/row.cfg"
+ROWV=15 run row-guard    1600 0 -E PADMENU_FLIP_MS=400 -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG="$T/row.cfg"
 run row-unmapped 1200 1 $ROWFAST -E PADMENU_CONF="$T/conf-off" -E PADMENU_ROW_CFG="$T/row-unmapped.cfg"
 run shared-off  1200 0 $ROWFAST -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG="$T/shared.cfg" \
     -E PADMENU_ROW_STATE="$T/state-off"

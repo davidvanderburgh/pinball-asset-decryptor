@@ -648,8 +648,9 @@ static int flip_was = -1;
 static FILE *trace;
 /* THE SERVICE MENU ROW (Simon, 2026-11-25: "there is no way to enable or disable the right flipper action").  A
  * game the app wrote with BOOT MENU FLIPPER ticked has /usr/local/padmode/padmenu.cfg (boot_flip.py):
- *     flip_row <the value's word> <key> <default>
- * 1 Off, 2 after 20 s, 3 after 60 s with no game on.  The word is the game's own address of the row's value (this
+ *     flip_secs <the value's word> <key> <default>
+ * the seconds with no game on before a hold counts, 0 Off (Simon 2026-11-26: "we let the user set the values"; the
+ * first build's 1 Off / 2 20 s / 3 60 s only went to Simon's test table).  The word is the game's own address of the row's value (this
  * object runs inside the game), or, at 0xfade0000 and up, one of the mode runtime's MORE SETTINGS words, whose value
  * the runtime keeps in /dump/pad_settings.state as "<key> <value>".  Where the card has the row, it wins over
  * images.conf's boot_menu= / flip_guard=.  An address the game has not mapped is never read (flip_row_ok). */
@@ -658,9 +659,10 @@ static FILE *trace;
 #define ROW_STATE   "/dump/pad_settings.state"
 #define ROW_SHARED  0xfade0000ul
 #define ROW_HOLD_MS 5000
+#define ROW_MAX_S   600
 static unsigned long row_addr;             /* 0: no row on this card */
 static char row_key[40], row_state[128] = ROW_STATE;
-static int row_def = 2, row_val = -1, row_ok = -1;
+static int row_def = 15, row_val = -1, row_ok = -1;
 static int guard_env;                      /* PADMENU_FLIP_GUARD_MS given (the tests): it wins over the row's too */
 static long long row_due;
 
@@ -758,7 +760,7 @@ static int flip_row_ok(void)
     return row_ok;
 }
 
-/* the row's value now (1..3): its word, or the runtime's file; the default until there is one.  The file is read at
+/* the row's value now (seconds, 0 Off): its word, or the runtime's file; the default until there is one.  The file is read at
  * most once a second, and only while the button is down (flip_check). */
 static int flip_row(long long t)
 {
@@ -782,8 +784,8 @@ static int flip_row(long long t)
     } else {
         v = row_val;
     }
-    if (v < 1 || v > 3)
-        v = row_def;                           /* a fresh store reads 0 until the game has loaded its settings */
+    if (v < 0 || v > ROW_MAX_S)
+        v = row_def;                           /* not a value the row can hold */
     return v;
 }
 
@@ -796,13 +798,13 @@ static void flip_check(long long t)
         static int said = -1;
         int v = flip_row(t);
         if (v != said)
-            tr("BOOT MENU FLIPPER reads %d (%s)", v, v == 1 ? "off" : v == 2 ? "after 20 s" : "after 60 s");
+            tr("BOOT MENU FLIPPER reads %d (%s)", v, v ? "seconds after a game" : "off");
         said = v;
-        if (v == 1)
+        if (v == 0)
             return;
         hold = flip_ms > 0 ? flip_ms : ROW_HOLD_MS;
         if (!guard_env)
-            quiet = v == 2 ? 20000 : 60000;
+            quiet = v * 1000L;
     }
     if (hold <= 0)
         return;
@@ -967,10 +969,10 @@ static void flip_init(const char *conf)
         int d;
         if (cf) {
             while (fgets(line, sizeof line, cf))
-                if (sscanf(line, "flip_row %lx %39s %d", &a, key, &d) == 3 && a) {
+                if (sscanf(line, "flip_secs %lx %39s %d", &a, key, &d) == 3 && a) {
                     row_addr = a;
                     snprintf(row_key, sizeof row_key, "%s", key);
-                    row_def = d >= 1 && d <= 3 ? d : 2;
+                    row_def = d >= 0 && d <= ROW_MAX_S ? d : 15;
                 }
             fclose(cf);
         }
@@ -982,7 +984,7 @@ static void flip_init(const char *conf)
     tr("padmenu flipper watcher: hold %ld ms (0 = off), after the flippers are off %ld ms, %s", flip_ms,
        flip_quiet_ms, flip_fire ? "restarts" : "log only");
     if (row_addr)
-        tr("BOOT MENU FLIPPER row at 0x%08lx (%s, %d to start with): it decides", row_addr, row_key, row_def);
+        tr("BOOT MENU FLIPPER row at 0x%08lx (%s, %d s to start with): it decides", row_addr, row_key, row_def);
     if (row_addr) {
         say("padmenu: the service menu's BOOT MENU FLIPPER decides the right flipper hold back to the boot menu\n");
     } else if (flip_ms > 0) {

@@ -9,8 +9,8 @@
      being made): a steel ball bouncing around the whole window.  Inline and
      wordless: it is drawn before app.css and the language catalog are in.
      Styles only, so it keeps moving while the scripts load: the ball's path
-     is two plain animations, a steady run side to side and a fall that
-     speeds up towards the floor and plays back as the rise.  It sits OVER
+     is two plain animations, a steady run side to side and a steady run
+     top to bottom (no gravity: it glances off all four edges).  It sits OVER
      #app; core/pageboot.js fades it away once the first screen is drawn. -->
 <style>
 html, body { margin: 0; height: 100%; background: #15171a; }
@@ -20,9 +20,9 @@ html, body { margin: 0; height: 100%; background: #15171a; }
 @keyframes pb-in { from { opacity: 0; } }
 .pb-x, .pb-y, .pb-x i { position: absolute; left: 0; top: 0; width: 26px; height: 26px; }
 .pb-x { animation: pb-x 3.1s linear infinite alternate; animation-delay: calc(var(--g, 0) * 16ms - 1.2s); }
-.pb-y { animation: pb-y .92s cubic-bezier(.33,0,.67,.33) infinite alternate; animation-delay: calc(var(--g, 0) * 16ms - 1.84s); }
+.pb-y { animation: pb-y 2.2s linear infinite alternate; animation-delay: calc(var(--g, 0) * 16ms - .7s); }
 @keyframes pb-x { from { transform: translateX(0); } to { transform: translateX(calc(100vw - 26px)); } }
-@keyframes pb-y { from { transform: translateY(16vh); } to { transform: translateY(calc(100vh - 26px)); } }
+@keyframes pb-y { from { transform: translateY(0); } to { transform: translateY(calc(100vh - 26px)); } }
 .pb-x i { border-radius: 50%;
   background: radial-gradient(circle at 34% 30%, #ffffff 0 12%, #cfd4da 26%, #7c848d 62%, #3b4046 100%);
   box-shadow: 0 0 16px rgba(232,163,61,.4), 0 3px 5px rgba(0,0,0,.55);

@@ -348,7 +348,8 @@ case "$1" in
         # ...and the menu is what it comes back to even on a card with no menu at power-up (boot_menu=hidden,
         # Simon 2026-11-22): the selector finds this note, removes it and opens the menu (the right flipper or
         # BACK was what asked, and a second hold must not be needed)
-        : > "${CODESELECT_MENU_FLAG:-/data/codeselect.menu}" 2>/dev/null || true
+        # (in a subshell: sh leaves the script when a redirection on ':' fails, and no note must stop the restart)
+        ( : > "${CODESELECT_MENU_FLAG:-/data/codeselect.menu}" ) 2>/dev/null || true
         sync
         ${CODESELECT_REBOOT:-reboot}
         exit $?

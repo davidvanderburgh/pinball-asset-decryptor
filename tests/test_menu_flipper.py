@@ -157,3 +157,18 @@ def test_a_loaded_cards_flipper_change_is_a_change():
     assert "boot menu" in menu
     menu, _ = mbc.diff_forms(before, dataclasses.replace(before, flip_guard=20))
     assert "after a game" in menu
+
+
+def test_a_hold_that_will_restart_shows_a_filling_ring():
+    """PR #48 review (David: "show some animation overlay (like a circle filling up) to let the user know it's
+    coming"): padmenu.so is the game's eglSwapBuffers on Spike 2, draws the ring and the words over the frame and
+    hands it on; GL calls only PAD's emulator bridge lacks are optional, and vertices come from a buffer of its own."""
+    src = open(os.path.join(SEL, "padmenu.c"), encoding="utf-8").read()
+    spike2 = src[src.index("#if !defined(PADMENU_FAST) && !defined(PADMENU_S3)"):]
+    assert "unsigned eglSwapBuffers(void *dpy, void *surf)" in spike2
+    assert 'dlsym(RTLD_NEXT, "eglSwapBuffers")' in spike2
+    for words in ('"HOLD FOR BOOT MENU"', '"RESTARTING TO BOOT MENU"', "RING_SHOW_MS 400", 'getenv("PADMENU_RING")'):
+        assert words in spike2
+    for optional in ("glColorMask", "glGetVertexAttribiv", "eglQuerySurface"):
+        assert 'RO(' in spike2 and '"%s"' % optional in spike2
+    assert "gl.GenBuffers(1, &ring_buf)" in spike2

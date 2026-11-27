@@ -67,6 +67,13 @@ function Sheet({ d, onClose }) {
   const inv = d.inventory;
   const w = sum.wired || {};
   const part = (k, name) => (w[k] ? html`<${Chip} kind=${w[k][0] === w[k][1] ? "ok" : "warn"} sm>${w[k][0]} of ${w[k][1]} ${name}<//>` : null);
+  // PAD-1629: the DOF list sits below every switch, coil and light, where
+  // Msaint30 did not find it; its chip in the top row jumps there (showing
+  // the whole sheet first, as "Only what is missing" hides the list)
+  const toDof = () => {
+    setOnlyMissing(false);
+    setTimeout(() => { const h = document.getElementById("vpx-sheet-dof"); if (h) h.scrollIntoView({ block: "start", behavior: "smooth" }); }, 50);
+  };
   const head = (cols) => html`<thead><tr>${cols.map((c) => html`<th>${c}</th>`)}</tr></thead>`;
   return html`<${Modal} title=${(sum.title || d.title) + ": what a Visual Pinball table needs"} icon="file" xwide cls="vpx-sheet" onClose=${onClose}
     footer=${html`
@@ -82,6 +89,8 @@ function Sheet({ d, onClose }) {
         ${sum.guesses ? html`<${Chip} sm>${sum.guesses} GUESS<//>` : null}
         ${sum.id_mismatch ? html`<${Chip} kind="warn" sm>${sum.id_mismatch} ids disagree<//>` : null}`
         : html`<${Chip} sm>${sum.switches} switches<//><${Chip} sm>${sum.coils} coils<//><${Chip} sm>${sum.inserts} inserts<//>`}
+      ${d.dof && d.dof.length ? html`<${Chip} sm onClick=${toDof}
+        title="Jump to the DOF events list near the bottom: every event this table sends DOF once patched, with its number and what it is.">${d.dof.length} DOF events ↓<//>` : null}
       ${inv ? html`<span class="small muted">${inv.name}: ${inv.brain === "pad" ? "already patched for PAD.Controller" : inv.brain === "rom" ? "a ROM table" : "a scripted tribute"}, ${inv.script_lines} lines of script${d.map ? ", map " + d.map : ""}.</span>` : null}
     </div>
     <div class="small muted">The table talks to the game in the machine's own numbers: a switch is 1000 + id, a lamp 1000 + node × 100 + index (an RGB insert: its first LED), a coil the small number its map gives it (flippers 46/48/36). A map names the table object for each part; <code>tools/spike2_emu/vpx/README.md</code> has the shape.</div>
@@ -107,7 +116,7 @@ function Sheet({ d, onClose }) {
       <tbody>${ins.map((g) => html`<tr class=${g.ok === "no" ? "miss" : ""}>${marked ? html`<td><${Ok} v=${g.ok} /></td>` : null}
         <td class="mono">${g.lamp}</td><td class="mono muted">${g.leds}</td><td><b>${g.name}</b></td><td>${g.rgb ? "yes" : ""}</td><td class="mono muted">${at(g)}</td></tr>`)}</tbody></table>
     ${off.length && !onlyMissing ? html`<div class="small muted"><b>Off the playfield</b> (no table light): ${off.slice(0, 120).map((g) => g.name + " (" + g.lamp + ")").join(", ")}${off.length > 120 ? " …" : ""}</div>` : null}
-    ${d.dof && d.dof.length && !onlyMissing ? html`<h3>DOF events <span class="small muted">${d.dof.length}${d.dof_rom ? ", table name " + d.dof_rom : ""}</span></h3>
+    ${d.dof && d.dof.length && !onlyMissing ? html`<h3 id="vpx-sheet-dof">DOF events <span class="small muted">${d.dof.length}${d.dof_rom ? ", table name " + d.dof_rom : ""}</span></h3>
       <div class="small muted">What DOF hears from this table once patched, to write DOF configs of your own (Save Markdown or Export CSV keeps the list). S, L and W are the table's own solenoid, lamp and switch numbers (a ROM table's are the original machine's, the ones its DOF config already uses); E are named events: the table script's own DOF calls, and the cabinet's events set in the Cabinet row.</div>
       <table class="vpx-sheet-table">${head(["kind", "number", "what", "from", "sent"])}
         <tbody>${d.dof.map((r) => html`<tr><td class="mono">${r.kind}</td><td class="mono">${r.number}</td><td><b>${r.name}</b></td>

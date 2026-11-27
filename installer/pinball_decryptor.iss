@@ -2,6 +2,16 @@
 ; Compile with build.ps1 (recommended) or directly:
 ;   ISCC.exe /DAppVersion=0.1.0 /DPythonDir=build\python /DProjectDir=.. pinball_decryptor.iss
 
+; NOT WITH INNO SETUP 6.7.0 - 6.7.3 (PAD-1635).  Those turn on Windows'
+; RedirectionGuard for Setup and hand it down to everything Setup starts,
+; the runasoriginaluser relaunch after an in-app update included (6.7.4
+; fixed that).  The relaunched app then could not open any folder reached
+; through a junction a non-admin made: WinError 448, "untrusted mount
+; point", on David's library junction.  Before 6.7.0 there was no guard.
+#if (Ver >= EncodeVer(6, 7, 0)) && (Ver < EncodeVer(6, 7, 4))
+  #error Inno Setup 6.7.0 - 6.7.3 hand RedirectionGuard down to the relaunched app (PAD-1635): build with 6.7.4 or later
+#endif
+
 #ifndef AppVersion
   #define AppVersion "0.1.0"
 #endif

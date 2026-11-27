@@ -421,7 +421,23 @@ INSTALLER_ARGS = ('/VERYSILENT /NORESTART /FORCECLOSEAPPLICATIONS /RELAUNCH=1 '
                   '/MERGETASKS="!runprereqs"')
 
 
-def launch_installer_windows(path, shell_execute=None):
+def installer_args(elevated=None):
+    """:data:`INSTALLER_ARGS`, plus ``/NOREDIRECTIONGUARD`` when this
+    process is already elevated (PAD-1635).
+
+    Inno Setup 6.7+ turns on Windows' RedirectionGuard for Setup.  Since
+    6.7.4 the app it relaunches as the original user does not inherit it -
+    but a Setup started by an ELEVATED app has no original user to drop to,
+    so the relaunched app still inherits it, and then opens no folder
+    reached through a junction a non-admin made (WinError 448).  Only that
+    case turns the guard off; an unelevated app's update keeps it."""
+    if elevated is None:
+        from .admin import is_admin
+        elevated = is_admin()
+    return INSTALLER_ARGS + (" /NOREDIRECTIONGUARD" if elevated else "")
+
+
+def launch_installer_windows(path, shell_execute=None, elevated=None):
     """Run the downloaded setup exe unattended; True on successful launch.
 
     Uses ShellExecuteW so the exe's requireAdministrator manifest is
@@ -431,7 +447,8 @@ def launch_installer_windows(path, shell_execute=None):
     if shell_execute is None:
         import ctypes
         shell_execute = ctypes.windll.shell32.ShellExecuteW  # noqa
-    ret = shell_execute(None, "open", str(path), INSTALLER_ARGS, None, 1)
+    ret = shell_execute(None, "open", str(path), installer_args(elevated),
+                        None, 1)
     # Per the ShellExecute contract, values > 32 mean success.
     return int(ret) > 32
 

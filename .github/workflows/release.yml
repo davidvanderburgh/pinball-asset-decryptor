@@ -84,15 +84,28 @@ jobs:
           path: ${{ runner.temp }}/pad-python
           key: pad-python-win-${{ steps.py.outputs.python-version }}-${{ steps.pybundle.outputs.month }}-${{ hashFiles('installer/build.ps1', 'requirements.txt', 'requirements-windows.txt', 'requirements-ui.txt') }}
 
+      # Inno Setup 6.7.4, pinned by its published sha256 (PAD-1635).  6.7.0 -
+      # 6.7.3 passed their RedirectionGuard mitigation down to the app the
+      # update relaunches, and that app then could not open any folder
+      # reached through a junction the user made (WinError 448).  Chocolatey
+      # stops at 6.7.1, and the runner may carry an older copy of its own,
+      # so the compiler is installed into its own folder and named to
+      # build.ps1 outright; the .iss refuses 6.7.0 - 6.7.3 as well.
       - name: Install Inno Setup
         shell: pwsh
         run: |
-          choco install innosetup -y --no-progress
-          echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+          $exe = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.4.exe'
+          Invoke-WebRequest -Uri 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe' -OutFile $exe
+          $sha = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+          if ($sha -ne 'a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c') { throw "innosetup-6.7.4.exe sha256 $sha does not match the pinned one" }
+          $dir = Join-Path $env:RUNNER_TEMP 'inno-6.7.4'
+          Start-Process -FilePath $exe -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CURRENTUSER', "/DIR=$dir" -Wait
+          if (-not (Test-Path (Join-Path $dir 'ISCC.exe'))) { throw "Inno Setup 6.7.4 did not install into $dir" }
+          "ISCC=$(Join-Path $dir 'ISCC.exe')" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
 
       - name: Build installer
         shell: pwsh
-        run: installer/build.ps1 -PythonCache (Join-Path $env:RUNNER_TEMP 'pad-python')
+        run: installer/build.ps1 -PythonCache (Join-Path $env:RUNNER_TEMP 'pad-python') -InnoSetupPath $env:ISCC
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

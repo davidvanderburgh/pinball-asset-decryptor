@@ -281,12 +281,76 @@ def test_the_start_script_announces_only_where_the_card_has_the_service():
     for text in (ssh_card.payload_bytes("sshd", {}, ssh_card.layout("stern-spike2")), ssh_jjp.start_script()):
         text = text.decode("ascii")
         assert "\r" not in text
-        assert '[ -x "$AVAHI" ] && [ -d /etc/avahi/services ] || return 0' in text
+        assert 'if [ -x "$AVAHI" ] && [ -d /etc/avahi/services ]; then' in text
         assert "<type>_pad-machine._tcp</type>" in text and "enable-dbus=no" in text
         # never in the way of the login, and everything it makes is in RAM
         assert "( announce ) </dev/null >/dev/null 2>&1 || true" in text
         assert "ANNOUNCE=/var/run/pad-announce" in text and "announce)" in text
         assert text.index('"$DAEMON" -P "$PIDFILE"') < text.index("( announce )")
+        # PAD-1631: JJP runs its own avahi: it is told to read its services again, never a second one started
+        # beside it, and never stopped by ours
+        body = text[text.index("announce() {"):text.index("announcing() {")]
+        assert body.index('if "$AVAHI" -c; then') < body.index('"$AVAHI" -r') < body.index("elif system_avahi")
+        stop = text[text.index("  stop)"):text.index("  restart)")]
+        assert '"$AVAHI" -k' in stop and stop.index('if [ -f "$ANNOUNCE/own" ]') < stop.index('"$AVAHI" -k')
+        assert "-k -f" not in stop
+        # PAD-1631: a Spike 3 card has no avahi but python3: the answerer runs from RAM, one at a time
+        assert "py=$(command -v python3 2>/dev/null) || return 0" in body
+        assert body.index('kill "$(cat "$ANNOUNCE/answer.pid")"') < body.index('cat > "$ANNOUNCE/answer.py"')
+
+
+def _answerer():
+    from pinball_decryptor.core import ssh_card
+    text = ssh_card.payload_bytes("sshd", {}, ssh_card.layout("stern-spike2")).decode("ascii")
+    return text.split("<<'PAD_ANSWER'\n", 1)[1].split("\nPAD_ANSWER\n", 1)[0]
+
+
+def test_the_answerer_of_a_card_with_no_avahi_answers_the_apps_question(tmp_path):
+    """PAD-1631: the answerer the start script runs on a Spike 3 card, run for real: the app's own question,
+    sent straight to it, gets the game, the SSH identity and the port back; any other question gets nothing."""
+    import os
+    import socket
+    import subprocess
+    import sys
+    import time
+    from pinball_decryptor.core import machine_announce as MA
+    script = tmp_path / "answer.py"
+    script.write_text(_answerer(), encoding="utf-8")
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    probe.bind(("127.0.0.1", 0))
+    port = probe.getsockname()[1]
+    probe.close()
+    env = dict(os.environ, PAD_ANSWER_PORT=str(port))
+    p = subprocess.Popen([sys.executable, "-I", str(script), "fallout_le", "ssh-ed25519 AAAAfallout"], env=env)
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.settimeout(0.3)
+    try:
+        got = None
+        end = time.monotonic() + 20
+        while got is None and time.monotonic() < end:
+            s.sendto(MA.question(), ("127.0.0.1", port))
+            try:
+                data, _src = s.recvfrom(9000)
+            except (socket.timeout, ConnectionResetError):   # not listening yet (Windows says so)
+                assert p.poll() is None, "the answerer stopped"
+                continue
+            got = MA.parse(data)
+        assert got is not None
+        assert got["game"] == "fallout_le" and got["host_key"] == ("ssh-ed25519", "AAAAfallout")
+        assert got["port"] == 22 and got["name"].startswith("PAD ")
+        # an A record with the address it was asked on
+        assert socket.inet_aton("127.0.0.1") in data
+        s.sendto(MA.question("_ssh._tcp.local"), ("127.0.0.1", port))
+        try:
+            s.recvfrom(9000)
+            raise AssertionError("answered a question that was not for it")
+        except socket.timeout:
+            pass
+        assert p.poll() is None
+    finally:
+        s.close()
+        p.kill()
+        p.wait(10)
 
 
 def test_only_a_machine_not_where_it_is_remembered_is_news(tmp_path, monkeypatch):
@@ -372,6 +436,8 @@ class _Machine:
         self.ran.append(script)
         words = script.replace("'", "").split()
         if "PAD_HAS" in script:
+            # PAD-1631: avahi, or python3 for the script's own answerer (a Spike 3 card)
+            assert "avahi-daemon" in script and "command -v python3" in script
             return 0, "PAD_HAS\n" if self.avahi else ""
         if "remount,rw" in script:
             return 0, "PAD_RW\n"
@@ -399,7 +465,7 @@ def test_a_machine_set_up_before_is_made_to_say_where_it_is():
     assert m.ran[-1] == "'/etc/init.d/sshd' announce" and not any("reboot" in r for r in m.ran)
     m.ran.clear()
     assert A.announce_to_machine(m) == "already" and not any("remount" in r for r in m.ran)
-    # a system with no announce service: the card is left as it was
+    # a system with neither avahi nor python3 to answer with: the card is left as it was
     old = _Machine({"/etc/init.d/sshd": b"old"}, avahi=False)
     assert A.announce_to_machine(old) == "none" and old.files == {"/etc/init.d/sshd": b"old"}
     # a file that did not arrive as sent changes nothing

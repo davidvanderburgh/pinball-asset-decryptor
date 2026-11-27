@@ -401,7 +401,10 @@ def test_an_unchanged_layered_test_is_taken_from_the_cache(tmp_path, monkeypatch
     assert made == ["place", "overlay"] and all(os.path.isfile(p) for p in first)
     w2 = tmp_path / "w2"
     w2.mkdir()
-    again = tc.layered_files(it, str(clip), str(w2), 0, log=lines.append)
+    # the same clip handed over from another temporary folder (a build's colour-profiled copy): still the same
+    moved = w2 / "video00.mp4"
+    moved.write_bytes(b"clip")
+    again = tc.layered_files(it, str(moved), str(w2), 0, log=lines.append)
     assert made == ["place", "overlay"], "nothing made again"
     assert open(again[0], "rb").read() == b"placed" and open(again[1], "rb").read() == b"ovl"
     assert any("unchanged since it was last made" in m for m in lines)

@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <errno.h>
 #include <math.h>
 #include <unistd.h>
@@ -129,6 +130,7 @@ struct state {
     int t_fw_s[FPS_WIN], t_fw_i, t_fw_n;
     long long t_fw_due, t_cap_due;
     const struct art_image *t_ovl_shown;     /* the scene's picture on the canvas now */
+    int t_ovl_x, t_ovl_y;                    /* ... and where, on the canvas */
     long long t_perf_due, t_draw_ms;         /* the video's 5 s account in the log */
     int t_draws;
     /* Simon (2026-11-22): on a moving test item "quick press to freeze, long press to back
@@ -902,6 +904,77 @@ static long long scene_ms(const struct state *st, long long now)
     return now - st->t_vstart;
 }
 
+/* where two pictures of the same size differ: 0 when they do not, else 1 and the rectangle (in the pictures) */
+static int picture_diff(const struct art_image *a, const struct art_image *b, int *rx, int *ry, int *rw, int *rh)
+{
+    size_t row = (size_t)a->w * 4;
+    int y0 = -1, y1 = -1, x0 = a->w, x1 = -1, y;
+    for (y = 0; y < a->h; y++)
+        if (memcmp(a->rgba + row * y, b->rgba + row * y, row)) { if (y0 < 0) y0 = y; y1 = y; }
+    if (y0 < 0) return 0;
+    for (y = y0; y <= y1; y++) {
+        const uint32_t *p = (const uint32_t *)(const void *)(a->rgba + row * y);
+        const uint32_t *q = (const uint32_t *)(const void *)(b->rgba + row * y);
+        int l = 0, r = a->w - 1;
+        while (l < x0 && p[l] == q[l]) l++;
+        if (l < x0) x0 = l;
+        while (r > x1 && p[r] == q[r]) r--;
+        if (r > x1) x1 = r;
+    }
+    if (x1 < x0) return 0;
+    *rx = x0; *ry = y0; *rw = x1 - x0 + 1; *rh = y1 - y0 + 1;
+    return 1;
+}
+
+static void unite(int *x0, int *y0, int *x1, int *y1, int x, int y, int w, int h)
+{
+    if (w <= 0 || h <= 0) return;
+    if (*x1 <= *x0 || *y1 <= *y0) { *x0 = x; *y0 = y; *x1 = x + w; *y1 = y + h; return; }
+    if (x < *x0) *x0 = x;
+    if (y < *y0) *y0 = y;
+    if (x + w > *x1) *x1 = x + w;
+    if (y + h > *y1) *y1 = y + h;
+}
+
+/* THE LAYERED TEST'S NEXT PICTURE, over a clip the graphics chip draws: only where it differs from the one shown.
+ * Simon (2026-11-27, the table): "still had the frame rate problem" - the menu's own log: while the Match digit
+ * zooms in (a new picture a frame), 27 of 57 frames late, against 17 of 121 before it.  Each new picture painted
+ * the whole canvas again (black, the clip's hole, the picture blended a pixel at a time - and, with the caption up,
+ * the whole test screen) and sent the whole screen to the graphics chip: ~1M pixels on the Cortex-A9 for a digit.
+ * Now only the rectangle where the old and new pictures differ is painted and sent; the caption band again only
+ * when that rectangle reaches it. */
+static void repaint_overlay(struct state *st, const struct art_image *was, int wx, int wy,
+                            const struct art_image *im, int ix, int iy, int cw, int ch)
+{
+    struct settings_env *e = st->e;
+    int W = e->g->w, H = e->g->h, cx = (W - cw) / 2, cy = (H - ch) / 2;
+    int vx = (W - st->t_vw) / 2, vy = (H - st->t_vh) / 2;
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0, rx, ry, rw, rh, a0, b0, a1, b1;
+    if (was && im && wx == ix && wy == iy && was->w == im->w && was->h == im->h) {
+        if (picture_diff(was, im, &rx, &ry, &rw, &rh)) unite(&x0, &y0, &x1, &y1, cx + ix + rx, cy + iy + ry, rw, rh);
+    } else {
+        if (was) unite(&x0, &y0, &x1, &y1, cx + wx, cy + wy, was->w, was->h);
+        if (im) unite(&x0, &y0, &x1, &y1, cx + ix, cy + iy, im->w, im->h);
+    }
+    st->t_ovl_shown = im;
+    st->t_ovl_x = ix;
+    st->t_ovl_y = iy;
+    /* inside the canvas */
+    if (x0 < cx) x0 = cx;
+    if (y0 < cy) y0 = cy;
+    if (x1 > cx + cw) x1 = cx + cw;
+    if (y1 > cy + ch) y1 = cy + ch;
+    if (x1 <= x0 || y1 <= y0) return;
+    gfx_rect(e->g, x0, y0, x1 - x0, y1 - y0, 0x000000);
+    /* the clip's hole, where it falls in the rectangle */
+    a0 = x0 > vx ? x0 : vx; b0 = y0 > vy ? y0 : vy;
+    a1 = x1 < vx + st->t_vw ? x1 : vx + st->t_vw; b1 = y1 < vy + st->t_vh ? y1 : vy + st->t_vh;
+    if (a1 > a0 && b1 > b0) gfx_clear(e->g, a0, b0, a1 - a0, b1 - b0);
+    if (im) gfx_blit_part(e->g, cx + ix, cy + iy, im->rgba, im->w, im->h,
+                          x0 - (cx + ix), y0 - (cy + iy), x1 - x0, y1 - y0);
+    if (st->t_caption && y1 > H - (int)(96 * S(e))) draw_caption(st, 1);
+}
+
 /* THE LAYERED TEST (overlay.h): the scene's frame for the clip's time, over the clip,
  * after the colour correction - the scene is the game's own drawing, not the picture
  * under test; the canvas is centred on the screen, as the clip is */
@@ -913,6 +986,8 @@ static void draw_overlay(struct state *st, long long now)
     if (!st->t_ovl) return;
     im = ovl_at(st->t_ovl, scene_ms(st, now), &x, &y);
     st->t_ovl_shown = im;
+    st->t_ovl_x = x;
+    st->t_ovl_y = y;
     if (!im) return;
     ovl_canvas(st->t_ovl, &cw, &ch);
     gfx_blit(e->g, (e->g->w - cw) / 2 + x, (e->g->h - ch) / 2 + y, im->rgba, im->w, im->h);
@@ -1048,15 +1123,12 @@ static void draw_test_frame(struct state *st)
         /* the frame went to the graphics chip already (test_tick): the canvas changes
          * only when the scene over it moves to another picture */
         int ox, oy, cw, ch;
+        const struct art_image *was = st->t_ovl_shown;
         if (!st->t_ovl || !st->t_vw) return;
-        if (ovl_at(st->t_ovl, scene_ms(st, sel_now_ms()), &ox, &oy) == st->t_ovl_shown) return;
+        im = ovl_at(st->t_ovl, scene_ms(st, sel_now_ms()), &ox, &oy);
+        if (im == was) return;
         ovl_canvas(st->t_ovl, &cw, &ch);
-        x = (W - st->t_vw) / 2;
-        y = (H - st->t_vh) / 2;
-        gfx_rect(e->g, (W - cw) / 2, (H - ch) / 2, cw, ch, 0x000000);
-        gfx_clear(e->g, x, y, st->t_vw, st->t_vh);
-        draw_overlay(st, sel_now_ms());
-        if (st->t_caption && y + st->t_vh > H - (int)(96 * S(e))) draw_test(st);
+        repaint_overlay(st, was, st->t_ovl_x, st->t_ovl_y, im, ox, oy, cw, ch);
         return;
     }
     im = st->t_vid ? vid_current(st->t_vid) : art_anim_frame(st->t_anim, st->t_frame);

@@ -560,7 +560,17 @@ def _layered_key(item, clip):
             return [p, st.st_size, int(st.st_mtime)]
         except OSError:
             return [p, None]
-    parts = [list(item.layers), getattr(item, "player", ""), bool(getattr(item, "plain", False)), stamp(clip),
+    def contents(p):
+        # the clip by what is in it: a build hands it over from a new temporary folder each time
+        h = hashlib.sha1()
+        try:
+            with open(p, "rb") as f:
+                for block in iter(lambda: f.read(1 << 20), b""):
+                    h.update(block)
+        except OSError:
+            return None
+        return h.hexdigest()
+    parts = [list(item.layers), getattr(item, "player", ""), bool(getattr(item, "plain", False)), contents(clip),
              stamp(os.path.join(item.project, "images", "scene_textures", "scene_tree.json")),
              stamp(os.path.join(item.project, ".staged_changes.json")),
              stamp(LT.__file__), stamp(SR.__file__), stamp(__file__)]

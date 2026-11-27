@@ -169,10 +169,18 @@ void gfx_round_frame(struct gfx *g, int x, int y, int w, int h, int r, int t,
 
 void gfx_blit(struct gfx *g, int x, int y, const unsigned char *rgba, int w, int h)
 {
-    int sx0 = 0, sy0 = 0, sx1 = w, sy1 = h, yy, xx;
+    gfx_blit_part(g, x, y, rgba, w, h, 0, 0, w, h);
+}
+
+void gfx_blit_part(struct gfx *g, int x, int y, const unsigned char *rgba, int w, int h,
+                   int rx, int ry, int rw, int rh)
+{
+    int sx0 = rx > 0 ? rx : 0, sy0 = ry > 0 ? ry : 0, sx1 = rx + rw, sy1 = ry + rh, yy, xx;
     if (!rgba || w <= 0 || h <= 0) return;
-    if (x < 0) sx0 = -x;
-    if (y < 0) sy0 = -y;
+    if (sx1 > w) sx1 = w;
+    if (sy1 > h) sy1 = h;
+    if (x + sx0 < 0) sx0 = -x;
+    if (y + sy0 < 0) sy0 = -y;
     if (x + sx1 > g->w) sx1 = g->w - x;
     if (y + sy1 > g->h) sy1 = g->h - y;
     if (sx1 <= sx0 || sy1 <= sy0) return;

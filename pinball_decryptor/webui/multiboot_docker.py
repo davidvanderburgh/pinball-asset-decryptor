@@ -54,7 +54,9 @@ tests/test_multiboot_docker.py.  :func:`unavailable_reason` is the guard: if
 Docker is not there, the tab says so and runs nothing.
 """
 
+import hashlib
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -737,6 +739,263 @@ def unshared_reason(unseen):
             % (folders, it, that, it))
 
 
+# ---------------------------------------------------------------------------
+# a file the container SEES but cannot READ (PAD-1630)
+# ---------------------------------------------------------------------------
+#
+# A Mac's engine can list a folder, and stat a file in it, and still hand the
+# container nothing of what is IN the file.  Dustin's Iron Maiden card was
+# there at /host/... (``[ -f ]`` true, the PAD-885 share check passed) and its
+# first sector read as no card at all, so every step said "no MBR signature -
+# not a card image?" about a card the app itself had just read: the guest
+# filesystem was never unpacked, the menu program could not be compiled, and
+# the size check and the Build failed with it.  macOS guards Documents,
+# Desktop, Downloads, iCloud Drive and removable disks per app (Privacy &
+# Security > Files and Folders), and an iCloud file left in the cloud is only
+# a name until something on the Mac opens it; the container engine is not
+# the app the person said yes to.  ~/Library/Caches is none of those, and the
+# cache is mounted and read from on every run.
+#
+# So each file a run reads is compared, first sector against first sector,
+# with what the Mac reads.  One that differs is CLONED into the cache
+# (``cp -c``: APFS clonefile, instant and no extra space on the same volume,
+# made by the app, which may read it) and every step reads the clone instead
+# (:func:`remap_argv`).  One that cannot be cloned stops the run with what is
+# wrong and what to do about it.
+
+#: Host path -> ((size, mtime_ns), clone's host path) for a file the
+#: container reads through a clone in the cache.
+_CLONES = {}
+
+#: Host path -> (size, mtime_ns) of a file the container was seen to read
+#: just as the Mac does.
+_READ_OK = {}
+
+#: Clones live here, one folder per original (a hash of its path).
+_CLONE_DIR = "readable"
+
+_HEAD_PY = (
+    "import sys\n"
+    "for p in sys.argv[1:]:\n"
+    "    try:\n"
+    "        with open(p, 'rb') as f:\n"
+    "            b = f.read(512)\n"
+    "        print('OK %d %s' % (len(b), b.hex()))\n"
+    "    except OSError as e:\n"
+    "        print('ERR %s' % (e.strerror or e))\n"
+    "    sys.stdout.flush()\n")
+
+
+class Unreadable(RuntimeError):
+    """Files the container cannot read as the Mac does, and no clone helped:
+    ``files`` is ``[(host path, what the container read)]``."""
+
+    def __init__(self, files):
+        self.files = list(files)
+        RuntimeError.__init__(self, unreadable_reason(self.files))
+
+
+def unreadable_reason(files):
+    """The sentence for :class:`Unreadable`."""
+    names = ", ".join("%s (%s)" % (os.path.basename(p) or p, seen)
+                      for p, seen in files)
+    return ("The Linux container this Mac runs the tools in can see %s but "
+            "cannot read what is in it, so the tools would take it for no "
+            "card at all. macOS lets an app into Documents, Desktop, "
+            "Downloads, iCloud Drive and external disks only with your "
+            "permission, and the container engine (Docker, OrbStack or "
+            "Colima) is a separate app from this one. Give it that access in "
+            "System Settings > Privacy & Security > Files and Folders (or "
+            "Full Disk Access), or move the file into a folder of its own in "
+            "your home folder, and try again. A file kept in iCloud must be "
+            "downloaded to this Mac too." % names)
+
+
+def _stamp(path):
+    st = os.stat(path)
+    return (st.st_size, st.st_mtime_ns)
+
+
+def _seen(line):
+    """What a :data:`_HEAD_PY` line says the container read, in words."""
+    line = (line or "").strip()
+    if line.startswith("ERR"):
+        return "it will not open there: %s" % (line[3:].strip() or "error")
+    parts = line.split(" ", 2)
+    try:
+        n = int(parts[1])
+    except (IndexError, ValueError):
+        return "the container gave no answer for it"
+    if n == 0:
+        return "it reads as empty there"
+    data = parts[2] if len(parts) > 2 else ""
+    if not data.strip("0"):
+        return "it reads as zeros there"
+    return "its first bytes read differently there"
+
+
+def _heads(cpaths):
+    """One :data:`_HEAD_PY` line per container path, or None when the
+    container could not be asked."""
+    if not cpaths:
+        return []
+    try:
+        r = _docker(["exec", CONTAINER, "python3", "-c", _HEAD_PY]
+                    + list(cpaths), timeout=90)
+    except Exception:                                   # noqa: BLE001
+        return None
+    lines = [x for x in (r.stdout or "").split("\n") if x.strip()]
+    if r.returncode != 0 or len(lines) != len(cpaths):
+        return None
+    return lines
+
+
+def _clone_path(path):
+    h = hashlib.sha1(_norm(path).encode("utf-8")).hexdigest()[:16]
+    return os.path.join(cache_root(), _CLONE_DIR, h,
+                        os.path.basename(_norm(path)) or "file")
+
+
+def _rm_dir(d):
+    try:
+        for n in os.listdir(d):
+            os.remove(os.path.join(d, n))
+        os.rmdir(d)
+    except OSError:
+        pass
+
+
+def _drop_clone(path):
+    """Remove *path*'s clone, if it has one."""
+    _CLONES.pop(path, None)
+    d = os.path.dirname(_clone_path(path))
+    if os.path.isdir(d):
+        _rm_dir(d)
+
+
+def _prune_clones():
+    """Clones left by an earlier session that nothing uses now: an
+    original rewritten since holds its old blocks, so each would cost the
+    card's size."""
+    root = os.path.join(cache_root(), _CLONE_DIR)
+    keep = set(os.path.dirname(_clone_path(p)) for p in _CLONES)
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    for n in names:
+        d = os.path.join(root, n)
+        if d not in keep and os.path.isdir(d):
+            _rm_dir(d)
+
+
+def _clone(path):
+    """Clone *path* into the cache; its host path, or None.  Clone only, never
+    a full copy: a card is 8 GB or more, written to a cache the person never
+    sees."""
+    _drop_clone(path)
+    dst = _clone_path(path)
+    try:
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        ok = _clonefile(path, dst)
+    except Exception:                                   # noqa: BLE001
+        ok = False
+    if not ok or not os.path.isfile(dst):
+        _rm_dir(os.path.dirname(dst))
+        return None
+    return dst
+
+
+def _clonefile(src, dst):
+    """APFS clonefile through ``cp -c``, which refuses rather than copies
+    when the two are not on one APFS volume.  True when it made *dst*."""
+    r = subprocess.run(["/bin/cp", "-c", src, dst], capture_output=True,
+                       text=True, timeout=120)
+    return r.returncode == 0
+
+
+def settle_reads(files, log=None):
+    """See the comment above: make every file in *files* readable in the
+    container as it is on the Mac, cloning where it is not.  Raises
+    :class:`Unreadable` for one that stays unreadable.  A file the Mac
+    cannot read itself, or a container that cannot be asked, is left to the
+    steps."""
+    cache = _norm(cache_root())
+    todo = []
+    for p in files or ():
+        p = _norm((p or "").strip().strip('"'))
+        if (not os.path.isabs(p) or p == cache
+                or p.startswith(cache + "/")):
+            continue
+        try:
+            if not os.path.isfile(p):
+                continue
+            key = _stamp(p)
+            with open(p, "rb") as f:
+                head = f.read(512)
+        except OSError:
+            continue
+        if not head or _READ_OK.get(p) == key:
+            continue
+        c = _CLONES.get(p)
+        if c and c[0] == key and os.path.isfile(c[1]):
+            continue
+        todo.append((p, key, head))
+    if not todo:
+        return
+    lines = _heads([container_path(p) for p, _, _ in todo])
+    if lines is None:
+        return
+    bad = []
+    for (p, key, head), line in zip(todo, lines):
+        if line.strip() == "OK %d %s" % (len(head), head.hex()):
+            _READ_OK[p] = key
+            _drop_clone(p)
+        else:
+            bad.append((p, key, head, _seen(line)))
+    if not bad:
+        return
+    _prune_clones()
+    tried = [(p, key, head, seen, _clone(p)) for p, key, head, seen in bad]
+    made = [t for t in tried if t[4]]
+    lines = _heads([container_path(t[4]) for t in made]) or []
+    good = set()
+    for t, line in zip(made, lines):
+        if line.strip() == "OK %d %s" % (len(t[2]), t[2].hex()):
+            good.add(t[0])
+    refused = []
+    for p, key, head, seen, dst in tried:
+        if p in good:
+            _CLONES[p] = (key, dst)
+            if log:
+                log("%s is there in the Linux container but %s (macOS keeps "
+                    "the container engine out of that folder), so the tools "
+                    "read a clone of it in the app's cache instead: made in "
+                    "an instant, and it takes no extra space."
+                    % (os.path.basename(p), seen))
+        else:
+            if dst:
+                _drop_clone(p)
+            refused.append((p, seen))
+    if refused:
+        raise Unreadable(refused)
+
+
+def remap_argv(argv):
+    """*argv* (a container exec, its shell line last) with every file
+    :func:`settle_reads` cloned named by its clone instead."""
+    if not _CLONES or not argv or not isinstance(argv[-1], str):
+        return argv
+    line = argv[-1]
+    for p, (_key, dst) in list(_CLONES.items()):
+        to = container_path(dst)
+        line = re.sub(re.escape(container_path(p)) + r"(?=$|[\s'\";|&)<>+])",
+                      lambda _m, t=to: t, line)
+    if line == argv[-1]:
+        return argv
+    return list(argv[:-1]) + [line]
+
+
 def ensure_container(paths, repo_src, log=None):
     """Make sure a container is up that can see every path in *paths*.
 
@@ -750,6 +1009,9 @@ def ensure_container(paths, repo_src, log=None):
     since that one was mounted the same way.  One that cannot is removed
     and the run stops here with the way to share the folders.
 
+    What it sees it must also READ (PAD-1630): the tab calls
+    :func:`settle_reads` with the run's input files once this is done.
+
     Under :data:`_LOCK`: a Build asked for while a preview's worker is in
     :func:`ensure_ready_container` would otherwise ``rm -f`` and ``run`` the
     same container name beside it, and one of the two ``docker run`` calls
@@ -759,6 +1021,7 @@ def ensure_container(paths, repo_src, log=None):
         _ensure_container(paths, repo_src, log)
         _PREVIEW_REFUSED.clear()
         _BUILD_FAILED.clear()
+        _UNREADABLE_SAID.clear()
 
 
 def _ensure_container(paths, repo_src, log):
@@ -806,6 +1069,8 @@ def ensure_ready_container(paths, repo_src, log=None):
     A mount set the engine could not see (:class:`Unshared`) or a failed
     image build is not tried again on the next redraw: that would retry on
     every keystroke.  A writing run (:func:`ensure_container`) clears both.
+
+    The preview then hands its input files to :func:`settle_reads_quietly`.
     """
     want = frozenset(mount_points(paths))
     with _LOCK:
@@ -845,6 +1110,21 @@ def ensure_ready_container(paths, repo_src, log=None):
     return True
 
 
+def settle_reads_quietly(reads, log=None):
+    """:func:`settle_reads` for a preview: never raises, and says a file it
+    cannot make readable once per session, not on every redraw."""
+    try:
+        settle_reads(reads, log)
+    except Unreadable as exc:
+        msg = str(exc)
+        if msg not in _UNREADABLE_SAID:
+            _UNREADABLE_SAID.add(msg)
+            if log:
+                log(msg)
+    except Exception:                                   # noqa: BLE001
+        pass
+
+
 #: Held by :func:`ensure_container` and :func:`ensure_ready_container`: the
 #: UI thread's writing run and the preview's worker share one container.
 _LOCK = threading.RLock()
@@ -857,6 +1137,9 @@ _BUILD_FAILED = set()
 
 #: Repo sources :func:`stage_rig` has copied in this app session.
 _STAGED = set()
+
+#: :class:`Unreadable` sentences a preview has put in the Log already.
+_UNREADABLE_SAID = set()
 
 
 def exec_argv(line):

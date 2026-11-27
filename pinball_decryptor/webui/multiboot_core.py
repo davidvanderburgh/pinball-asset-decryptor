@@ -3422,7 +3422,12 @@ def container_note(text):
                 "Build / flash card... builds its image the first time (a few "
                 "minutes) and starts it; the preview and the size check never "
                 "build one behind you, so they stay blank until then.")
-    if "/host/" in t and any(m in t for m in _UNMOUNTED_HOST):
+    # ON ONE LINE (PAD-1630): a run's output that names a /host/ card on one
+    # line and has a compiler's "stdio.h: No such file or directory" on
+    # another is no folder missing from the container, and saying so sent
+    # Dustin to mount a folder that was mounted.
+    if any("/host/" in ln and any(m in ln for m in _UNMOUNTED_HOST)
+           for ln in t.split("\n")):
         return ("The Linux container this Mac runs the tools in does not have "
                 "this folder mounted yet. Build / flash card... mounts it, and "
                 "offers to share it with the engine if the engine cannot see "
@@ -14622,6 +14627,8 @@ class MultibootPanel:
         guards.  Split out so a queued action can be started from the
         render's own finish without going through them again."""
         paths = self._run_paths() if preview and _mac.enabled() else ()
+        reads = (getattr(self, "_read_paths", tuple)()
+                 if preview and _mac.enabled() else ())
         log_fn = getattr(self, "_warm_log", self._append)
 
         def run():
@@ -14631,6 +14638,9 @@ class MultibootPanel:
                 # spawning a process against a container that is not up.
                 mac_ready = _mac.ensure_ready_container(
                     paths, rig_repo_dir(), log=log_fn)
+                if mac_ready and reads:
+                    # PAD-1630: a card it sees but cannot read
+                    _mac.settle_reads_quietly(reads, log_fn)
             rc = 0
             failed = None
             texts = {}
@@ -14686,6 +14696,10 @@ class MultibootPanel:
                     self._say_once(container_note(texts[label]))
                     rc, failed = 1, label
                     break
+                if is_container_exec:
+                    # a picked file the container reads through a clone
+                    # (PAD-1630, multiboot_docker.settle_reads)
+                    argv = _mac.remap_argv(argv)
                 self._append("$ " + argv[-1])
                 try:
                     if root_line is not None:
@@ -14823,12 +14837,16 @@ class MultibootPanel:
         except Exception:                               # noqa: BLE001
             pass
         paths = self._run_paths()       # reads the form: main thread only
+        reads = getattr(self, "_read_paths", tuple)()
         box = {}
 
         def work():
             try:
                 _mac.ensure_container(paths, rig_repo_dir(),
                                       log=self._append)
+                # PAD-1630: a card it sees but cannot read is read through a
+                # clone, or the run stops here saying why (Unreadable)
+                _mac.settle_reads(reads, log=self._append)
             except Exception as exc:                    # noqa: BLE001
                 box["exc"] = exc
 
@@ -14945,6 +14963,23 @@ class MultibootPanel:
             paths.append(md)
         return paths
 
+    def _read_paths(self):
+        """The files a run takes in - the cards and the menu's pictures,
+        clips and sounds - for :func:`multiboot_docker.settle_reads`.  Never
+        the output: a clone of last time's card is not where this one goes."""
+        paths = []
+        try:
+            form = self.form()
+        except Exception:                               # noqa: BLE001
+            return paths
+        for row in (form.images or []):
+            for p in row_paths(row):
+                sp = split_edits(p)
+                paths.append(sp[0] if sp else p)    # base card + edits
+        paths += media_source_paths(form)
+        out = (form.out or "").strip().strip('"')
+        return [p for p in paths if p and p != out]
+
     def _warm_log(self, line):
         """Log a container warm-up or image-build line, and show it on the
         preview caption strip while no frame is on screen yet."""
@@ -14969,11 +15004,14 @@ class MultibootPanel:
                 or getattr(self, "_warming_container", False)):
             return False
         paths = self._run_paths()
+        reads = getattr(self, "_read_paths", tuple)()
         self._warming_container = True
 
         def work():
             ok = _mac.ensure_ready_container(
                 paths, rig_repo_dir(), log=self._warm_log)
+            if ok and reads:
+                _mac.settle_reads_quietly(reads, self._warm_log)
 
             def back():
                 self._warming_container = False

@@ -371,6 +371,8 @@ def test_network_tab_scan_remembers_every_machine_and_picks_one(tmp_path, monkey
         note = w.state('network')['scan_note']
         assert w.state('network')['scan_kind'] == 'err' and 'Found no device with remote login' in note
         assert 'Looked at 1022 addresses on 192.168.4.0/22, the 57 devices this computer knew of first' in note
+        # PAD-1642: a card written whole without its settings has forgotten the machine's Wi-Fi
+        assert "has forgotten your Wi-Fi network: join it again from the machine's own menu" in note
 
 
 def test_check_connection_finds_the_machine_at_another_address(tmp_path, monkeypatch):

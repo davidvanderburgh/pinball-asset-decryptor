@@ -302,7 +302,7 @@ def test_the_runtime_wiring():
     assert "cpk_have_now()" in R._lift(src, "static int cselm_picked_follows(int c)\n{")
     for name, kind in (("ci", "CMM_INTRO"), ("ccer", "CMM_CER"), ("cselm", "CMM_SELM")):
         body = R._lift(src, "static void %s_sound_line(" % name)
-        assert "cmm_mode_of(mds)" in body and "cmm_add(%s, 0, m" % kind in body
+        assert "cmm_mode_of(mds)" in body and "cmm_add(%s, 0, m, h, ms)" % kind in body and "if (m == 1 || " in body
     assert "cmm_add(CMM_PICK, (int)n, m" in R._lift(src, "static void cpk_sound_line(")
     for disp in ("ci_sound_line(f[1], f[2], f[3], f[4], n >= 6 ? f[5] : 0)",
                  "ccer_sound_line(f[1], f[2], f[3], f[4], n >= 6 ? f[5] : 0)",
@@ -327,3 +327,15 @@ def test_the_dialogs_grid(project, tmp_path):
     CP.save_intro(project, _file(tmp_path, "intro.mp4"))
     rows = {r["kind"]: r for r in ModesTab._coop_by_mode(None, project, CP.load_characters(project))["rows"]}
     assert rows["intro"]["plain"] == "intro_video.mp4"
+
+
+def test_co_op_mode_files_alone_keep_the_music_mode_setting():
+    # the emulator set (Godzilla LE 1.16, no music mode files on the Audio tab): the first build wrote sounds.cfg with
+    # no `setting` line, so the runtime could never read MUSIC MODE and every mode played mode 1's
+    import inspect
+    from pinball_decryptor.plugins.stern import engine as E
+    src = inspect.getsource(E._sound_modes_cfg)
+    assert 'coop_mm = bool((intro or {}).get("by_mode"))' in src
+    assert "if modes.count and not sounds and not bsids and not coop_mm:" in src
+    assert "modes.count if sounds or bsids or coop_mm else 0" in src
+    assert src.index("intro = _intro_lines(") < src.index("coop_mm = ")

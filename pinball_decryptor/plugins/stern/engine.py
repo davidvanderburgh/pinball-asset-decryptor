@@ -14088,7 +14088,8 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     except (RuntimeError, ValueError, OSError, struct.error) as e:
         log("%s: not put on this card: %s. Every sound plays its own." % (who, e), "warning")
         return ""
-    if modes.count and not sounds and not bsids:
+    coop_mm = bool((intro or {}).get("by_mode"))     # PAD-1637: co-op's own files in a music mode want it too
+    if modes.count and not sounds and not bsids and not coop_mm:
         log("Music modes: none of the files for the other modes can be played on this card, so "
             "MUSIC MODE is not added.", "warning")
         if not turns and not tsids and not jukebox and not attract and not shots and not intro and not speak:
@@ -14122,7 +14123,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
-        f.write(_SMo.cfg_text(live, modes.count if sounds or bsids else 0, sounds, only,
+        f.write(_SMo.cfg_text(live, modes.count if sounds or bsids or coop_mm else 0, sounds, only,
                               turns=turns, bsids=bsids, tsids=tsids, randoms=randoms, attract=attract,
                               jukebox=jukebox, shots=shots, intro=intro, speak=speak,
                               record=_SMo.card_record(modes, used + banked)))

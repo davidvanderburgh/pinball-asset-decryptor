@@ -31079,14 +31079,18 @@ static unsigned cpk_have_now(void)
 static void ci_sound_line(const char *rs, const char *ks, const char *hs, const char *mss, const char *mds)
 {
     const char *p = rs;
-    int ok, ok2, m = cmm_mode_of(mds);
+    unsigned char h[8];
+    int ok, ok2, k, m = cmm_mode_of(mds);
     unsigned r = (unsigned)number(&p, &ok), ms;
     p = mss;
     ms = (unsigned)number(&p, &ok2);
-    if (!ok || !ok2 || !r || m < 0 || !key_hex(ks, ci.key) || !key_hex(hs, ci.host)) { ci_bad++; return; }
+    if (!ok || !ok2 || !r || m < 0 || !key_hex(ks, ci.key) || !key_hex(hs, h)) { ci_bad++; return; }
+    if (m == 1 || !ci.request) {                     /* PAD-1637: mode 1's, the arm line's (a play takes its mode's) */
+        for (k = 0; k < 8; k++) ci.host[k] = h[k];
+        ci.sound_ms = ms;
+    }
     ci.request = r;
-    ci.sound_ms = ms;
-    cmm_add(CMM_INTRO, 0, m, ci.host, ms);   /* PAD-1637: music mode m's (no mode field: mode 1's) */
+    cmm_add(CMM_INTRO, 0, m, h, ms);   /* PAD-1637: music mode m's (no mode field: mode 1's) */
 }
 
 /* PAD-1123: sounds.cfg `cpick <n> <request> <carrier's key> <the sound's key> <ms>` (the intro's carrier) */
@@ -31095,18 +31099,22 @@ static void cpk_sound_line(const char *ns, const char *rs, const char *ks, const
                            const char *mds)
 {
     const char *p = ns;
-    int ok, ok2, ok3, m = cmm_mode_of(mds);
+    unsigned char h[8];
+    int ok, ok2, ok3, k, m = cmm_mode_of(mds);
     unsigned n = (unsigned)number(&p, &ok), r, ms;
     p = rs;
     r = (unsigned)number(&p, &ok2);
     p = mss;
     ms = (unsigned)number(&p, &ok3);
     if (!ok || !ok2 || !ok3 || !r || n < 1 || n > CPK_CHARS || (cpk.request && cpk.request != r) || m < 0
-        || !key_hex(ks, cpk.key) || !key_hex(hs, cpk.host[n - 1])) { cpk_bad++; return; }
+        || !key_hex(ks, cpk.key) || !key_hex(hs, h)) { cpk_bad++; return; }
+    if (m == 1 || !(cpk.have_sound >> (n - 1) & 1u)) {   /* PAD-1637: mode 1's first (a play takes its mode's) */
+        for (k = 0; k < 8; k++) cpk.host[n - 1][k] = h[k];
+        cpk.sound_ms[n - 1] = ms;
+    }
     cpk.request = r;
-    cpk.sound_ms[n - 1] = ms;
     cpk.have_sound |= 1u << (n - 1);
-    cmm_add(CMM_PICK, (int)n, m, cpk.host[n - 1], ms);   /* PAD-1637 */
+    cmm_add(CMM_PICK, (int)n, m, h, ms);   /* PAD-1637 */
 }
 
 /* from sndm_arm: the record lookup's hook for the characters' sounds */
@@ -31136,14 +31144,18 @@ static int ccer_bad;
 static void ccer_sound_line(const char *rs, const char *ks, const char *hs, const char *mss, const char *mds)
 {
     const char *p = rs;
-    int ok, ok2, m = cmm_mode_of(mds);
+    unsigned char h[8];
+    int ok, ok2, k, m = cmm_mode_of(mds);
     unsigned r = (unsigned)number(&p, &ok), ms;
     p = mss;
     ms = (unsigned)number(&p, &ok2);
-    if (!ok || !ok2 || !r || m < 0 || !key_hex(ks, ccer.key) || !key_hex(hs, ccer.host)) { ccer_bad++; return; }
+    if (!ok || !ok2 || !r || m < 0 || !key_hex(ks, ccer.key) || !key_hex(hs, h)) { ccer_bad++; return; }
+    if (m == 1 || !ccer.request) {                     /* PAD-1637: mode 1's, the arm line's (a play takes its mode's) */
+        for (k = 0; k < 8; k++) ccer.host[k] = h[k];
+        ccer.sound_ms = ms;
+    }
     ccer.request = r;
-    ccer.sound_ms = ms;
-    cmm_add(CMM_CER, 0, m, ccer.host, ms);   /* PAD-1637: music mode m's (no mode field: mode 1's) */
+    cmm_add(CMM_CER, 0, m, h, ms);   /* PAD-1637: music mode m's (no mode field: mode 1's) */
 }
 
 /* from sndm_arm: the record lookup's hook for the ceremony's music */
@@ -31172,14 +31184,18 @@ static int cselm_bad;
 static void cselm_sound_line(const char *rs, const char *ks, const char *hs, const char *mss, const char *mds)
 {
     const char *p = rs;
-    int ok, ok2, m = cmm_mode_of(mds);
+    unsigned char h[8];
+    int ok, ok2, k, m = cmm_mode_of(mds);
     unsigned r = (unsigned)number(&p, &ok), ms;
     p = mss;
     ms = (unsigned)number(&p, &ok2);
-    if (!ok || !ok2 || !r || m < 0 || !key_hex(ks, cselm.key) || !key_hex(hs, cselm.host)) { cselm_bad++; return; }
+    if (!ok || !ok2 || !r || m < 0 || !key_hex(ks, cselm.key) || !key_hex(hs, h)) { cselm_bad++; return; }
+    if (m == 1 || !cselm.request) {                     /* PAD-1637: mode 1's, the arm line's (a play takes its mode's) */
+        for (k = 0; k < 8; k++) cselm.host[k] = h[k];
+        cselm.sound_ms = ms;
+    }
     cselm.request = r;
-    cselm.sound_ms = ms;
-    cmm_add(CMM_SELM, 0, m, cselm.host, ms);   /* PAD-1637: music mode m's (no mode field: mode 1's) */
+    cmm_add(CMM_SELM, 0, m, h, ms);   /* PAD-1637: music mode m's (no mode field: mode 1's) */
 }
 
 /* from sndm_arm: the record lookup's hook for the character select's music */

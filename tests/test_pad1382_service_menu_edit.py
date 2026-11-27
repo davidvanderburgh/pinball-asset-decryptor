@@ -30,7 +30,7 @@ def test_the_order_lives_in_the_sidecar(tmp_path):
 
 
 def test_the_owners_order_comes_first_then_the_engines(tmp_path):
-    p = _project(tmp_path, {"coop_play": {"on": True, "menu": True}, "handicap": {"on": True},
+    p = _project(tmp_path, {"coop_play": {"on": True, "row": True}, "handicap": {"on": True},
                             "service_menu": {"order": ["handicap"],
                                              "custom": [{"name": "Old", "values": ["x", "y"]}]}})
     assert [r[0] for r in SM.wanted(p)] == ["handicap", "coop_play"]   # a round 3 project's own settings are gone;
@@ -57,7 +57,7 @@ def test_the_real_menu_is_read_by_a_rig_script_of_the_emulates():
 
 def test_the_tab_orders_and_switches(tmp_path):
     from tests.webui_harness import web_app
-    p = _project(tmp_path, {"handicap": {"on": True}, "coop_play": {"on": True, "menu": True}})
+    p = _project(tmp_path, {"handicap": {"on": True}, "coop_play": {"on": True, "row": True}})
     with web_app(tmp_path / "app") as w:
         modes = w.window.service("modes")
         var = modes._project_var() if modes is not None else None

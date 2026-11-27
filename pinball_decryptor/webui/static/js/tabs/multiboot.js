@@ -53,12 +53,6 @@ const setPowerUp = (s, v) => {
   if (v === "hidden") setField(NS, "boot_menu", "hidden", { flush: true });
   else if (s.boot_menu === "hidden") setField(NS, "boot_menu", "flipper", { flush: true });
 };
-// ...and the countdown, as the service menus' BOOT MENU TIMER offers it (Simon: "OFF/15 seconds. 30 seconds"); a card
-// built with another value keeps it as a choice of its own
-const timerOpts = (v) => {
-  const opts = [{ value: "0", label: "Off (wait for START)" }, { value: "15", label: "15 s" }, { value: "30", label: "30 s" }];
-  return ["0", "15", "30"].includes(String(v)) ? opts : opts.concat([{ value: String(v), label: v + " s" }]);
-};
 const fid = (k) => FID + k;
 
 // ------------------------------------------------- Tk's _Modal, on the page
@@ -713,10 +707,7 @@ function MenuDialog({ s, w }) {
     <${Box} legend="At power-up">
       <div class="kv mb-kv2">
         <label class="k" for=${fid("timeout")}>Countdown (s):</label>
-        ${md.flip_ok ? html`<div class="row wrap"><${Select} id=${fid("timeout")} ns=${NS} k="timeout" value=${String(s.timeout)} width=${180}
-            options=${timerOpts(s.timeout)} />
-          <span class="small muted">how long the menu waits before it starts the highlighted image${s.menu_rows ? "; the service menus' Boot Menu Timer can change it" : ""}</span></div>`
-        : html`<div class="row"><${Field} id=${fid("timeout")} ns=${NS} k="timeout" value=${s.timeout} ...${num} max=${600} /><span class="small muted">0 = wait for START</span></div>`}
+        <div class="row wrap"><${Field} id=${fid("timeout")} ns=${NS} k="timeout" value=${s.timeout} ...${num} max=${600} /><span class="small muted">0 = wait for START${md.flip_ok && s.menu_rows ? ". The games' service menus can change it to Off, 15 or 30 s (Boot Menu Timer)" : ""}</span></div>
         <label class="k" for=${fid("countdown_word")}>Countdown says:</label>
         <div class="row wrap"><${Field} id=${fid("countdown_word")} ns=${NS} k="countdown_word" value=${s.countdown_word} width=${180} /><span class="small muted">${md.example}</span></div>
         <label class="k" for=${fid("default")}>Default image:</label>

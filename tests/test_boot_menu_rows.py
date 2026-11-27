@@ -99,7 +99,10 @@ def test_the_tab_passes_the_choice():
     for words in ("No boot menu: the service menu can turn it on", "Boot menu: the service menu can turn it off",
                   "Boot menu, always (the service menus cannot change it)"):
         assert words in js
-    assert '{ value: "15", label: "15 s" }, { value: "30", label: "30 s" }' in js
+    # David (PR #53 review: "flexibility for each person"): the countdown stays any seconds, as before; the note says
+    # what the service menus' Boot Menu Timer can set it to
+    assert 'k="timeout" value=${s.timeout} ...${num} max=${600}' in js and "timerOpts" not in js
+    assert "can change it to Off, 15 or 30 s (Boot Menu Timer)" in js
 
 
 def test_the_boot_menu_reads_the_card_value_only_where_the_card_allows():

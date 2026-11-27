@@ -74,6 +74,11 @@ MENU_OFF, MENU_ON = 0, 1
 #: On to start with, so a fresh card plays as one with no row until the operator says Off. menu_settings.plan counts an
 #: Off / On row's default from 1 (1 Off, 2 On): seen in the emulator as "Default Value = Off" with 1
 MENU_DEFAULT = MENU_ON + 1
+#: the sidecar's key for that tick. Not round 2's ``menu``: PAD-1443 made co-op always on the start menu and left that
+#: flag in projects and co-op files that asked for the old row, and those owners keep the always-on start menu they have
+#: now (David, PR #53 review: "We need to maintain the existing option of just getting to coop in the menu. We need
+#: flexibility for each person since this is a modular setup"). Only a tick made since asks for the row.
+ROW_KEY = "row"
 #: the help says what On does and costs (63 characters: the spare help lines' room)
 MENU_HELP = "On: co-op games on the start menu; they stay off Insider"
 #: how a teammate joins, for the tab and the log. PAD-1443: the games are always on the start menu, no service row
@@ -145,7 +150,7 @@ def menu_asked(project):
         raw = staged_changes.load(project).get(STAGED_KEY)
     except Exception:                                   # noqa: BLE001 - an unreadable sidecar: no
         return False
-    return bool(isinstance(raw, dict) and raw.get("menu"))
+    return bool(isinstance(raw, dict) and raw.get(ROW_KEY))
 
 
 def save(project, on, menu=None):
@@ -157,8 +162,8 @@ def save(project, on, menu=None):
     raw = data.get(STAGED_KEY) if isinstance(data.get(STAGED_KEY), dict) else {}
     was = bool(raw.get("on"))
     keep = {k: v for k, v in raw.items() if k in ("awards", "characters", "style")}   # PAD-1558: the style too
-    if on and (raw.get("menu") if menu is None else menu):
-        keep["menu"] = True
+    if on and (raw.get(ROW_KEY) if menu is None else menu):
+        keep[ROW_KEY] = True                            # round 2's "menu" is not kept (ROW_KEY)
     if on or keep:
         data[STAGED_KEY] = dict(keep, on=bool(on))
     else:
@@ -3640,7 +3645,7 @@ def export_settings(project, path):
     prof = project_title(project)
     head = {"kind": FILE_KIND, "version": FILE_VERSION,
             "from": {"label": prof.label if prof is not None else ""},
-            "on": bool(raw.get("on")), "menu": bool(raw.get("menu")), "awards": awards, "characters": chars}
+            "on": bool(raw.get("on")), ROW_KEY: bool(raw.get(ROW_KEY)), "awards": awards, "characters": chars}
     if _style_of(raw.get("style")) != "normal":
         head["style"] = _style_of(raw.get("style"))     # PAD-1558: the default co-op style
     as_zip = not path.lower().endswith(".json")
@@ -3933,8 +3938,8 @@ def import_settings(project, path):
     awards = {}
     if not head.get("preset"):
         raw = {"on": bool(head.get("on"))}
-        if head.get("on") and head.get("menu"):
-            raw["menu"] = True
+        if head.get("on") and head.get(ROW_KEY):          # a file's round 2 "menu" asks for no row (ROW_KEY)
+            raw[ROW_KEY] = True
         if _style_of(head.get("style")) != "normal":
             raw["style"] = _style_of(head.get("style"))  # PAD-1558: the default co-op style
         got = head.get("awards") if isinstance(head.get("awards"), dict) else {}

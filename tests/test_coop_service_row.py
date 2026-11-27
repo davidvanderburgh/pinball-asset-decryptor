@@ -160,3 +160,30 @@ def test_an_off_on_row_gives_the_start_menu_of_a_card_with_no_row(tmp_path):
     main = T.PRELUDE + SWITCH_MAIN.replace("@FNS@", T._fns(_src(), *T.ROW_FNS))
     out = R._host_run(tmp_path, main, flags=("-no-pie",)).strip()
     assert out == "none:1435,0 off:,0 on:1435,10,1"
+
+def test_each_owner_keeps_co_op_always_on_unless_they_tick_the_row(tmp_path):
+    """David (PR #53 review): "We need to maintain the existing option of just getting to coop in the menu. We need
+    flexibility for each person since this is a modular setup." Round 2's ``menu`` flag, left in projects and co-op files
+    from before PAD-1443, asks for no row: those cards keep co-op always on the start menu. Only the tick asks."""
+    from pinball_decryptor.plugins.stern import service_menu as SM
+    p = _project(tmp_path, {"coop_play": {"on": True, "menu": True}})
+    assert not CP.menu_asked(p) and "coop_play" not in [r[0] for r in SM.wanted(p)]
+    CP.save(p, True)                                               # any later save drops the old flag
+    side = json.load(open(os.path.join(p, ".staged_changes.json"), encoding="utf-8"))["coop_play"]
+    assert "menu" not in side and not side.get(CP.ROW_KEY)
+    CP.save(p, True, menu=True)                                    # the Service menu tab's tick
+    assert CP.menu_asked(p) and "coop_play" in [r[0] for r in SM.wanted(p)]
+    # a co-op file carries the tick as it is; an old one's "menu" brings no row
+    out = str(tmp_path / "coop.json")
+    CP.export_settings(p, out)
+    head = json.load(open(out, encoding="utf-8"))
+    assert head[CP.ROW_KEY] is True and "menu" not in head
+    q = _project(tmp_path / "q", {})
+    CP.import_settings(q, out)
+    assert CP.menu_asked(q)
+    head[CP.ROW_KEY] = False
+    head["menu"] = True
+    json.dump(head, open(out, "w", encoding="utf-8"))
+    r = _project(tmp_path / "r", {})
+    CP.import_settings(r, out)
+    assert CP.load(r) and not CP.menu_asked(r)

@@ -361,6 +361,14 @@ def _isolate_pad_ssh_key(tmp_path_factory):
     pad_ssh_key.KEY_DIR = str(tmp_path_factory.mktemp("remote_access"))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _no_announce_questions():
+    """PAD-1627: no test puts the "which PAD machines are here?" question to the developer's real network (a test
+    that wants answers patches ``machine_scan.announced``)."""
+    from pinball_decryptor.core import machine_scan
+    machine_scan.ANNOUNCE = False
+
+
 @pytest.fixture(autouse=True)
 def _forget_machines():
     """PAD-1427: the machines this computer remembers (a list now) and their identities start empty in every

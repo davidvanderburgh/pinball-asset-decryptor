@@ -237,3 +237,175 @@ def test_a_machine_on_a_new_card_and_a_new_address_takes_its_old_place(tmp_path,
     other = dict(new, address="10.0.0.13", host_key=("ssh-ed25519", "AAAAother"))
     _ours, moved = machine_scan.remember([new, other])
     assert moved == {} and [m["address"] for m in pad_ssh_key.machines()] == ["10.0.0.50", "10.0.0.12", "10.0.0.13"]
+
+
+# ---- PAD-1627: a machine that says where it is (core/machine_announce.py, resources/ssh/sshd) ----
+def _labels(name):
+    return b"".join(bytes([len(x)]) + x.encode() for x in name.split(".")) + b"\0"
+
+
+def _answer(game="godzilla_le", key="ssh-ed25519 AAAAgodzilla", service="_pad-machine._tcp.local"):
+    """An answer the way avahi sends it: the question echoed, then PTR, SRV, TXT and A, names compressed."""
+    import struct
+    head = struct.pack(">HHHHHH", 0, 0x8400, 1, 1, 0, 3)
+    q = _labels(service) + struct.pack(">HH", 12, 1)
+    svc = b"\xc0\x0c"                                    # a pointer to the question's name
+    inst = b"\x10PAD stern-spike2" + svc
+    ptr = svc + struct.pack(">HHIH", 12, 1, 4500, len(inst)) + inst
+    at = len(head) + len(q) + len(ptr) - len(inst)       # where the instance name sits
+    iname = struct.pack(">H", 0xC000 | at)
+    target = _labels("stern-spike2.local")
+    srv = iname + struct.pack(">HHIH", 33, 0x8001, 120, 6 + len(target)) + struct.pack(">HHH", 0, 0, 22) + target
+    txts = b"".join(bytes([len(t)]) + t for t in (b"v=1", ("game=" + game).encode(), ("key=" + key).encode()))
+    txt = iname + struct.pack(">HHIH", 16, 0x8001, 4500, len(txts)) + txts
+    a = _labels("stern-spike2.local") + struct.pack(">HHIH", 1, 0x8001, 120, 4) + bytes([10, 0, 0, 12])
+    return head + q + ptr + srv + txt + a
+
+
+def test_an_announce_answer_is_read_and_anything_else_is_not():
+    from pinball_decryptor.core import machine_announce as MA
+    q = MA.question()
+    assert q[:12] == b"\0\0\0\0\0\1\0\0\0\0\0\0" and q.endswith(b"\x05local\x00\x00\x0c\x80\x01")
+    assert MA.parse(_answer()) == {"game": "godzilla_le", "host_key": ("ssh-ed25519", "AAAAgodzilla"),
+                                   "port": 22, "name": "PAD stern-spike2"}
+    assert MA.parse(_answer(key="rubbish"))["host_key"] is None
+    assert MA.parse(q) is None                          # a question, not an answer
+    assert MA.parse(_answer(service="_ssh._tcp.local")) is None
+    for bad in (b"", b"\x00" * 5, _answer()[:40], b"\xff" * 64):
+        assert MA.parse(bad) is None
+    assert MA.ask(wait=0.05, addresses=[]) == []
+
+
+def test_the_start_script_announces_only_where_the_card_has_the_service():
+    from pinball_decryptor.core import ssh_card, ssh_jjp
+    for text in (ssh_card.payload_bytes("sshd", {}, ssh_card.layout("stern-spike2")), ssh_jjp.start_script()):
+        text = text.decode("ascii")
+        assert "\r" not in text
+        assert '[ -x "$AVAHI" ] && [ -d /etc/avahi/services ] || return 0' in text
+        assert "<type>_pad-machine._tcp</type>" in text and "enable-dbus=no" in text
+        # never in the way of the login, and everything it makes is in RAM
+        assert "( announce ) </dev/null >/dev/null 2>&1 || true" in text
+        assert "ANNOUNCE=/var/run/pad-announce" in text and "announce)" in text
+        assert text.index('"$DAEMON" -P "$PIDFILE"') < text.index("( announce )")
+
+
+def test_only_a_machine_not_where_it_is_remembered_is_news(tmp_path, monkeypatch):
+    from pinball_decryptor.core import machine_scan
+    _keys(tmp_path, monkeypatch, MOVED)
+    said = {"address": "10.0.0.7", "game": "godzilla_le", "host_key": tuple(KEY), "port": 22, "name": "PAD x"}
+    probed = []
+
+    def probe(host, port=22, timeout=8):
+        probed.append(host)
+        return dict(lets_in=host != "10.0.0.99", game="godzilla_le", host_key=("ssh-ed25519", "AAAAnewcard"),
+                    note="")
+    monkeypatch.setattr(machine_scan, "probe", probe)
+    monkeypatch.setattr(machine_scan, "_refused", {})
+    assert machine_scan.news([said]) == [] and not probed           # where it was, the identity it had
+    assert machine_scan.news([dict(said, host_key=("ssh-rsa", "AAAAother"))]) == []     # another kind of key
+    moved = dict(said, address="10.0.0.12", host_key=("ssh-ed25519", "AAAAnewcard"))
+    recs = machine_scan.news([moved])
+    assert [(r["address"], r["lets_in"], r["announces"]) for r in recs] == [("10.0.0.12", True, True)]
+    ours, went = machine_scan.remember(recs)
+    assert went == {"10.0.0.7": "10.0.0.12"} and pad_ssh_key.machines()[-1]["announces"] is True
+    assert machine_scan.news([moved]) == []                        # known there now
+    assert SM._find_careful([]) is False                           # it is asked, never swept for
+    # one that doesn't let this computer in is not tried again every half minute
+    other = dict(said, address="10.0.0.99", host_key=("ssh-ed25519", "AAAAstranger"))
+    assert len(machine_scan.news([other], now=1000.0)) == 1
+    assert machine_scan.news([other], now=1100.0) == [] and len(machine_scan.news([other], now=1700.0)) == 1
+    # found again by its identity at once
+    monkeypatch.setattr(machine_scan, "ANNOUNCE", True)
+    from pinball_decryptor.core import machine_announce
+    monkeypatch.setattr(machine_announce, "ask", lambda: [dict(moved, address="10.0.0.33")])
+    monkeypatch.setattr(machine_scan, "scan", lambda *a, **k: (_ for _ in ()).throw(AssertionError("swept")))
+    assert machine_scan.find_moved(("ssh-ed25519", "AAAAnewcard")) == "10.0.0.33"
+
+
+def test_the_page_follows_a_machine_that_says_where_it_is_with_no_sweep(tmp_path, monkeypatch):
+    """David: "the IP address is pretty much going to change every time the machine boots on. we need the machine
+    to reach out to the app": the page's own check asks the network, and the row goes to the new address."""
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import machine_scan
+    _keys(tmp_path, monkeypatch, MOVED)
+    monkeypatch.delenv("PAD_UI_CAPTURE", raising=False)
+    monkeypatch.setattr(machine_scan, "online", lambda a, **kw: a == "10.0.0.12")
+    monkeypatch.setattr(machine_scan, "announced", lambda: [
+        {"address": "10.0.0.12", "game": "godzilla_le", "host_key": tuple(KEY), "port": 22, "name": "PAD x"}])
+    monkeypatch.setattr(machine_scan, "probe", lambda host, port=22, timeout=8: dict(
+        lets_in=True, game="godzilla_le", host_key=tuple(KEY), note=""))
+    monkeypatch.setattr(machine_scan, "_refused", {})
+    monkeypatch.setattr(machine_scan, "scan", lambda *a, **k: (_ for _ in ()).throw(AssertionError("swept")))
+    with web_app(tmp_path) as w:
+        assert _until(w, lambda: len(_m(w)["network"]) == 2)
+        assert w.call("shellx.machines_open")
+        assert _until(w, lambda: [n["address"] for n in _m(w)["network"]] == ["10.0.0.50", "10.0.0.12"])
+        assert _until(w, lambda: _m(w)["online"].get("10.0.0.12") is True)
+        m = _m(w)
+        assert m["network"][1]["announces"] is True and not m["finding"]
+        assert m["find_note"] == "Godzilla LE / Premium is on at 10.0.0.12 (it was at 10.0.0.7)."
+
+
+class _Machine:
+    """A machine over remote access, as core/network_apply talks to one."""
+    def __init__(self, files, avahi=True):
+        self.files, self.avahi, self.ran, self.sftp, self.corrupt = dict(files), avahi, [], self, False
+
+    def open(self, path, mode):
+        import io as _io
+        m = self
+        if "r" in mode:
+            if path not in m.files:
+                raise IOError(path)
+            return _io.BytesIO(m.files[path])
+
+        class F(_io.BytesIO):
+            def __exit__(s, *a):
+                m.files[path] = s.getvalue()[:-1] + b"!" if m.corrupt else s.getvalue()
+        return F()
+
+    def sh(self, script, timeout=60, check=True):
+        import hashlib
+        self.ran.append(script)
+        words = script.replace("'", "").split()
+        if "PAD_HAS" in script:
+            return 0, "PAD_HAS\n" if self.avahi else ""
+        if "remount,rw" in script:
+            return 0, "PAD_RW\n"
+        if words[0] == "sha1sum":
+            return 0, "%s %s\n" % (hashlib.sha1(self.files[words[1]]).hexdigest(), words[1])
+        if "PAD_PUT" in script:
+            self.files[words[words.index("mv") + 3]] = self.files.pop(words[words.index("mv") + 2])
+            return 0, "PAD_PUT\n"
+        if words[0] == "rm":
+            self.files.pop(words[2], None)
+        if words[-1] == "announce":
+            return 0, "PAD_ANNOUNCING\n"
+        return 0, ""
+
+
+def test_a_machine_set_up_before_is_made_to_say_where_it_is():
+    import pytest
+    from pinball_decryptor.core import network_apply as A, ssh_card
+    from pinball_decryptor.core.card_extras import ExtrasError
+    new = ssh_card.payload_bytes("sshd", {}, ssh_card.layout("stern-spike2"))
+    m = _Machine({"/etc/init.d/sshd": b"#!/bin/sh\n# the script of before\n"})
+    assert A.announce_to_machine(m) == "on"
+    assert m.files == {"/etc/init.d/sshd": new}
+    assert any("remount,rw" in r for r in m.ran) and "remount,ro" in m.ran[-2]
+    assert m.ran[-1] == "'/etc/init.d/sshd' announce" and not any("reboot" in r for r in m.ran)
+    m.ran.clear()
+    assert A.announce_to_machine(m) == "already" and not any("remount" in r for r in m.ran)
+    # a system with no announce service: the card is left as it was
+    old = _Machine({"/etc/init.d/sshd": b"old"}, avahi=False)
+    assert A.announce_to_machine(old) == "none" and old.files == {"/etc/init.d/sshd": b"old"}
+    # a file that did not arrive as sent changes nothing
+    bad = _Machine({"/etc/init.d/sshd": b"old"})
+    bad.corrupt = True
+    with pytest.raises(ExtrasError, match="did not arrive"):
+        A.announce_to_machine(bad)
+    assert bad.files == {"/etc/init.d/sshd": b"old"} and "remount,ro" in bad.ran[-1]
+    with pytest.raises(ExtrasError, match="no remote access start script"):
+        A.announce_to_machine(_Machine({}))
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "shell.js").read_text(encoding="utf-8")
+    assert 'call("shellx.machines_announce_on", n.address)' in js and "MACH.says" in js

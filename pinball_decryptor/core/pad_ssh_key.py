@@ -121,7 +121,10 @@ def _entry(rec):
             "host_key": tuple(hk) if isinstance(hk, (list, tuple)) and len(hk) == 2 else None,
             "game": str(rec.get("game") or ""),
             # PAD-1627: the owner's own name for it (My machines), kept when the router moves it
-            "name": str(rec.get("name") or "").strip()}
+            "name": str(rec.get("name") or "").strip(),
+            # PAD-1627: True once the machine has said where it is by itself (core/machine_announce.py): it is
+            # found by asking, so no sweep of the network is ever made for it
+            "announces": bool(rec.get("announces"))}
 
 
 def _load_machines():
@@ -183,7 +186,7 @@ def remember_address(address):
         _save_machines(address, ms)
 
 
-def remember_machine(address, host_key=None, game="", make_current=True, replaces=""):
+def remember_machine(address, host_key=None, game="", make_current=True, replaces="", announces=None):
     """A machine found (a scan, or a connection that let this computer in), with its identity and game.  The same
     identity at a new address is the same machine, moved.  PAD-1627: *replaces* is the address of the remembered
     machine this one IS although its identity is new (a card written again has a new one): its place, and the
@@ -196,7 +199,8 @@ def remember_machine(address, host_key=None, game="", make_current=True, replace
                or next((m for m in ms if replaces and m["address"] == replaces), None))
         rec = _entry({"address": address, "host_key": host_key or (old or {}).get("host_key"),
                       "game": game or (old or {}).get("game") or "",
-                      "name": (old or {}).get("name") or ""})
+                      "name": (old or {}).get("name") or "",
+                      "announces": (old or {}).get("announces") if announces is None else announces})
         if old is not None:
             if current == old["address"]:
                 current = address

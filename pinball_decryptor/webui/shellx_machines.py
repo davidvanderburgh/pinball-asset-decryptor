@@ -123,6 +123,11 @@ class MachinesMixin:
         if on:
             self._tell_newer(rows)
         rows, unlinked = link_network(rows, network)
+        # PAD-1627: which of a row's machines says where it is (the row offers to turn that on for one that
+        # doesn't)
+        says = {n["address"]: n["announces"] for n in network}
+        for r in rows:
+            r["announces"] = says.get(r.get("address"))
         self._mach_last = (rows, on, unlinked)
         self._machines_set()
         if self._mach_open:
@@ -155,7 +160,7 @@ class MachinesMixin:
         """Ask every address the page shows whether its SSH server answers (the banner only, all at once, off
         the loop); the page shows a green light for those that do."""
         addresses = self._mach_addresses()
-        if not addresses or self._mach_probing:
+        if self._mach_probing:
             return
         self._mach_probing = True
 
@@ -177,11 +182,28 @@ class MachinesMixin:
             threads = [threading.Thread(target=one, args=(a,), daemon=True) for a in addresses]
             for t in threads:
                 t.start()
+            # PAD-1627: meanwhile the network is asked which PAD machines are on; one at an address (or with an
+            # identity) this computer doesn't have it at is logged in to and remembered there, so the page
+            # follows a machine the router moved within one check, with no sweep
+            recs = []
+            if shot is None and not self._mach_finding:
+                try:
+                    recs = machine_scan.news()
+                except Exception:                       # noqa: BLE001
+                    log.exception("machines that announce themselves")
             for t in threads:
                 t.join(5)
-            self.ctx.loop.post(self._machines_probed, got)
+            if any(r.get("lets_in") for r in recs):
+                self.ctx.loop.post(self._machines_probed_news, recs)
+            else:
+                self.ctx.loop.post(self._machines_probed, got)
 
         threading.Thread(target=work, name="pad-machines-online", daemon=True).start()
+
+    def _machines_probed_news(self, recs):
+        self._mach_probing = False
+        if not self._mach_finding:
+            self._machines_found(recs, "")
 
     def _machines_probed(self, got):
         self._mach_probing = False
@@ -250,6 +272,52 @@ class MachinesMixin:
         """Find my machines: look over the home network for the machines that let this computer in, remember
         each (one at a new address is followed there) and light the ones that are on."""
         return self._machines_find()
+
+    @rpc
+    def machines_announce_on(self, address):
+        """A machine whose card was set up before PAD-1627: put today's remote access start script on its card
+        and start its announce, so it is found wherever the router puts it (core/network_apply
+        .announce_to_machine).  The game goes on; the machine is not restarted."""
+        from ..core import network_apply, remote_send
+        found = next((n for n in _network_machines() if n["address"] == address), None)
+        if found is None or getattr(self, "_mach_announcing", False):
+            return False
+        name = found["name"] or found["title"] or "the machine"
+        if not compat.messagebox.askyesno(
+                "Find this machine by itself",
+                "Have %s (at %s) say where it is on your network?\n\nYour router gives the machine a new address "
+                "whenever it likes. With this on, the machine tells PAD where it is each time it starts, so PAD "
+                "finds it in a second without looking over the whole network.\n\nOne small file on the "
+                "machine's card is replaced (PAD's own remote access start script). The game is not stopped and "
+                "the machine is not restarted." % (name, address)):
+            return False
+        self._mach_announcing = True
+
+        def work():
+            try:
+                machine = remote_send.connect(address)
+                try:
+                    res = network_apply.announce_to_machine(machine)
+                finally:
+                    machine.close()
+                if res == "none":
+                    text, kind = ("%s's system has no announce service, so nothing was changed: PAD keeps finding "
+                                  "it by looking over the network." % name, "info")
+                else:
+                    text, kind = ("%s now says where it is: PAD finds it by itself, whatever address your router "
+                                  "gives it." % name, "success")
+            except Exception as e:                      # noqa: BLE001 - said, never raised into the page
+                text, kind = "Couldn't turn that on for %s: %s" % (name, e), "error"
+            self.ctx.loop.post(self._machines_announced, text, kind)
+        threading.Thread(target=work, name="pad-machine-announce", daemon=True).start()
+        return True
+
+    def _machines_announced(self, text, kind):
+        self._mach_announcing = False
+        self.window.append_log(text, kind)
+        self.window.toast(text, kind, ms=9000)
+        self._mach_online = {}
+        self._machines_refresh()
 
     @rpc
     def machines_name_network(self, address, name=None):
@@ -1009,7 +1077,9 @@ def _network_machines():
         out.append({"address": m["address"], "game": game, "title": title or game.replace("_", " ").title(),
                     # the owner's own name for it, and whether anything ever answered there (False: an address
                     # only typed in on the Network tab)
-                    "name": m.get("name") or "", "known": bool(game or m.get("host_key"))})
+                    "name": m.get("name") or "", "known": bool(game or m.get("host_key")),
+                    # True once the machine has said where it is by itself (core/machine_announce.py)
+                    "announces": bool(m.get("announces"))})
     return out
 
 
@@ -1019,7 +1089,10 @@ def _find_careful(recs):
     none and none let it in.  A known machine is accounted for by its identity, or by a machine of its game that
     let this computer in (its card written again has a new identity)."""
     from ..core import pad_ssh_key
-    known = [m for m in pad_ssh_key.machines() if m["host_key"] or m["game"]]
+    # a machine that says where it is (PAD-1627) is asked, not swept for: when it is on it has answered
+    known = [m for m in pad_ssh_key.machines() if (m["host_key"] or m["game"]) and not m.get("announces")]
+    if not known and any(m.get("announces") for m in pad_ssh_key.machines()):
+        return False
     seen = {tuple(r["host_key"]) for r in recs if r.get("host_key")}
     games = {r.get("game") for r in recs if r.get("lets_in") and r.get("game")}
     if known:

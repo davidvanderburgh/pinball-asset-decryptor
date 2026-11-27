@@ -952,6 +952,8 @@ const MACH = {
   // PAD-1627: Find my machines on the page, a name for a machine found, and an address nothing ever answered at
   find: { head: "Find my machines", lines: ["Looks over your home network for the machines that let this computer in (remote access, Network tab), and lights the ones that are on.", "A machine your router has given a new address is found there, and its row follows it.", "It only looks: nothing on a machine changes. About half a minute; a couple of minutes when one of your machines is off."] },
   netName: (n) => ({ head: n.name ? "Named by you" : "Name this machine", lines: ["The machine says only which build it runs (" + (n.title || "unknown") + "): Stern's LE and Premium run the same one. Click to give it your own name."] }),
+  says: { head: "Says where it is", lines: ["This machine tells PAD where it is each time it starts, so PAD finds it in a second whatever address your router gives it."] },
+  announce: (n) => ({ head: "Find it by itself", lines: ["Your router gives the machine a new address whenever it likes, and PAD then has to look over your whole network for it.", "This has the machine say where it is each time it starts. One small file on its card is replaced; the game is not stopped and the machine is not restarted.", "Cards you build or set up from now on do this already."] }),
   unknown: "An address typed in",
   unknownText: (n) => "Typed in on the Network tab; nothing at " + n.address + " has ever let this computer in. Forget it if it is not yours.",
   header: (m) => ({ head: "My machines", lines: [(m.rows || []).length ? (m.rows.length + " machine" + (m.rows.length === 1 ? "" : "s")) + (m.newer_count ? ": newer game code is out for " + m.newer_count + "." : ".") : "The pinball machines you own: add one to see its build, hear about new code and update your work onto it."] }),
@@ -974,6 +976,7 @@ function MachineRow({ r, on }) {
     { label: "Show the " + r.noun, icon: "folder", disabled: r.card_missing, onClick: () => call("shellx.machines_show_card", r.id) },
     { label: r.noun === "card image" ? "Change card…" : "Change " + r.noun + "…", icon: "sd", onClick: () => call("shellx.machines_rebind", r.id) },
     { label: "Rename…", icon: "edit", onClick: () => call("shellx.machines_rename", r.id) },
+    ...(r.address && r.announces === false ? [{ label: "Find it by itself…", icon: "globe", disabled: on !== true, onClick: () => call("shellx.machines_announce_on", r.address) }] : []),
     ...((r.backup_machines || []).length ? [{ sep: true },
       { label: "Back up settings now", icon: "save", onClick: () => call("shellx.machines_backup_now", r.id) },
       { label: "Restore settings from", icon: "undo", disabled: !(r.backups || []).length,
@@ -1034,10 +1037,11 @@ function MyMachines({ shell }) {
           : html`<button type="button" class="t mach-name" ...${tip(MACH.netName(n))} onClick=${() => call("shellx.machines_name_network", n.address)}>${n.name || n.title || "A Stern machine"}<${Icon} name="edit" /></button>`}
         ${n.name && n.title ? html`<span class="notr muted">${n.title}</span>` : null}
       </div>
-      <span class="muted small" ...${tip(MACH.online(n, online[n.address]))}><${Light} on=${online[n.address]} /><span class="mono">${n.address}</span>${online[n.address] === true ? " · online" : online[n.address] === false ? " · not answering" : ""}</span>
+      <span class="muted small" ...${tip(MACH.online(n, online[n.address]))}><${Light} on=${online[n.address]} /><span class="mono">${n.address}</span>${online[n.address] === true ? " · online" : online[n.address] === false ? " · not answering" : ""}${n.announces === true ? html` · <span ...${tip(MACH.says)}>says where it is</span>` : ""}</span>
       ${n.known === false ? html`<span class="muted small">${MACH.unknownText(n)}</span>` : null}
     </div>
     ${n.known === false ? html`<${Button} size="sm" icon="trash" onClick=${() => call("shellx.machines_forget_network", n.address)}>Forget<//>` : null}
+    ${n.known !== false && n.announces === false && online[n.address] === true ? html`<${Button} size="sm" icon="globe" cls="sx-mach-announce" disabled=${running} title=${MACH.announce(n)} onClick=${() => call("shellx.machines_announce_on", n.address)}>Find it by itself…<//>` : null}
     <${Button} size="sm" icon="plus" disabled=${running} title=${MACH.netAdd(n)} onClick=${() => call("shellx.machines_add_network", n.address)}>Add with its card image…<//>
     ${n.known === false ? null : html`<${Button} size="sm" kind="ghost" icon="more" title="More" onClick=${(e) => openShellMenu(e.currentTarget, [
       { label: "Name this machine…", icon: "edit", onClick: () => call("shellx.machines_name_network", n.address) },

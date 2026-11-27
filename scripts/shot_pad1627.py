@@ -28,7 +28,7 @@ import webui_shot as ws  # noqa: E402
 NETWORK = {"current": "192.168.1.64", "machines": [
     {"address": "192.168.1.50", "host_key": None, "game": ""},
     {"address": "192.168.1.64", "host_key": ["ssh-ed25519", "AAAAshot"], "game": "godzilla_le",
-     "name": "Godzilla Premium"}]}
+     "name": "Godzilla Premium", "announces": True}]}
 
 
 def main():

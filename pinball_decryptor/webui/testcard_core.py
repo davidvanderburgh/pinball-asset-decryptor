@@ -525,8 +525,8 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None,
                     log("test card: layered test %r left out: its video cannot play as a clip" % label)
                     continue
                 try:
-                    path = place_layered_clip(src, path, work, n, log=log, cancel=cancel)
-                    made.append((kind, path, label, layer_overlay(src, path, work, n, log=log)))
+                    placed, ovl = layered_files(src, path, work, n, log=log, cancel=cancel)
+                    made.append((kind, placed, label, ovl))
                 except Exception as exc:                        # noqa: BLE001
                     log("test card: layered test %r left out: %s" % (label, exc))
                 continue
@@ -537,6 +537,84 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None,
             log("test card: layered test %r left out: a Spike 3 test card plays no clips" % it.label)
         out = [o[1:] for o in out if id(o[0]) not in layered]
     return out
+
+
+#: Simon (2026-11-26): "It takes a really long time to make the test card with no feedback that anything is going
+#: on. It should be a fast process?" - a layered test's placed clip and overlay are kept here, by what made them, and
+#: a build whose test, clip, project scenes and drawing code have not changed takes them as they are
+LAYERED_CACHE = "testcard_layered"
+#: the newest this many tests' files are kept
+LAYERED_KEEP = 12
+
+
+def _layered_key(item, clip):
+    """What a layered test's files are made from: the test, its clip, the project's scenes and edits, and the
+    code that draws them (a file's size and time)."""
+    import hashlib
+    from pinball_decryptor.plugins.stern import layered_test as LT
+    from pinball_decryptor.plugins.stern import scene_render as SR
+
+    def stamp(p):
+        try:
+            st = os.stat(p)
+            return [p, st.st_size, int(st.st_mtime)]
+        except OSError:
+            return [p, None]
+    parts = [list(item.layers), getattr(item, "player", ""), bool(getattr(item, "plain", False)), stamp(clip),
+             stamp(os.path.join(item.project, "images", "scene_textures", "scene_tree.json")),
+             stamp(os.path.join(item.project, ".staged_changes.json")),
+             stamp(LT.__file__), stamp(SR.__file__), stamp(__file__)]
+    return hashlib.sha1(json.dumps(parts, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:20]
+
+
+def layered_files(item, clip, work, n, log=print, cancel=None):
+    """``(clip, overlay)`` for layered test *item* over *clip*: from the cache when nothing that makes them has
+    changed (:data:`LAYERED_CACHE`), else made (:func:`place_layered_clip`, :func:`layer_overlay`) and kept."""
+    home = os.path.join(os.path.dirname(store_path()), LAYERED_CACHE)
+    key = _layered_key(item, clip)
+    kept_clip, kept_ovl = (os.path.join(home, key + ext) for ext in (".mp4", ".pado"))
+    cached = os.path.isfile(kept_ovl) and (os.path.isfile(kept_clip) or os.path.isfile(kept_ovl + ".asis"))
+    if cached:
+        log("test card: layered test %r unchanged since it was last made: kept as it was" % item.label)
+        placed = kept_clip if os.path.isfile(kept_clip) else clip
+        got = (placed, kept_ovl)
+        try:
+            for p in got:
+                os.utime(p)
+        except OSError:
+            pass
+    else:
+        log("test card: making layered test %r" % item.label)
+        placed = place_layered_clip(item, clip, work, n, log=log, cancel=cancel)
+        ovl = layer_overlay(item, placed, work, n, log=log)
+        got = (placed, ovl)
+        try:
+            os.makedirs(home, exist_ok=True)
+            shutil.copyfile(ovl, kept_ovl)
+            if placed != clip:
+                shutil.copyfile(placed, kept_clip)
+            else:
+                open(kept_ovl + ".asis", "w").close()
+            _prune_layered(home)
+        except OSError as exc:
+            log("test card: layered test %r could not be kept for the next build: %s" % (item.label, exc))
+    return got
+
+
+def _prune_layered(home):
+    """Only the newest :data:`LAYERED_KEEP` tests' files stay in *home*."""
+    try:
+        names = [f for f in os.listdir(home) if f.endswith(".pado")]
+    except OSError:
+        return
+    names.sort(key=lambda f: os.path.getmtime(os.path.join(home, f)), reverse=True)
+    for f in names[LAYERED_KEEP:]:
+        stem = f[:-len(".pado")]
+        for g in (stem + ".pado", stem + ".mp4", stem + ".pado.asis"):
+            try:
+                os.remove(os.path.join(home, g))
+            except OSError:
+                pass
 
 
 def place_layered_clip(item, clip, work, n, log=print, cancel=None):
@@ -569,8 +647,11 @@ def layer_overlay(item, clip, work, n, log=print):
     from pinball_decryptor.plugins.stern import layered_test as LT
     frames, fps = LT.clip_frames(clip)
     out = os.path.join(work, "clip%02d.pado" % n)
+
+    def progress(done, total):
+        log("test card: layered test %r: drawing frame %d of %d" % (item.label, done, total))
     LT.make_overlay(item.project, list(item.layers), out, frames, fps, log=lambda m: log("test card: " + m.strip()),
-                    profiles=not getattr(item, "plain", False))
+                    profiles=not getattr(item, "plain", False), progress=progress)
     return out
 
 

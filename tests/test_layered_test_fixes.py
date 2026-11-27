@@ -103,8 +103,9 @@ def test_the_build_places_a_layered_clip_by_its_item(player, tmp_path, monkeypat
     assert dst.endswith("placed03.mp4") and got == {"place": (1.06468, 1.06467, -43.0, -98.0), "stage": (1360, 768)}
     it = tc.Item("video", "L", "x/video/match.mp4", "proj", "video/match.mp4", layers=["0335207f"], player="Normal")
     assert tc.place_layered_clip(it, "clip.mp4", str(tmp_path), 3, log=lambda m: None) == "clip.mp4"
-    src = inspect.getsource(tc.stage)
-    assert "path = place_layered_clip(src, path, work, n, log=log, cancel=cancel)" in src
+    assert "placed = place_layered_clip(item, clip, work, n, log=log, cancel=cancel)" in inspect.getsource(
+        tc.layered_files)
+    assert "layered_files(src, path, work, n, log=log, cancel=cancel)" in inspect.getsource(tc.stage)
 
 
 def test_the_item_keeps_its_player_state():
@@ -329,3 +330,88 @@ def test_a_layered_test_can_leave_the_files_colour_profiles_off(monkeypatch):
     js = open(JS, encoding="utf-8").read()
     assert '{ value: "plain", label: "As extracted (no file colour profiles)" }' in js
     assert "index == null ? null : index, plain);" in js
+
+
+# Simon (2026-11-26): "It takes a really long time to make the test card with no feedback that anything is going on.
+# It should be a fast process?"
+
+def test_a_scene_is_drawn_again_only_when_its_draw_list_changes(monkeypatch):
+    from PIL import Image
+    from pinball_decryptor.plugins.stern import scene_eval as ev
+    from pinball_decryptor.plugins.stern import scene_render as sr
+    from pinball_decryptor.plugins.stern import fontrender as fr
+    monkeypatch.setattr(fr, "load_fonts", lambda p: [])
+    # frames 0-2 the same draw, 3-4 another: two drawings, and frames alike come back as one picture
+    monkeypatch.setattr(ev, "draw_list", lambda man, f: [{"kind": "bitmap", "x": 0 if f < 3 else 1}])
+    calls = []
+
+    def render(project, man, frame=None, draws=None, **kw):
+        calls.append(frame)
+        im = Image.new("RGBA", (4, 4), (0, 0, 0, 0))
+        im.putpixel((draws[0]["x"], 0), (255, 0, 0, 255))
+        return {"sel": im}
+    monkeypatch.setattr(sr, "render_tree", render)
+    man = {"stage": [4, 4], "root": {"frames": 5}}
+    seen = []
+    frames = list(LT.render_frames("proj", [(man, None)], 5, progress=lambda a, b: seen.append(a)))
+    assert calls == [0, 3]
+    assert frames[0] is frames[1] is frames[2] and frames[3] is frames[4] and frames[0] is not frames[3]
+    assert frames[3].getpixel((1, 0)) == (255, 0, 0, 255)
+    assert seen == [1, 2, 3, 4]
+
+
+def test_a_repeated_frame_is_one_entry_in_the_overlay(tmp_path):
+    from PIL import Image
+    a = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+    a.putpixel((2, 2), (9, 9, 9, 255))
+    b = Image.new("RGBA", (8, 8), (0, 0, 0, 0))
+    out = str(tmp_path / "o.pado")
+    n, pics, _size = LT.write_pado([a, a, b, b, a.copy()], 30.0, out)
+    got = LT.read_pado(out)
+    assert (n, pics) == (5, 1) and got["table"][:2] == [0, 0] and got["table"][4] == 0
+    assert got["table"][2] == got["table"][3] == LT.NONE
+
+
+def test_an_unchanged_layered_test_is_taken_from_the_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("PAD_TESTCARD_STORE", str(tmp_path / "store" / "testcard.json"))
+    clip = tmp_path / "match.mp4"
+    clip.write_bytes(b"clip")
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    made = []
+
+    def place(item, c, work, n, log=print, cancel=None):
+        dst = os.path.join(work, "placed%02d.mp4" % n)
+        open(dst, "wb").write(b"placed")
+        made.append("place")
+        return dst
+
+    def overlay(item, c, work, n, log=print):
+        dst = os.path.join(work, "clip%02d.pado" % n)
+        open(dst, "wb").write(b"ovl")
+        made.append("overlay")
+        return dst
+    monkeypatch.setattr(tc, "place_layered_clip", place)
+    monkeypatch.setattr(tc, "layer_overlay", overlay)
+    it = tc.Item("video", "M", str(clip), str(proj), "video/match.mp4", layers=["0335207f"])
+    lines = []
+    w1 = tmp_path / "w1"
+    w1.mkdir()
+    first = tc.layered_files(it, str(clip), str(w1), 0, log=lines.append)
+    assert made == ["place", "overlay"] and all(os.path.isfile(p) for p in first)
+    w2 = tmp_path / "w2"
+    w2.mkdir()
+    again = tc.layered_files(it, str(clip), str(w2), 0, log=lines.append)
+    assert made == ["place", "overlay"], "nothing made again"
+    assert open(again[0], "rb").read() == b"placed" and open(again[1], "rb").read() == b"ovl"
+    assert any("unchanged since it was last made" in m for m in lines)
+    # the test changed: made again
+    other = tc.Item("video", "M", str(clip), str(proj), "video/match.mp4", layers=["0335207f"], plain=True)
+    tc.layered_files(other, str(clip), str(w2), 0, log=lines.append)
+    assert made[-2:] == ["place", "overlay"] and len(made) == 4
+
+
+def test_the_build_says_each_step_under_the_progress_bar():
+    from pinball_decryptor.webui.tabs import testcard as tab
+    src = inspect.getsource(tab.TestCardTab._say)
+    assert 'self._step = line[len("test card: "):]' in src

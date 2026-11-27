@@ -147,6 +147,11 @@ class TestCardTab(TabService):
         # (2026-11-26): "remote access could not be added: TestCardTab._say() takes 2 positional arguments but 3
         # were given"; the build's own log is plain lines
         self._lines.append(line)
+        # Simon (2026-11-26): "It takes a really long time to make the test card with no feedback that anything is
+        # going on" - while the items are made, each line is the step under the progress bar too (the log itself
+        # is shut away under "What it did")
+        if self._busy and isinstance(line, str) and line.startswith("test card: "):
+            self._step = line[len("test card: "):]
         self._pub_soon()
 
     def _pub_soon(self, now=None):

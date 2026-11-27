@@ -278,11 +278,16 @@ def place_clip(src, dst, placement, stage, fps=None, cancel=None):
     return dst
 
 
-def render_frames(project, scenes, frames):
+def render_frames(project, scenes, frames, progress=None):
     """RGBA PIL image per clip frame, yielded one at a time (a long clip's frames are ~4 MB each
     at full stage size, so they are never all held): the scenes (``(manifest, pin)`` or
     ``(manifest, pin, render_tree keywords)``, drawn in order, the first lowest) composited over
-    transparency, straight alpha."""
+    transparency, straight alpha.
+
+    Simon (2026-11-26): "It takes a really long time to make the test card with no feedback that anything is going
+    on. It should be a fast process?" - a scene draws the same picture on most frames (Godzilla's Match: 17 pictures
+    in 221 frames, 86 s drawing every one), so a scene's layer is drawn again only when its draw list changes, and
+    a frame the same as the one before is the same picture.  *progress(done, frames)*: called now and then."""
     from PIL import Image
     from . import fontrender as fr
     from . import scene_eval as ev
@@ -291,27 +296,45 @@ def render_frames(project, scenes, frames):
     cache, inks = {}, {}
     w, h = int(scenes[0][0]["stage"][0]), int(scenes[0][0]["stage"][1])
     still = {}
+    drawn = {}                                  # scene -> (its draw list's key, its layer) last frame
+    last = None                                 # (the frame's layers' keys, the frame) last frame
+    step = max(1, frames // 10)
     for k in range(frames):
-        frame = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        if progress is not None and k and k % step == 0:
+            progress(k, frames)
+        keys, layers = [], []
         for i, scene in enumerate(scenes):
             man, pin = scene[0], scene[1]
             kw = scene[2] if len(scene) > 2 else {}
             f = pin if pin is not None else min(k, max(0, int(man["root"].get("frames") or 1) - 1))
             if pin is not None and i in still:
-                layer = still[i]
+                key, layer = still[i]
             else:
                 d = player_names(ev.draw_list(man, f))
-                layer = None
-                if d:
-                    got = sr.render_tree(project, man, frame=f, draws=d, split=set(range(len(d))),
-                                         fonts=fonts, cache=cache, inks=inks, **kw)
-                    layer = got["sel"] if isinstance(got, dict) else None
+                key = repr(d)
+                if i in drawn and drawn[i][0] == key:
+                    layer = drawn[i][1]
+                else:
+                    layer = None
+                    if d:
+                        got = sr.render_tree(project, man, frame=f, draws=d, split=set(range(len(d))),
+                                             fonts=fonts, cache=cache, inks=inks, **kw)
+                        layer = got["sel"] if isinstance(got, dict) else None
+                    drawn[i] = (key, layer)
                 if pin is not None:
-                    still[i] = layer
+                    still[i] = (key, layer)
+            keys.append(key)
+            layers.append(layer)
+        if last is not None and last[0] == keys:
+            yield last[1]
+            continue
+        frame = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        for layer in layers:
             if layer is not None:
                 if layer.size != (w, h):
                     raise Refused("the scenes are not one size (%dx%d and %dx%d)" % ((w, h) + layer.size))
                 frame = Image.alpha_composite(frame, layer)
+        last = (keys, frame)
         yield frame
 
 
@@ -326,9 +349,13 @@ def write_pado(images, fps, out):
             if w > MAX_CANVAS[0] or h > MAX_CANVAS[1]:
                 raise Refused("the scene is %dx%d; the test card's screen is %dx%d"
                               % ((w, h) + MAX_CANVAS))
+        if seen.get("last") is not None and seen["last"][0] is im:
+            table.append(seen["last"][1])               # the same picture as the frame before (render_frames)
+            continue
         box = im.getbbox()
         if box is None or im.getchannel("A").getbbox() is None:
             table.append(NONE)
+            seen["last"] = (im, NONE)
             continue
         crop = im.crop(box)
         key = (box, hashlib.sha1(crop.tobytes()).hexdigest())
@@ -338,6 +365,7 @@ def write_pado(images, fps, out):
             seen[key] = len(pics)
             pics.append((box[0], box[1], buf.getvalue()))
         table.append(seen[key])
+        seen["last"] = (im, seen[key])
     if w is None:
         raise Refused("no frames")
     head = MAGIC + struct.pack("<IIIIII", w, h, int(round(fps * 1000)), len(table), len(pics), 0)
@@ -371,7 +399,7 @@ def read_pado(path):
     return {"canvas": (w, h), "fps": fps / 1000.0, "frames": n, "pictures": pics, "table": table}
 
 
-def make_overlay(project, scene_specs, out, frames, fps=30.0, log=print, profiles=True):
+def make_overlay(project, scene_specs, out, frames, fps=30.0, log=print, profiles=True, progress=None):
     """The overlay for a clip of *frames* frames at *fps*, from the project's scenes
     (:func:`parse_scene` specs, drawn in order); *profiles*: :func:`scene_setup`'s."""
     tree = scene_tree(project)
@@ -384,7 +412,7 @@ def make_overlay(project, scene_specs, out, frames, fps=30.0, log=print, profile
         scenes.append((man, f, kw))
         log("  scene %s%s: %s" % (key, " at frame %d" % f if f is not None else " from frame 0",
                                   name.split("/")[-2]))
-    images = render_frames(project, scenes, int(frames))
+    images = render_frames(project, scenes, int(frames), progress=progress)
     n, npics, size = write_pado(images, fps, out)
     log("  overlay: %d frames, %d picture%s, %d KB -> %s" % (n, npics, "" if npics == 1 else "s",
                                                            size >> 10, out))

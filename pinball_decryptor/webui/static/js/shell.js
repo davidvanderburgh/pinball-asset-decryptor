@@ -965,7 +965,26 @@ const MACH = {
   keep: "How many backups each machine keeps; older ones are deleted.",
   why: { auto: "by itself", send: "before a Send", write: "before a card write", "by hand": "by hand" },
   last: (r) => ({ head: "Settings and scores backed up " + r.backup_last, lines: [r.backups.length + " kept on this computer, the newest " + (MACH.why[r.backups[0].why] || "") + " (" + r.backups[0].files + " files).", "Restore any of them from the row's More menu."] }),
-  none: { head: "No settings backup yet", lines: ["PAD takes one by itself the next time it finds the machine on your network, unless the switch above is off. More > Back up settings now takes one at once."] },
+  none: { head: "No settings backup yet", lines: ["PAD takes one by itself the next time it finds the machine on your network, unless the switch under the list is off. More > Back up settings now takes one at once."] },
+  // PAD-1632: the Remote panel of a row, a project picked by hand, and the page's summary line
+  remote: (name, on) => ({ head: "Remote", lines: [on === true ? "See " + name + "'s screen, read its status, save its logs, back up its settings and scores or restart it, right here. No project needed." : on === false ? name + " is not answering right now: switch it on, or Find my machines if your router moved it." : "Checking whether " + name + " is on…", "It is the Network tab's remote access, pointed at this machine."] }),
+  noAddress: { head: "Not linked to a machine on your network", lines: ["This row is only a card image so far. With remote access on the machine's card (Network tab), Find my machines links it, and its screen, status and logs show here."] },
+  pickProject: (r) => ({ head: "Open project", lines: ["No project was made from this " + r.noun + " itself. Pick the project of this game that is this machine's; the row remembers it."] }),
+  projectHow: { linked: "picked by you (More > Choose its project…)", holds: "the project folder this card image is in" },
+  screenTip: "One picture of what the machine's screen shows right now. It only reads the screen: the game goes on.",
+  liveTip: "The machine's screen, a few frames a second, with no sound. For setting up and troubleshooting: it takes most of the machine's Wi-Fi while it runs, so not during a game that matters. It stops when you leave this page, and by itself after 30 minutes.",
+  buttonsTip: "The machine's coin-door service buttons, pressed from here. They work only while the coin door is open, and the machine's card needs Remote buttons on it (Network tab).",
+  logsTip: "One zip: the system and kernel logs, PAD's mode log, the connectivity logs and a report of the machine's state. It names your network and the machine's addresses; it holds no password.",
+  followTip: "PAD's mode log on the machine, its last lines read every two seconds until you stop.",
+  backupTip: "Save the machine's adjustments, audits and high scores to a zip you choose. It only reads them: the game goes on.",
+  restoreTip: "Put a settings backup back on the machine. A game being played ends: the game is held for a few seconds and starts again.",
+  sum: (rows, net, online, newer) => {
+    const all = rows.length + net.filter((n) => n.known !== false).length;
+    const linked = rows.filter((r) => r.address).map((r) => r.address).concat(net.filter((n) => n.known !== false).map((n) => n.address));
+    const on = linked.filter((a) => online[a] === true).length;
+    const checked = linked.length && linked.every((a) => online[a] !== undefined);
+    return all + " machine" + (all === 1 ? "" : "s") + (linked.length ? (checked ? ", " + (on === 0 ? "none" : on) + " on right now" : ", checking which are on…") : "") + (newer ? " · newer game code is out for " + newer : "") + ".";
+  },
 };
 
 // PAD-1585 (David: "if the game was detected online we'd show a green light next to it"): green when the
@@ -974,11 +993,106 @@ function Light({ on }) {
   return html`<span class=${cx("mach-dot", on === true && "on", on === false && "off")} aria-hidden="true"></span>`;
 }
 
-function MachineRow({ r, on }) {
+// PAD-1632 (David: "I should be able to see the remote access controls here easily (to see the screen, data, etc.
+// like on the remote access screen) without having to make or load a project"): a machine's Remote panel, under
+// its row.  It is the Network tab's own service (the `network` namespace, tabs/network.py) pointed at this
+// machine by shellx.machines_remote: its screen (one picture or live), the service buttons, its status (read as the
+// panel opens), its logs, its settings and scores, a restart.
+function MachineRemote({ address, name, mfr, on, buttons }) {
+  const n = useNs("network");
+  const mine = n.address === address;
+  const off = on !== true || !mine || !!n.running;
+  const careOff = off || !!n.care_busy;
+  const jjp = mfr === "jjp";
+  const token = encodeURIComponent(new URLSearchParams(location.search).get("t") || "");
+  const said = (text, kind) => text ? html`<span class=${cx("small", kind === "err" ? "err-ink" : kind === "ok" ? "ok-ink" : "muted")}>${text}</span>` : null;
+  const status = mine ? (n.care_status || []) : [];
+  const reading = mine && n.care_busy === "Reading the status";
+  const live = mine && n.screen_live;
+  const shot = mine && n.screen_path;
+  return html`<div class=${cx("mach-remote", jjp && "one")}>
+    ${jjp ? null : html`<div class="mach-remote-col">
+      <div class="row wrap mach-remote-bar">
+        <span class="mach-h grow">Screen</span>
+        <${Button} size="sm" kind=${live || shot ? "" : "primary"} disabled=${off || n.screen_busy || live} title=${MACH.screenTip}
+          onClick=${() => call("network.capture_screen")}>${mine && n.screen_busy ? "Capturing…" : "Capture"}<//>
+        ${live ? html`<${Button} size="sm" kind="primary" icon="stop" onClick=${() => call("network.stop_live")}>Stop live view<//>`
+          : html`<${Button} size="sm" icon="eye" disabled=${off || n.screen_busy} title=${MACH.liveTip} onClick=${() => call("network.start_live")}>Live view<//>`}
+        ${live || (mine && n.screen_recording) ? html`<${Button} size="sm" onClick=${() => call("network.record_live", !n.screen_recording)}>${n.screen_recording ? "Stop and save recording…" : "Record"}<//>` : null}
+        <${Button} size="sm" icon="save" disabled=${!(shot || live)} title="Save the picture on show as a PNG" onClick=${() => call("network.save_screen")}>Save…<//>
+      </div>
+      ${live ? html`<img class="mach-screen" alt="The machine's screen, live" src=${"/screen?t=" + token + "&v=" + (n.screen_live_id || 0)} />`
+        : shot ? html`<img class="mach-screen" alt="The machine's screen" src=${mediaUrl(n.screen_path) + "&v=" + (n.screen_seq || 0)} />`
+        : html`<div class="mach-screen mach-screen-none"><${Icon} name="image" /><span>${on === true ? "Capture or Live view shows " + name + "'s screen here." : on === false ? name + " is not answering right now." : "Checking whether " + name + " is on…"}</span></div>`}
+      ${mine ? said(n.screen_note, n.screen_kind) : null}
+      ${(buttons || []).length ? html`<div class="row wrap mach-remote-btns" ...${tip(MACH.buttonsTip)}>
+        <span class="muted small">Service buttons</span>
+        ${buttons.map(([key, label]) => html`<${Button} size="sm" key=${key} disabled=${off || n.buttons_busy} onClick=${() => call("network.press_button", key)}>${label}<//>`)}
+      </div>` : null}
+      ${mine ? said(n.buttons_note, n.buttons_kind) : null}
+    </div>`}
+    <div class="mach-remote-col">
+      <div class="row mach-remote-bar">
+        <span class="mach-h grow">Status</span>
+        <${Button} size="sm" icon="refresh" disabled=${careOff} onClick=${() => call("network.machine_status")}>${reading ? "Reading…" : "Read again"}<//>
+      </div>
+      ${status.length ? html`<table class="mach-status"><tbody>${status.map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th><td>${r[1]}</td></tr>`)}</tbody></table>`
+        : html`<span class="muted small">${reading ? "Reading " + name + "'s status…" : on === true ? "Read again shows what the machine runs, its Wi-Fi and the room on its card." : "Shown once the machine answers."}</span>`}
+      <div class="mach-remote-acts">
+        <span class="mach-h">Logs</span>
+        <div class="row wrap">
+          <${Button} size="sm" icon="download" disabled=${careOff} title=${MACH.logsTip} onClick=${() => call("network.grab_logs")}>Save the logs…<//>
+          ${jjp ? null : html`<${Button} size="sm" icon="log" disabled=${off} title=${MACH.followTip} onClick=${() => call("network.follow_log", !n.care_following)}>${mine && n.care_following ? "Stop following" : "Follow the mode log"}<//>`}
+        </div>
+        <span class="mach-h">Settings and scores</span>
+        <div class="row wrap">
+          <${Button} size="sm" icon="save" disabled=${careOff} title=${MACH.backupTip} onClick=${() => call("network.backup_settings")}>Back up…<//>
+          <${Button} size="sm" icon="undo" disabled=${careOff} title=${MACH.restoreTip} onClick=${() => call("network.restore_settings")}>Restore…<//>
+        </div>
+        <span class="mach-h">Restart</span>
+        <div class="row wrap">
+          <${Button} size="sm" disabled=${careOff} title="Restart the game on the machine. A game being played ends." onClick=${() => call("network.restart_game")}>The game<//>
+          <${Button} size="sm" disabled=${careOff} title="Restart the whole machine, as switching it off and on does. It is back in about a minute." onClick=${() => call("network.restart_machine")}>The machine<//>
+        </div>
+      </div>
+      ${mine && (n.care_following || n.care_log) ? html`<pre class="mach-log">${n.care_log || ""}</pre>` : null}
+      ${mine && n.care_busy && !reading ? html`<span class="small">${n.care_busy}…</span>` : null}
+      ${mine && n.care_pct != null ? html`<${Progress} pct=${n.care_pct} />` : null}
+      ${mine ? said(n.care_note, n.care_kind) : null}
+      <div class="row mach-remote-foot">
+        <span class="muted small grow">Send a card image, Wi-Fi and remote access set-up are on the Network tab.</span>
+        <${Button} size="sm" kind="ghost" iconRight="right" onClick=${() => call("shellx.machines_go_network", address)}>Network tab<//>
+      </div>
+    </div>
+  </div>`;
+}
+
+// The Remote button of a row or of a machine found on the network: opens and closes its panel.
+function RemoteButton({ address, name, on, open }) {
+  return html`<${Button} size="sm" kind=${on === true && !open ? "primary" : ""} icon="eye" cls=${cx("mach-remote-btn", open && "on")}
+    title=${MACH.remote(name, on)} onClick=${() => call("shellx.machines_remote", address, !open)}>Remote<//>`;
+}
+
+function MachineRow({ r, on, remote, buttons }) {
+  const proj = r.project && !r.project_missing;
+  const open = !!r.address && remote === r.address;
+  const picks = r.game_projects || [];
+  const pickProject = (e) => openShellMenu(e.currentTarget, [
+    ...picks.map((p) => ({ label: p.name, icon: "folder", onClick: () => call("shellx.machines_link_project", r.id, p.folder, true) })),
+    { sep: true },
+    { label: "Another folder…", icon: "search", onClick: () => call("shellx.machines_link_project", r.id, null, true) },
+    { label: "Extract a new project", icon: "extract", disabled: r.card_missing, onClick: () => call("shellx.machines_extract", r.id) },
+  ]);
   const more = (e) => openShellMenu(e.currentTarget, [
     { label: "Show the " + r.noun, icon: "folder", disabled: r.card_missing, onClick: () => call("shellx.machines_show_card", r.id) },
     { label: r.noun === "card image" ? "Change card…" : "Change " + r.noun + "…", icon: "sd", onClick: () => call("shellx.machines_rebind", r.id) },
     { label: "Rename…", icon: "edit", onClick: () => call("shellx.machines_rename", r.id) },
+    { sep: true },
+    { label: "Choose its project…", icon: "link", onClick: () => call("shellx.machines_link_project", r.id) },
+    ...(r.project_how === "linked" ? [{ label: "Find its project by itself again", icon: "unlock", onClick: () => call("shellx.machines_unlink_project", r.id) }] : []),
+    ...(proj ? [{ label: "Extract a new project", icon: "extract", disabled: r.card_missing, onClick: () => call("shellx.machines_extract", r.id) }] : []),
+    { sep: true },
+    { label: r.address ? "Remote access on the Network tab" : "Set up remote access…", icon: "globe", onClick: () => call("shellx.machines_go_network", r.address || null) },
     ...(r.address && r.announces === false ? [{ label: "Find it by itself…", icon: "globe", disabled: on !== true, onClick: () => call("shellx.machines_announce_on", r.address) }] : []),
     ...((r.backup_machines || []).length ? [{ sep: true },
       { label: "Back up settings now", icon: "save", onClick: () => call("shellx.machines_backup_now", r.id) },
@@ -988,8 +1102,8 @@ function MachineRow({ r, on }) {
     { sep: true },
     { label: "Remove from My machines", icon: "trash", onClick: () => call("shellx.machines_remove", r.id) },
   ]);
-  const proj = r.project && !r.project_missing;
-  return html`<div class="mach-row">
+  return html`<div class=${cx("mach-item", open && "open")}>
+  <div class="mach-row">
     <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="sd" /></span>
     <div class="stack grow" style="gap:3px;min-width:0">
       <div class="row wrap" style="gap:4px 10px;align-items:baseline">
@@ -997,27 +1111,32 @@ function MachineRow({ r, on }) {
         <span class="notr">${r.title}${r.edition ? html` <span class="muted">${r.edition}</span>` : null}</span>
         ${r.build ? html`<${Chip} kind="info" sm>${r.build}<//>` : null}
         <${Chip} sm kind=${r.lineage === "Stock" ? "" : "warn"}>${r.lineage}<//>
-        ${r.address ? html`<${Chip} sm kind=${on === true ? "ok" : ""} title=${MACH.address(r, on)}><${Light} on=${on} />${r.address}<//>` : null}
+        ${r.address ? html`<${Chip} sm kind=${on === true ? "ok" : ""} title=${MACH.address(r, on)}><${Light} on=${on} />${on === true ? "On · " : on === false ? "Off · " : ""}${r.address}<//>`
+          : html`<span class="muted small" ...${tip(MACH.noAddress)}>not on your network yet</span>`}
         ${r.newer ? html`<button type="button" class="mach-newer" onClick=${() => call("shellx.machines_open_page", r.id)}
             ...${tip(MACH.newer({ ...r, build_next: r.newer }))}><${Icon} name="star" />${r.newer} is out<${Icon} name="external" /></button>` : null}
       </div>
       <div class="muted small mach-sub">
         <span class=${cx("mono", r.card_missing && "err-ink")} title=${r.card}>${r.card_missing ? r.noun.charAt(0).toUpperCase() + r.noun.slice(1) + " not found: " : ""}${r.card_name}</span>
         ${r.size ? html` · ${r.size}` : null}
-        ${" · "}${proj ? html`project <b class="mach-proj" title=${r.project}>${r.project_name}</b>${r.more_projects.length ? " +" + r.more_projects.length + " more" : ""}`
-          : r.project_missing ? html`<span class="err-ink">project folder missing: ${r.project_name}</span>` : html`<span ...${tip(MACH.noProject(r))}>no project yet</span>`}
+        ${" · "}${proj ? html`project <b class="mach-proj" title=${r.project + (MACH.projectHow[r.project_how] ? "\n" + MACH.projectHow[r.project_how] : "")}>${r.project_name}</b>${r.more_projects.length ? " +" + r.more_projects.length + " more" : ""}`
+          : r.project_missing ? html`<span class="err-ink">project folder missing: ${r.project_name}</span>` : html`<span ...${tip(picks.length ? MACH.pickProject(r) : MACH.noProject(r))}>no project yet</span>`}
         ${(r.backup_machines || []).length ? html` · ${r.backup_last ? html`<span class="mach-bk" ...${tip(MACH.last(r))}>settings backed up ${r.backup_last}</span>`
           : html`<span class="mach-bk" ...${tip(MACH.none)}>no settings backup yet</span>`}` : null}
       </div>
     </div>
     <div class="row mach-acts">
+      ${r.address ? html`<${RemoteButton} address=${r.address} name=${r.name || "the machine"} on=${on} open=${open} />` : null}
       ${proj ? html`<${Button} size="sm" icon="folder" onClick=${() => call("shellx.machines_open_project", r.id)}>Open project<//>`
+        : picks.length ? html`<${Button} size="sm" icon="folder" iconRight="down" title=${MACH.pickProject(r)} onClick=${pickProject}>Open project<//>`
         : html`<${Button} size="sm" icon="extract" disabled=${r.card_missing} title=${MACH.noProject(r)} onClick=${() => call("shellx.machines_extract", r.id)}>Extract<//>`}
       ${r.newer && (proj || r.multi) && r.transfer ? html`<${Button} size="sm" kind="primary" icon="star" disabled=${r.card_missing} title=${MACH.update(r)} onClick=${() => call("shellx.machines_update", r.id)}>Update to ${r.newer}<//>` : null}
       <${Button} size="sm" kind=${r.newer && proj && !r.transfer ? "primary" : ""} icon="modpack" disabled=${!proj} title=${r.transfer ? MACH.transfer : MACH.modpack} onClick=${() => call("shellx.machines_transfer", r.id)}>${r.transfer ? "Transfer Mods" : "Mod Pack"}<//>
       <${Button} size="sm" icon="write" disabled=${!proj} onClick=${() => call("shellx.machines_write", r.id)}>Write<//>
       <${Button} size="sm" kind="ghost" icon="more" title="More" onClick=${more} />
     </div>
+  </div>
+  ${open ? html`<${MachineRemote} address=${r.address} name=${r.name || "the machine"} mfr=${r.mfr} on=${on} buttons=${r.mfr === "stern" ? buttons : []} />` : null}
   </div>`;
 }
 
@@ -1032,7 +1151,7 @@ function MyMachines({ shell }) {
   const net = m.network || [];
   const online = m.online || {};
   const working = shell.view === "mfr";
-  const found = net.map((n) => html`<div class="mach-row mach-net" key=${n.address}>
+  const found = net.map((n) => html`<div class=${cx("mach-item", m.remote === n.address && "open")} key=${n.address}><div class="mach-row mach-net">
     <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="globe" /></span>
     <div class="stack grow" style="gap:2px;min-width:0">
       <div class="row wrap" style="gap:2px 10px;align-items:baseline">
@@ -1043,14 +1162,19 @@ function MyMachines({ shell }) {
       <span class="muted small" ...${tip(MACH.online(n, online[n.address]))}><${Light} on=${online[n.address]} /><span class="mono">${n.address}</span>${online[n.address] === true ? " · online" : online[n.address] === false ? " · not answering" : ""}${n.announces === true ? html` · <span ...${tip(MACH.says)}>says where it is</span>` : ""}</span>
       ${n.known === false ? html`<span class="muted small">${MACH.unknownText(n)}</span>` : null}
     </div>
-    ${n.known === false ? html`<${Button} size="sm" icon="trash" onClick=${() => call("shellx.machines_forget_network", n.address)}>Forget<//>` : null}
+    ${n.known === false ? html`<${Button} size="sm" icon="trash" onClick=${() => call("shellx.machines_forget_network", n.address)}>Forget<//>`
+      : html`<${RemoteButton} address=${n.address} name=${n.name || n.title || "the machine"} on=${online[n.address]} open=${m.remote === n.address} />`}
     ${n.known !== false && n.announces === false && online[n.address] === true ? html`<${Button} size="sm" icon="globe" cls="sx-mach-announce" disabled=${running} title=${MACH.announce(n)} onClick=${() => call("shellx.machines_announce_on", n.address)}>Find it by itself…<//>` : null}
     <${Button} size="sm" icon="plus" disabled=${running} title=${MACH.netAdd(n)} onClick=${() => call("shellx.machines_add_network", n.address)}>Add with its card image…<//>
     ${n.known === false ? null : html`<${Button} size="sm" kind="ghost" icon="more" title="More" onClick=${(e) => openShellMenu(e.currentTarget, [
       { label: "Name this machine…", icon: "edit", onClick: () => call("shellx.machines_name_network", n.address) },
       { sep: true },
+      { label: "Remote access on the Network tab", icon: "globe", onClick: () => call("shellx.machines_go_network", n.address) },
+      { sep: true },
       { label: "Forget this machine", icon: "trash", onClick: () => call("shellx.machines_forget_network", n.address) },
     ])} />`}
+  </div>
+  ${m.remote === n.address ? html`<${MachineRemote} address=${n.address} name=${n.name || n.title || "the machine"} mfr="stern" on=${online[n.address]} buttons=${m.buttons} />` : null}
   </div>`);
   const find = html`<${Button} cls="sx-mach-find" icon="search" disabled=${m.finding === true} title=${MACH.find} onClick=${() => call("shellx.machines_find")}>${m.finding ? "Looking…" : "Find my machines"}<//>`;
   const findLine = m.finding ? html`<div class="mach-find row" style="gap:10px;align-items:center"><div class="grow"><${Progress} pct=${m.find_pct || 0} /></div><span class="muted small">${m.find_note}</span></div>`
@@ -1060,23 +1184,25 @@ function MyMachines({ shell }) {
   return html`<div class="picker sx-mach-page"><div class="inner">
     <div class="row wrap" style="align-items:flex-end;gap:12px 24px">
       <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">My machines</h1>
-        <p class="dim" style="margin:6px 0 0">${MACH.lede}</p></div>
-      ${rows.length ? html`<${Check} checked=${m.watch === true} title=${MACH.watch} label="Check for new game code once a day"
-        onChange=${(v) => call("shellx.machines_set_watch", v)} />` : null}
-      ${rows.length ? html`<div class="row" style="gap:6px;align-items:center">
-        <${Check} checked=${(m.backup || {}).auto !== false} title=${MACH.backup} label="Back up settings and scores by itself"
-          onChange=${(v) => call("shellx.machines_set_backup", v, null)} />
-        <${Select} sm width=${92} title=${MACH.keep} disabled=${(m.backup || {}).auto === false} value=${String((m.backup || {}).keep || 5)}
-          options=${[1, 3, 5, 10, 20, 50].map((n) => ({ value: String(n), label: "keep " + n }))}
-          onChange=${(v) => call("shellx.machines_set_backup", null, parseInt(v, 10))} />
-      </div>` : null}
-      ${rows.length ? add : null}
+        <p class="dim" style="margin:6px 0 0">${rows.length ? MACH.sum(rows, net, online, m.newer_count) : MACH.lede}</p></div>
       ${find}
+      ${rows.length ? add : null}
       <${Button} cls="sx-mach-close" onClick=${() => call("shellx.machines_close")}>${working && shell.mfr ? "Back to " + shell.mfr.display : "Choose a manufacturer"}<//>
     </div>
     ${findLine}
-    ${rows.length ? html`<section class="mach"><div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} on=${online[r.address]} />`)}</div>
-      ${m.watch_text ? html`<div class="muted small">${m.watch_text}</div>` : null}</section>`
+    ${rows.length ? html`<section class="mach"><div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} on=${online[r.address]} remote=${m.remote} buttons=${m.buttons} />`)}</div>
+      <div class="row wrap mach-opts">
+        <${Check} checked=${m.watch === true} title=${MACH.watch} label="Check for new game code once a day"
+          onChange=${(v) => call("shellx.machines_set_watch", v)} />
+        <div class="row" style="gap:6px;align-items:center">
+          <${Check} checked=${(m.backup || {}).auto !== false} title=${MACH.backup} label="Back up settings and scores by itself"
+            onChange=${(v) => call("shellx.machines_set_backup", v, null)} />
+          <${Select} sm width=${92} title=${MACH.keep} disabled=${(m.backup || {}).auto === false} value=${String((m.backup || {}).keep || 5)}
+            options=${[1, 3, 5, 10, 20, 50].map((n) => ({ value: String(n), label: "keep " + n }))}
+            onChange=${(v) => call("shellx.machines_set_backup", null, parseInt(v, 10))} />
+        </div>
+        ${m.watch_text ? html`<span class="muted small grow mach-opts-note">${m.watch_text}</span>` : null}
+      </div></section>`
       : html`<section class="mach-empty">
         <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="sd" /></span>
         <div class="stack grow" style="gap:12px">

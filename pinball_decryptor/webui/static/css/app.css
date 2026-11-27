@@ -393,6 +393,34 @@ input[type=range] { accent-color: var(--accent); }
 .mach-name svg { width: 13px; height: 13px; opacity: .35; }
 .mach-name:hover svg, .mach-name:focus-visible svg { opacity: 1; color: var(--accent); }
 .mach-find { margin: 2px 0 0; }
+/* PAD-1632: a machine's Remote panel under its row (its screen, status, logs, settings, restart), and the
+   page's two switches under the list they are about */
+.mach-item { display: flex; flex-direction: column; }
+.mach-item.open > .mach-row { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-color: var(--accent-line); }
+.mach-remote-btn.on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+.mach-remote { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px 22px; padding: 14px 16px 16px;
+  background: var(--panel-2); border: 1px solid var(--accent-line); border-top: 0; border-radius: 0 0 12px 12px; }
+.mach-remote.one { grid-template-columns: minmax(0, 1fr); }
+html.bp-1100 .mach-remote { grid-template-columns: minmax(0, 1fr); }
+.mach-remote-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mach-remote-bar { gap: 6px; align-items: center; }
+.mach-h { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3, var(--ink-2)); }
+.mach-screen { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #000; }
+.mach-screen-none { aspect-ratio: 16 / 9; max-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: #8b93a1; font-size: 13px; text-align: center; padding: 12px; }
+.mach-screen-none .i { width: 28px; height: 28px; opacity: .6; }
+.mach-remote-btns { gap: 6px; align-items: center; }
+.mach-remote-btns button { min-width: 64px; }
+.mach-status { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.mach-status th, .mach-status td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.mach-status th { width: 36%; color: var(--ink-3, var(--ink-2)); font-weight: 600; }
+.mach-remote-acts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; align-items: center; margin-top: 4px; }
+.mach-remote-acts .row { gap: 6px; }
+.mach-log { max-height: 220px; overflow: auto; font-size: 11.5px; line-height: 1.35; margin: 0; padding: 8px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mach-remote-foot { align-items: center; gap: 10px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); }
+.mach-opts { gap: 8px 24px; align-items: center; padding: 2px 4px 0; }
+.mach-opts-note { text-align: right; min-width: 240px; }
 
 /* ------------------------------------------------------------- responsive */
 /* Breakpoints are classes the shell sets on <html> from the EFFECTIVE width

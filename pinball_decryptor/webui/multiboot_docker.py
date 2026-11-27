@@ -68,7 +68,7 @@ import time
 #: image inspect`` succeeds on a stale image built from an older Dockerfile,
 #: so a new package list that kept the old tag would never reach anybody who
 #: had already built one.
-IMAGE = "pad-multiboot:5"
+IMAGE = "pad-multiboot:6"
 CONTAINER = "pad-multiboot-worker"
 
 #: Named volume mounted at ``/root`` in the container so the unpacked Stern
@@ -124,13 +124,19 @@ ARCH = "amd64"
 #: ``gnupg`` IS A BARRELS OF FUN UPDATE (PAD-342).  A .fun is a GPG-symmetric
 #: tarball: ``mkbofmulti.py`` decrypts the two the menu offers and encrypts the
 #: one it writes, so without it a Mac's plan stopped at "this needs gpg".
+#:
+#: ``psmisc`` IS fuser(1) (PAD-1630).  ``mkmulticard.py build --layout store``
+#: grows the primary's games partition through a loop mount and asks fuser
+#: who still holds it before the unmount, so it refuses up front without one
+#: ("missing tool(s): fuser") - the runtime image and the Linux installer
+#: carry it for the same reason, and this list never had it.
 DOCKERFILE = """\
 FROM debian:bookworm-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \\
         partclone e2fsprogs xorriso pigz gzip coreutils util-linux \\
         python3 bash make gcc libc6-dev \\
         gcc-arm-linux-gnueabihf libc6-dev-armhf-cross qemu-user-static \\
-        fonts-dejavu-core ffmpeg gnupg \\
+        fonts-dejavu-core ffmpeg gnupg psmisc \\
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /tmp
 CMD ["bash"]

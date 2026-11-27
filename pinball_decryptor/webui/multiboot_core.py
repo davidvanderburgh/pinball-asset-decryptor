@@ -3310,10 +3310,33 @@ def preview_highlight(form, row_index):
 #: tried first because it is what every older machine has.  ``sh -c`` because
 #: every word of the step line is quoted (shell_line), which is what keeps this
 #: script's ``$`` for the shell that runs it.
+#:
+#: WHEN QEMU CANNOT RESERVE THE GUEST, THE KERNEL'S OWN ARM HANDLER RUNS IT
+#: (PAD-1630).  A Mac's container is x86-64 Linux, so on Apple silicon it runs
+#: under Rosetta, and an x86-64 qemu-arm there stops before the first
+#: instruction: "Unable to reserve 0xfffff000 bytes of virtual address space
+#: at 0x8000 (Success)" - Rosetta does not hand it the fixed 4 GB it maps the
+#: 32-bit guest into.  A smaller ``-R`` is no way out: ARM's commpage sits at
+#: 0xffff0000, and qemu aborts on it (measured, qemu 8.2).  But the Linux VM
+#: under that container is arm64 and registers its own native qemu-arm in
+#: binfmt_misc, which a --privileged container shares, so the menu program run
+#: as itself with ``QEMU_LD_PREFIX`` set to the rootfs (qemu's spelling of
+#: ``-L``) is drawn by a qemu that Rosetta never sees.  Only that one failure
+#: takes this path, and only for a ``-L`` line; every other error is the
+#: interpreter's own, passed through as it was.
 QEMU_ARM = ["sh", "-c",
             'q=$(command -v qemu-arm-static || command -v qemu-arm) || '
             '{ echo "no qemu-arm-static or qemu-arm in this Linux" >&2; '
-            'exit 127; }; exec "$q" "$@"',
+            'exit 127; }; '
+            'e=$(mktemp 2>/dev/null) || exec "$q" "$@"; '
+            '"$q" "$@" 2>"$e"; rc=$?; '
+            'if [ "$rc" -ne 0 ] && [ "$1" = -L ] '
+            '&& grep -q "Unable to reserve" "$e"; then '
+            'echo "[preview] qemu-arm could not reserve the memory of the '
+            '32-bit guest in this Linux (an emulated x86-64 one); drawing the '
+            'menu through the ARM handler of the system instead" >&2; '
+            'r=$2; shift 2; QEMU_LD_PREFIX=$r "$@" 2>>"$e"; rc=$?; fi; '
+            'cat "$e" >&2; rm -f "$e"; exit "$rc"',
             "qemu-arm"]
 
 

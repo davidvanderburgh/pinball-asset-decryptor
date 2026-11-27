@@ -23,6 +23,11 @@ REAL_NOTE = ("Boots the game in the emulator, hidden and muted, with this projec
              "game itself draws it. A minute or more (longer the first time a card is used); the emulator must be "
              "stopped.")
 
+#: PAD-1640: the Co-op Play row's style-picking form, told only while the Modes tab (where "Style picked" is) is
+#: shown: with the mode maker a preview switched off, no tab names it
+COOP_STYLE_WHERE = (" Where the Modes tab's co-op \"Style picked\" says the service menu (or both), the row is Off, "
+                    "Normal, Characters or Enhanced instead and picks the style.")
+
 #: each setting of ours, its name, and where it is switched when not here
 SETTINGS = (
     ("music_mode", "Music Mode", "Set on the Audio tab: give a sound more than one music choice."),
@@ -32,9 +37,7 @@ SETTINGS = (
     # set to have the item on will be able to turn coop off/on.. thats it." (PAD-1443 had taken the row away)
     ("coop_play", "Co-op Play", "Ticking it switches co-op play on too. On the machine the row is Off / On: On, the "
                                 "start menu offers the co-op and team games (as with no row); Off, the stock game, "
-                                "reporting to Insider Connected as it always has. Where the Modes tab's co-op "
-                                "\"Style picked\" says the service menu (or both), the row is Off, Normal, Characters "
-                                "or Enhanced instead and picks the style."),
+                                "reporting to Insider Connected as it always has."),
     ("handicap", "Handicap", ""),
     ("colour_blind", "Color Blind", "Play options tab: color-blind insert colors."),
     ("spoken_scores", "Spoken Scores", "Play options tab: the machine says each player's score."),
@@ -138,9 +141,12 @@ class ServiceMenuTab(TabService):
         except Exception:                               # noqa: BLE001 - shown as off then
             has = set()
         ticked = SM.on_keys(project)
+        from ...core import preview
         for key, name, where in SETTINGS:
             if key == "brightness" and not PS.OFFERED:
                 continue
+            if key == "coop_play" and preview.enabled("modes"):
+                where += COOP_STYLE_WHERE
             row = {"key": key, "name": name, "where": where, "can": False, "on": False, "note": ""}
             if key in SM.OFF_KEYS:                      # PAD-1393 round 2: ticked/unticked here
                 on = key in ticked                      # round 3: unticked until the owner ticks it

@@ -24,7 +24,7 @@ import struct
 
 import pytest
 
-from tests.test_spike2_mode_roster import _host_run, _lift
+from tests.test_spike2_mode_roster import _host_run, _lift as _lift_first
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 SDK = ROOT / "tools" / "spike2_emu" / "modes" / "sdk"
@@ -42,6 +42,15 @@ def _cc_or_skip():
     if not cc:
         pytest.skip("no host C compiler")
     return cc
+
+
+def _lift(src, signature):
+    """A function's body, past any prototype of it (PAD-1640: PAD-1637's prototypes put ci_lookup's
+    ahead of an enum, so the first match's brace was not the function's)."""
+    i = src.index(signature)
+    while src.find(";", i) < src.find("{", i):
+        i = src.index(signature, i + 1)
+    return _lift_first(src[i:], signature)
 
 
 def _src():

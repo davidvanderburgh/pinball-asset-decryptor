@@ -377,7 +377,8 @@ if [ -n "${PAD_CARD:-}" ]; then
             # 'Launching' must preview as that card, not as the default menu.
             # ...and boot_menu= / flip_hold= / flip_guard= (Simon, 2026-11-22): how the card's menu is reached,
             # which this menu (the start-up screen, the right flipper's line) and padmenu.so both read.
-            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|back_hold|boot_menu|flip_hold|flip_guard|color_[a-z_]+)[[:space:]]*=' \
+            # ...and menu_rows= (Simon, 2026-11-27): the games' BOOT MENU / BOOT MENU TIMER rows may change the card.
+            printf '%s\n' "$SEL_CARDCONF" | grep -E '^[[:space:]]*(sound_move|sound_confirm|volume|machine_volume|mixer_volume|heading|text_size|counter|countdown_word|footer|theme|settings|back_hold|boot_menu|flip_hold|flip_guard|menu_rows|color_[a-z_]+)[[:space:]]*=' \
                 | grep -vE '^[[:space:]]*color_profile[[:space:]]*=' || true
             # ...and the TEST CARD entry's lists, which it is nothing without
             if [ -n "${SEL_TESTENTRY:-}" ]; then

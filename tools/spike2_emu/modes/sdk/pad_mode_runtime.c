@@ -20126,6 +20126,11 @@ static struct {
     unsigned n, turn;                    /* teammates (2-4) and the one up (1..n) */
     pm_addr setting;                     /* round 2: the CO-OP PLAY row's live value (0: none - always on; PAD-1326: a
                                           * PIE's moved by game_base) */
+    int onoff;                           /* coop.cfg `switch`: the row is Off / On only, and On plays as a card with
+                                          * no row does (the start menu's own style step) */
+    unsigned rowsty;                     /* coop.cfg `styles service` (1) / `styles both` (2), with `switch`: the row is
+                                          * 1 Off, 2 Normal, 3 Characters, 4 Enhanced (a named row, from 1) and picks the
+                                          * style - 1: no start menu step, 2: the step starts on it (PR #53 review) */
     unsigned teams_always;               /* PAD-1042: coop.cfg `teams on` (4: 2v2) or `teams 2v1` (3); `teams 3v1` (5) */
     unsigned teams;                      /* PAD-1042: this game is a team game (coop.n players, turn = the player up) */
     unsigned team_n[3];                  /* PAD-1042: players in team 1 and team 2 */
@@ -20377,13 +20382,38 @@ static int coop_switched_on(void)
 {
     if (coop.teams_always) return 0;
     if (!coop.setting) return 1;
+    if (coop.rowsty) {                                       /* PR #53 review: 1 Off, 2-4 a style */
+        unsigned v = *(volatile const unsigned *)(unsigned long)coop.setting;
+        return v >= 2u && v <= 4u;
+    }
     return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) != 0u;
+}
+
+/* The CO-OP PLAY row sets how co-op plays (round 2 / PAD-1073's 0 Off, 1 Classic, 2 Enhanced): a card with the row
+ * and no `switch` line. An Off / On row (Simon, 2026-11-27, agreed with daveyvandy: "PAD - Item for coop play in
+ * service menu OFF/ON. SERVICE MENU - if set to have the item on will be able to turn coop off/on.. thats it.") only
+ * switches co-op: On plays as a card with no row does - every use of "a card with the row" below asks this. */
+static int coop_row_styles(void)
+{
+    return coop.setting && !coop.onoff;
+}
+
+/* The style a co-op or team game plays when none was chosen on the start menu (1 NORMAL, 2 CHARACTERS, 3 ENHANCED; 0
+ * none): the CO-OP PLAY row's where it picks the style (coop.cfg `styles`; David, PR #53 review: "The user should have
+ * the option to place the co-op selection style in either place"), else the card's coop.cfg `style` (PAD-1558) */
+static unsigned coop_card_style(void)
+{
+    if (coop.rowsty && coop.setting) {
+        unsigned v = *(volatile const unsigned *)(unsigned long)coop.setting;
+        return v >= 2u && v <= 4u ? v - 1u : 1u;
+    }
+    return coop.style_default;
 }
 
 /* PAD-1065: CO-OP PLAY says Classic: the characters are picked but have no abilities */
 static int coop_classic(void)
 {
-    if (!coop.setting) return coop.style == 2u;              /* PAD-1449: the chooser's CHARACTERS */
+    if (!coop_row_styles()) return coop.style == 2u;         /* PAD-1449: the chooser's CHARACTERS */
     return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) == 1u;
 }
 
@@ -21709,7 +21739,8 @@ static void coop_turn_show(void);
  * style), no coop.cfg `teams` card */
 static int sty_wanted(void)
 {
-    return coop.on && !coop.setting && !coop.teams_always && coop_pick_on && coop_ch_n > 0;
+    return coop.on && !coop_row_styles() && !coop.teams_always && coop_pick_on && coop_ch_n > 0
+           && coop.rowsty != 1u;                              /* PR #53 review: the service menu alone picks it */
 }
 
 /* PAD-1449: the game the chooser is for, as the top line names it */
@@ -22141,10 +22172,12 @@ static int sty_default_for(unsigned kind, unsigned dflt)
  * has one, says how it plays - NORMAL no character pick, CHARACTERS a pick with no abilities, ENHANCED as before */
 static void coop_style_held(void)
 {
-    if (!coop.style_default || coop.setting) return;
-    coop.style = coop.style_default <= 3u ? coop.style_default : 3u;
+    unsigned d = coop_card_style();
+    if (!d || coop_row_styles()) return;
+    coop.style = d <= 3u ? d : 3u;
     coop.plain = coop.style == 1u;
-    say("styles: the held button's game plays the card's default style - %s", STY_NAMES[coop.style - 1]);
+    say("styles: the game plays the %s style - %s", coop.rowsty ? "service menu's" : "card's default",
+        STY_NAMES[coop.style - 1]);
 }
 
 /* the menu's Start (the switch drain; the game begins its game on it): what the cursor's entry says is kept for it */
@@ -22161,13 +22194,13 @@ static void sty_menu_go(void)
         team = kind;
     smn.go_style = sty_menu_go_style(smn.open, smn.shaping, smn.at, smn.taken);
     if (!smn.taken && !(smn.open && !smn.shaping))            /* PAD-1558: none chosen - the card's default */
-        smn.go_style = sty_default_for(kind, coop.style_default);
+        smn.go_style = sty_default_for(kind, coop_card_style());
     smn.go_kind = kind;
     smn.go_team = team;
     smn.go_ms = pm_ms() | 1ul;
     say("styles: Start on the start menu's %s - %s %s goes in when the game begins%s", sty_label(kind), sty_label(kind),
         STY_NAMES[smn.go_style - 1], smn.taken || (smn.open && !smn.shaping) ? ""
-        : coop.style_default && kind != STY_STANDARD && kind != STY_CHALLENGE ? " (none chosen: the card's default)"
+        : coop_card_style() && kind != STY_STANDARD && kind != STY_CHALLENGE ? " (none chosen: the card's default)"
         : " (none chosen: NORMAL)");
 }
 
@@ -22473,7 +22506,7 @@ static void sty_begin(unsigned kind)
 {
     sty.preset = sty_menu_preset(kind);
     if (sty_default_normal(sty.preset, smn.frame_ms != 0)) {   /* PAD-1449 round 5 */
-        sty.preset = sty_default_for(kind, coop.style_default);   /* PAD-1558: the card's default, else NORMAL */
+        sty.preset = sty_default_for(kind, coop_card_style());   /* PAD-1558: the card's default, else NORMAL */
         say("styles: no version chosen on the start menu (its Action was the game's: the Home Team screen) - %s%s",
             STY_NAMES[sty.preset - 1], sty.preset != 1 ? " (the card's default style)" : "");
     }
@@ -25767,8 +25800,9 @@ static void on_team_dispatch(pm_reg *r)
         coop.game = chg_game_now() + 1;
         coop.teams = 0;
         coop.standard = 0;                                    /* PAD-1224 */
-        coop.plain = kind == 1u && !coop.setting;             /* PAD-1443: no row - CO-OP PLAY picks no character */
+        coop.plain = kind == 1u && !coop_row_styles();        /* PAD-1443: no row - CO-OP PLAY picks no character */
         coop.style = 0;                                       /* PAD-1449 */
+        if (coop.rowsty == 1u) coop_style_held();             /* PR #53 review: the service menu's style, no step */
         coop.n = 1;
         coop.turn = 1;
         coop.round = 1;
@@ -25811,6 +25845,7 @@ static void on_team_dispatch(pm_reg *r)
     tm.size = 0;
     if (!added) say("teams: TEAM PLAY - the game added no one (credits?) - a one-player game");
     else if (coop_teammates() && sty_wanted()) sty_begin(kind);  /* PAD-1449: its style first */
+    else if (coop_teammates() && coop.rowsty == 1u) coop_style_held();   /* PR #53 review: the service menu's */
 }
 
 /* PAD-1052: from the tick: the fill's lines on the top line, one at a time, then player 1's pick. While the game's own
@@ -26459,6 +26494,9 @@ static void coop_line(const char *s)
         if (!ok) coop.setting = 0;
         coop.setting = setting_addr(coop.setting);       /* PAD-1326: a PIE's; PAD-1382: or a shared one */
     }
+    if (str_starts(s, "switch")) coop.onoff = 1;         /* Simon: an Off / On row (coop_row_styles) */
+    if (str_starts(s, "styles service")) coop.rowsty = 1u;   /* PR #53 review: the row picks the style */
+    if (str_starts(s, "styles both")) coop.rowsty = 2u;
 }
 
 /* round 2: the CO-OP PLAY row's live value from coop.cfg when the card carries no modes ("only"), read before the gate
@@ -26471,7 +26509,7 @@ static pm_addr coop_setting_wanted(void)
     unsigned k;
     pm_addr v = 0;
     const char *p;
-    int ok, only = 0;
+    int ok, only = 0, sw = 0;
     for (k = 0; k < sizeof COOP_FILES / sizeof COOP_FILES[0] && n < 0; k++)
         n = pm_read_file(COOP_FILES[k], raw, sizeof raw - 1);
     if (n <= 0) return 0;
@@ -26479,6 +26517,7 @@ static pm_addr coop_setting_wanted(void)
     for (i = 0; i < n; i++) {
         if (i && raw[i - 1] != '\n') continue;
         if (str_starts(raw + i, "only")) only = 1;
+        if (str_starts(raw + i, "switch")) sw = 1;     /* Simon: an Off / On row - the gate holds per game */
         if (str_starts(raw + i, "setting ")) {
             p = raw + i + 8;
             v = (pm_addr)number(&p, &ok);
@@ -26486,7 +26525,8 @@ static pm_addr coop_setting_wanted(void)
         }
     }
     coop_cfg_only = only;
-    return only && v ? setting_addr(v) : 0;                 /* PAD-1326: a PIE's (0 on Spike 2); PAD-1382: or a shared one */
+    /* Simon: with an Off / On row the gate is PAD-1443's per game - Off, no game is one of ours, so all report */
+    return only && v && !sw ? setting_addr(v) : 0;                 /* PAD-1326: a PIE's (0 on Spike 2); PAD-1382: or a shared one */
 }
 
 /* coop.cfg asks for co-op: the card takes the runtime's whole gate, as attract items do */
@@ -26590,7 +26630,8 @@ static void coop_arm(void)
             "score goes on the game's boards");
     if (coop.setting)
         say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08" PMA ", now %s)", coop.setting,
-            !coop_switched_on() ? "Off" : coop_classic() ? "Classic" : "Enhanced");
+            !coop_switched_on() ? "Off" : coop.rowsty ? STY_NAMES[coop_card_style() - 1] : coop.onoff ? "On"
+            : coop_classic() ? "Classic" : "Enhanced");
     if (coop.teams_always)
         say("teams: team play is always on (coop.cfg `teams %s`): players 1+3 against %s",
             coop.teams_always == 3u ? "2v1" : coop.teams_always == 5u ? "3v1" : "on",
@@ -29252,7 +29293,7 @@ static unsigned team_menu_kinds(unsigned *kinds)
         return n;
     }
     /* PAD-1449: no row - one entry per game, the style chosen once it is picked (sty_wanted) */
-    if (coop.setting && !coop_classic()) kinds[n++] = 2u;    /* PAD-1224: ENHANCED STANDARD (Enhanced only) */
+    if (coop_row_styles() && !coop_classic()) kinds[n++] = 2u;   /* PAD-1224: ENHANCED STANDARD (Enhanced only) */
     kinds[n++] = 4u;
     kinds[n++] = 3u;
     kinds[n++] = 5u;                                         /* PAD-1224: TEAM PLAY 3 VS 1 */
@@ -33010,6 +33051,70 @@ static void mset_line(char *s)
     mset_bad++;
 }
 
+/* THE BOOT MENU'S OWN (Simon, 2026-11-27: "No boot menu with facility to enable/disable via service menu. Boot menu
+ * with ditto ... boot menu timer OFF/15 seconds. 30 seconds").  BOOT MENU (boot_show, 0 Off / 1 On) and BOOT MENU
+ * TIMER (boot_timer, seconds) are a multi-boot card's, one value for the whole card: padmenu.so keeps it in
+ * MSET_BOOT_FILE (the last change in any game's menu), and before any change it is what the card's images.conf says
+ * (boot_menu=hidden is Off, timeout=).  Only on a card whose images.conf says menu_rows=on.  On the shared rows the
+ * value is ours, so the card's is loaded here and the menu shows it; a change there is written to MSET_STATE as any
+ * other, where padmenu.so sees it and makes it the card's. */
+static const char MSET_BOOT_FILE[] = "/data/padmenu.boot";
+static const char MSET_BOOT_CONF[] = "/usr/local/codeselect/images.conf";
+static const char MSET_BOOT_RIG[] = "/dump/codeselect.conf";   /* the rig's copy of the card's (run_game.sh) */
+
+/* "<key>=<value>" or "<key> <value>" at a line's start in raw[0..n): the value's number, else -1 (a word: -2 for
+ * "hidden" / "on", -3 for anything else) */
+static long mset_boot_word(const char *raw, long n, const char *key, char sep)
+{
+    long i, found = -1;
+    unsigned len = 0;
+    while (key[len]) len++;
+    for (i = 0; i < n; i++) {
+        const char *s = raw + i;
+        unsigned j;
+        int ok;
+        if (i && raw[i - 1] != '\n') continue;
+        for (j = 0; j < len && i + (long)j < n && s[j] == key[j]; j++) {}
+        if (j != len || s[len] != sep) continue;
+        s += len + 1;
+        if (*s >= '0' && *s <= '9') { long v = mset_num(s, &ok); found = ok ? v : -1; }
+        else if (str_starts(s, "hidden") || str_starts(s, "on")) found = -2;
+        else found = -3;
+    }
+    return found;
+}
+
+static void mset_boot_card(void)
+{
+    static char conf[4096], card[128];
+    long n = pm_read_file(MSET_BOOT_CONF, conf, sizeof conf - 1), m, v;
+    if (n <= 0) n = pm_read_file(MSET_BOOT_RIG, conf, sizeof conf - 1);
+    int menu = 1;
+    long secs = -1;
+    unsigned k;
+    if (n <= 0) return;
+    conf[n] = 0;
+    if (mset_boot_word(conf, n, "menu_rows", '=') != -2) return;         /* the tab's "Boot menu, always" */
+    menu = mset_boot_word(conf, n, "boot_menu", '=') != -2;
+    secs = mset_boot_word(conf, n, "timeout", '=');
+    m = pm_read_file(MSET_BOOT_FILE, card, sizeof card - 1);
+    if (m > 0) {
+        card[m] = 0;
+        v = mset_boot_word(card, m, "menu", ' ');
+        if (v == 0 || v == 1) menu = (int)v;
+        v = mset_boot_word(card, m, "timer", ' ');
+        if (v >= 0) secs = v;
+    }
+    for (k = 1; k <= mset_n; k++) {
+        if (str_eq(mset_opt[k].key, "boot_show")) mset_word[k] = (unsigned)menu;
+        else if (str_eq(mset_opt[k].key, "boot_timer") && secs >= 0)
+            mset_word[k] = (unsigned)(secs > mset_opt[k].max ? mset_opt[k].max : secs);
+        else continue;
+        say("more settings: %s is the boot menu's, the card's value %u (%s)", mset_opt[k].key, mset_word[k],
+            m > 0 ? "a service menu set it" : "the card's images.conf");
+    }
+}
+
 /* the values the settings had when the machine last ran, by key ("music_mode 2"); a key not there takes its default */
 static void mset_state_read(void)
 {
@@ -33017,7 +33122,7 @@ static void mset_state_read(void)
     long n = pm_read_file(MSET_STATE, raw, sizeof raw - 1), i;
     unsigned k;
     for (k = 1; k <= mset_n; k++) mset_word[k] = (unsigned)mset_opt[k].def;
-    if (n <= 0) return;
+    if (n <= 0) { mset_boot_card(); return; }
     raw[n] = 0;
     for (i = 0; i < n; i++) {
         char *line = raw + i, *sp;
@@ -33039,6 +33144,7 @@ static void mset_state_read(void)
             if (ok && v >= mset_opt[k].min && v <= mset_opt[k].max) mset_word[k] = (unsigned)v;
         }
     }
+    mset_boot_card();                                    /* Simon: the boot menu's two are the card's */
 }
 
 extern int fsync(int);

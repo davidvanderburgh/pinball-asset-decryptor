@@ -26,7 +26,7 @@ def test_placeholders_plan_on_godzilla_116():
     from pinball_decryptor.plugins.stern.adjustments import AdjustmentTable
     names = list(SM.PLACEHOLDER_NAMES)
     rows = [(k, len(names), names) for k in SM.OFF_KEYS]
-    rows += [("coop_play", CP.MENU_VALUES, (), {"default": 1, "help_text": CP.MENU_HELP, "from_zero": True}),
+    rows += [("coop_play", CP.MENU_VALUES, (), {"default": CP.MENU_DEFAULT, "help_text": CP.MENU_HELP, "onoff": True}),
              ("handicap", HC.MENU_VALUES, (), {"default": 1, "help_text": HC.MENU_HELP, "onoff": True})]
     t = AdjustmentTable(_program(LE116))
     settings, _writes, _cat, refused = MS.plan_many(t, rows)

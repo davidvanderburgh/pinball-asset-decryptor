@@ -794,6 +794,224 @@ static int flip_row(long long t)
     return v;
 }
 
+/* ---- BOOT MENU and BOOT MENU TIMER: THE CARD'S ONE VALUE (Simon, 2026-11-27) -------------------
+ * Simon: "No boot menu with facility to enable/disable via service menu. Boot menu with ditto. Bootmenu - no service
+ * menu option (always boots to menu). We should also be able to set boot menu timer OFF/15 seconds. 30 seconds".
+ * A game the app wrote with those rows ticked has, in padmenu.cfg (boot_flip.py card_lines):
+ *     boot_show  <the value's word> <key> <default>      0 Off (the start-up screen, then the last game), 1 On
+ *     boot_timer <the value's word> <key> <default>      the menu's countdown, seconds, 0 Off (wait for START)
+ * The boot menu is the CARD's, so its value is one for the whole card: CARD_FILE on the data partition every game of the
+ * card shares, "menu <0|1>" and "timer <s>", which codeselect reads at power-up.  Only where the Multi-boot tab lets the
+ * service menu decide (images.conf menu_rows=on).  Until a game's menu changes it the card's value is images.conf's
+ * (boot_menu=hidden is Off, timeout= the seconds).
+ *
+ * EVERY GAME SHOWS THE CARD'S VALUE.  A row of the game's own is a word of the game's settings, which it reads from its
+ * store at boot (0 first, then the stored value): once the game has been talking to its boards for CARD_SETTLE_MS, the
+ * card's value is written into the word (where the mapping is writable) and that is what the menu shows; the game stores
+ * it with its settings the next time it saves them.  A shared row (MORE SETTINGS, the word at 0xfade0000 and up) is the
+ * mode runtime's, which loads the card's value itself (pad_mode_runtime.c "the boot menu's own"); its value is read
+ * from /dump/pad_settings.state, as BOOT MENU FLIPPER's.
+ *
+ * A CHANGE.  The word (or the state file's line) is looked at every CARD_POLL_MS; a value other than the one last
+ * seen is the operator's, and goes in CARD_FILE - the last change in any game's menu wins. */
+#define CARD_FILE      "/data/padmenu.boot"
+#define CARD_SETTLE_MS 5000
+#define CARD_POLL_MS   500
+struct card_row { unsigned long addr; char key[40]; int def, seen, ok; };
+static struct card_row card_show, card_timer;   /* addr 0: not on this game */
+static int card_on;                             /* images.conf menu_rows=on, and a row here */
+static int card_menu = 1, card_secs = -1;       /* the card's value: menu shown, the countdown (-1: codeselect's own) */
+static char card_path[160] = CARD_FILE;
+static long long card_first = -1, card_due;
+static long card_settle = CARD_SETTLE_MS;          /* PADMENU_CARD_SETTLE_MS: the tests' */
+static int card_put;                            /* the card's value is in the rows (or there was nothing to put) */
+
+static int card_mapped(unsigned long a, int write)
+{
+    FILE *f;
+    char line[256];
+    int ok = 0;
+    if (!(f = fopen("/proc/self/maps", "r")))
+        return 0;
+    while (fgets(line, sizeof line, f)) {
+        unsigned long lo, hi;
+        char perm[8];
+        if (sscanf(line, "%lx-%lx %7s", &lo, &hi, perm) == 3 && a >= lo && a + 4 <= hi
+                && perm[0] == 'r' && (!write || perm[1] == 'w')) {
+            ok = 1;
+            break;
+        }
+    }
+    fclose(f);
+    return ok;
+}
+
+/* the card's value, as CARD_FILE has it (lines not there keep what images.conf said) */
+static void card_read(void)
+{
+    FILE *f = fopen(card_path, "r");
+    char line[64];
+    int v;
+    if (!f)
+        return;
+    while (fgets(line, sizeof line, f)) {
+        if (sscanf(line, "menu %d", &v) == 1 && (v == 0 || v == 1))
+            card_menu = v;
+        else if (sscanf(line, "timer %d", &v) == 1 && v >= 0 && v <= 600)
+            card_secs = v;
+    }
+    fclose(f);
+}
+
+static void card_write(void)
+{
+    char tmp[200];
+    FILE *f;
+    snprintf(tmp, sizeof tmp, "%s.tmp", card_path);
+    if (!(f = fopen(tmp, "w"))) {
+        tr("BOOT MENU: %s cannot be written - the change is this game's only", tmp);
+        return;
+    }
+    fprintf(f, "menu %d\n", card_menu);
+    if (card_secs >= 0)
+        fprintf(f, "timer %d\n", card_secs);
+    fflush(f);
+    fsync(fileno(f));
+    fclose(f);
+    if (rename(tmp, card_path) != 0)
+        tr("BOOT MENU: %s could not be put in place", card_path);
+    else
+        tr("BOOT MENU: the card's value is now menu %d, timer %d (%s)", card_menu, card_secs, card_path);
+}
+
+/* a row's value now: its word, or the runtime's file by key; -1 when there is none to read */
+static int card_value(struct card_row *r)
+{
+    if (r->addr < ROW_SHARED) {
+        if (r->ok < 0)
+            r->ok = card_mapped(r->addr, 0);
+        return r->ok ? (int)*(volatile uint32_t *)(uintptr_t)r->addr : -1;
+    } else {
+        FILE *f = fopen(row_state, "r");
+        char line[96];
+        size_t k = strlen(r->key);
+        int v = -1;
+        if (f) {
+            while (fgets(line, sizeof line, f))
+                if (!strncmp(line, r->key, k) && line[k] == ' ')
+                    v = atoi(line + k + 1);
+            fclose(f);
+        }
+        return v;
+    }
+}
+
+/* the card's value as the row shows it: Off / On; the countdown in the row's 0 / 15 / 30 (a row of its own steps by
+ * 15: another tab value shows as the nearest) */
+static int card_shown(struct card_row *r)
+{
+    if (r == &card_show)
+        return card_menu;
+    if (card_secs < 0)
+        return r->def;
+    if (r->addr >= ROW_SHARED)
+        return card_secs > 30 ? 30 : card_secs;
+    return card_secs == 0 ? 0 : card_secs <= 22 ? 15 : 30;
+}
+
+static void card_tick(long long t)
+{
+    struct card_row *rows[2] = { &card_show, &card_timer };
+    int i, changed = 0;
+    if (!card_on)
+        return;
+    if (card_first < 0)
+        card_first = t;
+    if (t - card_first < card_settle || t < card_due)
+        return;
+    card_due = t + CARD_POLL_MS;
+    for (i = 0; i < 2; i++) {
+        struct card_row *r = rows[i];
+        int v;
+        if (!r->addr)
+            continue;
+        if (!card_put && r->addr < ROW_SHARED && card_mapped(r->addr, 1)) {
+            /* the menu shows the card's: the word and its check byte (the inverse of the word's byte sum, as the
+             * runtime's mset_put) - a word alone is a bad record to the game, which shows the row's default */
+            uint32_t v = (uint32_t)card_shown(r);
+            *(volatile uint32_t *)(uintptr_t)r->addr = v;
+            ((volatile unsigned char *)(uintptr_t)r->addr)[4] = (unsigned char)~(unsigned char)(v + (v >> 8) + (v >> 16)
+                                                                                             + (v >> 24));
+            tr("%s: the card's value %d put in the row (0x%08lx)", r->key, card_shown(r), r->addr);
+        }
+        v = card_value(r);
+        if (!card_put) {
+            r->seen = v;                         /* the value from here on; a change from it is the operator's */
+            continue;
+        }
+        if (v < 0 || v == r->seen)
+            continue;
+        tr("%s: %d -> %d in the service menu", r->key, r->seen, v);
+        r->seen = v;
+        if (r == &card_show && (v == 0 || v == 1)) {
+            card_menu = v;
+            changed = 1;
+        } else if (r == &card_timer && v >= 0 && v <= 600) {
+            card_secs = v;
+            changed = 1;
+        }
+    }
+    card_put = 1;
+    if (changed)
+        card_write();
+}
+
+/* padmenu.cfg's boot_show / boot_timer lines, and the card's value to start from (flip_init) */
+static void card_init(const char *conf, const char *line)
+{
+    struct card_row *r = !strncmp(line, "boot_show", 9) ? &card_show : !strncmp(line, "boot_timer", 10) ? &card_timer
+                       : NULL;
+    unsigned long a;
+    char key[40], w[32];
+    int d;
+    if (r && sscanf(line, "%*s %lx %39s %d", &a, key, &d) == 3 && a) {
+        r->addr = a;
+        snprintf(r->key, sizeof r->key, "%s", key);
+        r->def = d;
+        r->seen = -1;
+        r->ok = -1;
+    }
+    if (line[0])
+        return;
+    /* the end of padmenu.cfg: the card's value, only where the Multi-boot tab lets the service menu decide */
+    if (!card_show.addr && !card_timer.addr)
+        return;
+    if (!conf_word(conf, "menu_rows", w, sizeof w) || strcmp(w, "on")) {
+        tr("BOOT MENU rows here, but the card's images.conf has no menu_rows=on: they do nothing on this card");
+        return;
+    }
+    card_on = 1;
+    {
+        const char *s = getenv("PADMENU_CARD_SETTLE_MS");                /* the tests' */
+        if (s && *s)
+            card_settle = atol(s);
+        unsetenv("PADMENU_CARD_SETTLE_MS");
+    }
+    if (conf_word(conf, "boot_menu", w, sizeof w))
+        card_menu = strcmp(w, "hidden") != 0;
+    if (conf_word(conf, "timeout", w, sizeof w) && w[0] >= '0' && w[0] <= '9')
+        card_secs = atoi(w);
+    {
+        const char *p = getenv("PADMENU_CARD_FILE");                 /* the tests' */
+        if (p && *p)
+            snprintf(card_path, sizeof card_path, "%s", p);
+        unsetenv("PADMENU_CARD_FILE");
+    }
+    card_read();
+    tr("BOOT MENU: the card's value is menu %d, timer %d; rows: show 0x%08lx, timer 0x%08lx", card_menu, card_secs,
+       card_show.addr, card_timer.addr);
+}
+
 static void flip_check(long long t)
 {
     long hold = flip_ms, quiet = flip_quiet_ms;
@@ -879,6 +1097,7 @@ static void nb_wrote(int fd, const unsigned char *b, ssize_t n)
         static long long acct;
         long long t = now_ms();
         flip_check(t);
+        card_tick(t);                          /* BOOT MENU / BOOT MENU TIMER (Simon) */
         if (trace && t - acct >= 30000) {     /* how often the game reads node 8, for the trace */
             if (acct) tr("node 8 scans: %ld asked, %ld read in 30 s", scans_asked, scans_read);
             acct = t;
@@ -974,16 +1193,19 @@ static void flip_init(const char *conf)
         unsigned long a;
         int d;
         if (cf) {
-            while (fgets(line, sizeof line, cf))
+            while (fgets(line, sizeof line, cf)) {
                 if (sscanf(line, "flip_secs %lx %39s %d", &a, key, &d) == 3 && a) {
                     row_addr = a;
                     snprintf(row_key, sizeof row_key, "%s", key);
                     row_def = d >= 0 && d <= ROW_MAX_S ? d : 15;
                 }
+                card_init(conf, line);         /* BOOT MENU / BOOT MENU TIMER (Simon) */
+            }
             fclose(cf);
         }
         if (rs && *rs)
             snprintf(row_state, sizeof row_state, "%s", rs);
+        card_init(conf, "");                   /* the card's value, now the rows are known */
         unsetenv("PADMENU_ROW_CFG");
         unsetenv("PADMENU_ROW_STATE");
     }

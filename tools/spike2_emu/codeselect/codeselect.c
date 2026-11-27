@@ -128,6 +128,8 @@
 #define PEEK_TEXT "Hold the right flipper for the boot menu"
 /* select.sh --reboot's note: the game asked for the menu (CODESELECT_MENU_FLAG overrides) */
 #define MENU_FLAG "/data/codeselect.menu"
+/* the service menus' BOOT MENU / BOOT MENU TIMER: the card's one value, kept by padmenu.so (menu_rows=on) */
+#define BOOT_FILE "/data/padmenu.boot"
 
 /* The two footer lines, and the two long forms of the countdown line. Which
  * pair is drawn depends on whether this title HAS a lockdown-bar Action
@@ -1998,6 +2000,34 @@ int main(int argc, char **argv)
         sel_log("exit %d", rc);
         sel_log_close();
         return rc;
+    }
+    /* THE SERVICE MENUS' SAY (Simon, 2026-11-27: "No boot menu with facility to enable/disable via service menu.
+     * Boot menu with ditto ... boot menu timer OFF/15 seconds. 30 seconds").  A card built with menu_rows=on lets
+     * the games' BOOT MENU and BOOT MENU TIMER rows change the menu: padmenu.so keeps the card's one value (the last
+     * change in any game's menu) in /data/padmenu.boot, read here at power-up.  Not in a snapshot (the app's
+     * preview shows the card as built). */
+    if (c.menu_rows && !o.snapshot) {
+        const char *bf = getenv("CODESELECT_BOOT_FILE");
+        FILE *f = fopen(bf && *bf ? bf : BOOT_FILE, "r");
+        char line[64];
+        int v;
+        if (f) {
+            while (fgets(line, sizeof line, f)) {
+                if (sscanf(line, "menu %d", &v) == 1 && (v == 0 || v == 1)) {
+                    int was = c.boot_menu;
+                    if (v == 0)
+                        c.boot_menu = BOOT_MENU_HIDDEN;
+                    else if (c.boot_menu == BOOT_MENU_HIDDEN)
+                        c.boot_menu = BOOT_MENU_FLIPPER;   /* shown, the flipper way back kept */
+                    if (c.boot_menu != was)
+                        sel_say("boot menu: the service menu says %s", v ? "On (shown)" : "Off (hidden)");
+                } else if (sscanf(line, "timer %d", &v) == 1 && v >= 0 && v <= 600 && v != c.timeout) {
+                    c.timeout = v;
+                    sel_say("boot menu: the service menu's timer, %d s%s", v, v ? "" : " (Off: wait for START)");
+                }
+            }
+            fclose(f);
+        }
     }
     timeout = o.timeout >= 0 ? o.timeout : c.timeout >= 0 ? c.timeout : DEF_TIMEOUT;
     /* THE MENU'S VOLUME, most specific first: --volume, then the level the

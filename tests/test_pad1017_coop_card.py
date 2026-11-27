@@ -213,18 +213,23 @@ def test_the_service_menu_row_and_the_cfg_name_its_live_value():
     assert M.check(bytes(raw), s) in ([], ["no menu page lists it"])           # the page record is placed by the Write
     head = lambda text: "".join(l for l in text[:text.find("award ")].splitlines(True)   # PAD-1028's awards follow,
                                 if not l.startswith(("users ", "achievements ")))         # PAD-1108's lines before
-    assert head(CP.cfg_text(elf, setting=s.live)) == "coop on\nbutton 59\nsetting 0x%08x\n" % s.live
-    assert head(CP.cfg_text(elf, setting=s.live, only=True)) == "coop on\nbutton 59\nsetting 0x%08x\nonly\n" % s.live
+    # Simon: the row is Off / On, so coop.cfg says `switch` (the runtime's coop_row_styles)
+    assert head(CP.cfg_text(elf, setting=s.live)) == "coop on\nbutton 59\nsetting 0x%08x\nswitch\n" % s.live
+    assert head(CP.cfg_text(elf, setting=s.live, only=True)) == (
+        "coop on\nbutton 59\nsetting 0x%08x\nswitch\nonly\n" % s.live)
     assert head(CP.cfg_text(elf)) == "coop on\nbutton 59\n"                    # always on: no setting line
     assert head(CP.cfg_text(elf, only=True)) == "coop on\nbutton 59\nonly\n"    # PAD-1443: the per-game gate
 
 
-def test_the_service_menu_row_is_never_asked_for(tmp_path):
-    """PAD-1443 (daveyvandy: "I don't think we need to make it a setting in the service menu"): a project that asked
-    for the CO-OP PLAY row (round 2's ``menu``) gets none; its games are always on the start menu."""
+def test_the_service_menu_row_is_asked_for_only_when_ticked(tmp_path):
+    """PAD-1443 took the row away; Simon (2026-11-27, agreed with daveyvandy: "PAD - Item for coop play in service
+    menu OFF/ON") put it back: the sidecar's ``menu`` (the Service menu tab's tick), only while co-op play is on.
+    Unticked, the games are always on the start menu as PAD-1443 has it."""
     assert not CP.menu_asked(str(tmp_path))
+    CP.save(str(tmp_path), True)
+    assert CP.load(str(tmp_path)) and not CP.menu_asked(str(tmp_path))     # co-op on, no row: always on
     CP.save(str(tmp_path), True, menu=True)
-    assert CP.load(str(tmp_path)) and not CP.menu_asked(str(tmp_path))
+    assert CP.load(str(tmp_path)) and CP.menu_asked(str(tmp_path))
     CP.save(str(tmp_path), False)
     assert not CP.load(str(tmp_path)) and not CP.menu_asked(str(tmp_path))
 
@@ -252,7 +257,7 @@ def test_the_modes_tab_has_no_service_menu_sub_tick():
 
 def test_the_build_takes_the_row_and_leaves_co_op_out_without_it():
     src = _read(os.path.join(REPO, "pinball_decryptor", "plugins", "stern", "engine.py"))
-    assert "coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)" in src
+    assert "coop_menu = (_CoopMenu(log, assets_dir) if _coop_on and _CP_m.menu_asked(assets_dir) else None)" in src
     assert "_coop_on = False" in src and "coop_setting = coop_menu.setting.live" in src
     assert "coop_setting=coop_setting," in src
 
@@ -267,8 +272,9 @@ def test_the_runtime_gate_holds_back_only_while_co_op_play_is_on():
     arm = R._lift(src, "static int insider_arm(void)")
     assert "if (at && !attract_wanted() && maps_has(at, 4, MAP_R))" in arm   # only a card of co-op alone
     assert "} else if (!at && coop_cfg_only && !attract_wanted()) {" in arm and "insider_per_game = 1;" in arm   # PAD-1443
-    assert "return only && v ? setting_addr(v) : 0;" in R._lift(      # ... the build says (PAD-1326: moved; PAD-1382)
-        src, "static pm_addr coop_setting_wanted(void)\n{")
+    wanted = R._lift(src, "static pm_addr coop_setting_wanted(void)\n{")   # ... the build says (PAD-1326; PAD-1382)
+    assert "return only && v && !sw ? setting_addr(v) : 0;" in wanted      # Simon: an Off / On row - per game
+    assert 'if (str_starts(raw + i, "switch")) sw = 1;' in wanted
     add = R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)")
     assert "coop_switched_on() && coop_start_button_held()" in add             # Off: Start adds a competing player
     assert "return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) != 0u;" in R._lift(

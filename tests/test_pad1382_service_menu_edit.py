@@ -30,11 +30,11 @@ def test_the_order_lives_in_the_sidecar(tmp_path):
 
 
 def test_the_owners_order_comes_first_then_the_engines(tmp_path):
-    p = _project(tmp_path, {"coop_play": {"on": True, "menu": True}, "handicap": {"on": True},
+    p = _project(tmp_path, {"coop_play": {"on": True, "row": True}, "handicap": {"on": True},
                             "service_menu": {"order": ["handicap"],
                                              "custom": [{"name": "Old", "values": ["x", "y"]}]}})
-    assert [r[0] for r in SM.wanted(p)] == ["handicap"]   # a round 3 project's own settings are gone; PAD-1443:
-    # and co-op play's row (its games are always on the start menu)
+    assert [r[0] for r in SM.wanted(p)] == ["handicap", "coop_play"]   # a round 3 project's own settings are gone;
+    # co-op play's row is back (Simon), after the owner's order
 
 
 def test_there_are_no_settings_of_ones_own():
@@ -57,7 +57,7 @@ def test_the_real_menu_is_read_by_a_rig_script_of_the_emulates():
 
 def test_the_tab_orders_and_switches(tmp_path):
     from tests.webui_harness import web_app
-    p = _project(tmp_path, {"handicap": {"on": True}, "coop_play": {"on": True, "menu": True}})
+    p = _project(tmp_path, {"handicap": {"on": True}, "coop_play": {"on": True, "row": True}})
     with web_app(tmp_path / "app") as w:
         modes = w.window.service("modes")
         var = modes._project_var() if modes is not None else None
@@ -68,7 +68,18 @@ def test_the_tab_orders_and_switches(tmp_path):
         w.call("ui.select_tab", "svcmenu")
         w.drain()
         keys = [r["key"] for r in w.state("svcmenu")["settings"]]
-        assert "handicap" in keys and "coop_play" not in keys                 # PAD-1443: no co-op row
+        assert "handicap" in keys and "coop_play" in keys                     # Simon: the co-op row is back
+        row = next(r for r in w.state("svcmenu")["settings"] if r["key"] == "coop_play")
+        assert row["can"] and row["on"]
+        w.call("svcmenu.set_row", "coop_play", False)                          # off the card; co-op play stays on
+        w.drain()
+        from pinball_decryptor.plugins.stern import coop_play as CP
+        assert CP.load(p) and not CP.menu_asked(p)
+        row = next(r for r in w.state("svcmenu")["settings"] if r["key"] == "coop_play")
+        assert not row["on"] and row["note"].startswith("Not on the card: co-op play is always on.")
+        w.call("svcmenu.set_row", "coop_play", True)
+        w.drain()
+        assert CP.load(p) and CP.menu_asked(p)
         w.call("svcmenu.move", "handicap", -1)
         w.drain()
         keys2 = [r["key"] for r in w.state("svcmenu")["settings"]]

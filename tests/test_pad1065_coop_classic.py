@@ -36,7 +36,7 @@ int main(void)
 CHAR_UP_MAIN = r"""
 #include <stdio.h>
 struct coop_char { const char *name; };
-static struct { unsigned setting, turn, teams_always, style; } coop;   /* style: PAD-1449 */
+static struct { unsigned setting, turn, teams_always, style; int onoff; unsigned rowsty; } coop;   /* style: PAD-1449; onoff: Simon */
 static unsigned row;
 static int coop_pick_of[5];
 static struct coop_char coop_ch[2] = { { "GODZILLA 1954" }, { "MECHAGODZILLA" } };
@@ -62,7 +62,8 @@ int main(void)
 
 def test_classic_has_no_character_up(tmp_path):
     src = _src()
-    fns = (R._lift(src, "static unsigned coop_row_mode(unsigned v)") + R._lift(src, "static int coop_classic(void)")
+    fns = (R._lift(src, "static unsigned coop_row_mode(unsigned v)") + R._lift(src, "static int coop_row_styles(void)")
+           + R._lift(src, "static int coop_classic(void)")
            + R._lift(src, "static const struct coop_char *coop_char_up(void)"))
     out = R._host_run(tmp_path, CHAR_UP_MAIN.replace("@FNS@", fns), flags=("-no-pie",)).strip()
     assert out == ("MECHAGODZILLA - MECHAGODZILLA MECHAGODZILLA - - - MECHAGODZILLA | up")   # PAD-1073: 1 Classic
@@ -130,9 +131,10 @@ def test_the_menu_and_the_app_name_classic():
     from pinball_decryptor.plugins.stern import coop_play as CP
     from pinball_decryptor.webui import help_content
     from pinball_decryptor.webui.tabs import modes as M
-    assert CP.MENU_VALUES == 3 and CP.MENU_CLASSIC == 1                                     # PAD-1073
-    assert len(CP.MENU_HELP) <= 63 and "1 Classic. 2 Enhanced" in CP.MENU_HELP
-    # PAD-1443: no row is written now (an older card's row still reads 1 as Classic); PAD-1449: a game picked on the
+    # Simon (2026-11-27): the row the app writes is Off / On (an older card's three-value row still reads 1 as Classic)
+    assert CP.MENU_VALUES == 2 and CP.MENU_ON == 1
+    assert len(CP.MENU_HELP) <= 63
+    # PAD-1443: no row is written unless ticked; PAD-1449: a game picked on the
     # start menu asks NORMAL, CHARACTERS (Classic: a character, no ability) or ENHANCED
     assert "**CHARACTERS** (each player picks a character at their first ball, with no special abilities)" in         str(help_content.__dict__)
     assert "CHARACTERS (a character each, no special abilities)" in M.ModesTab.COOP_TIP

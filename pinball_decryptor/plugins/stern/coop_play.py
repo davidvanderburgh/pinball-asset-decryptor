@@ -63,11 +63,36 @@ NO_EDGE = ("The app cannot read %s's buttons as they are pressed yet, so a teamm
 #: PAD-1042: four, 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1 (daveyvandy: "a designated option for 2V1"; the row shows
 #: the number; Off/On had 0 and 1 and v1.360.0's row 0-2, so a pick is kept). PAD-1065: seven, 1-3 the Enhanced
 #: games (the characters' abilities hold) and 4-6 the same games Classic (a pick, no abilities). PAD-1073: three,
-#: 0 Off, 1 Classic, 2 Enhanced (DoomWalrus666); which game is the start menu's pick
-MENU_VALUES = 3
-MENU_OFF, MENU_CLASSIC, MENU_ENHANCED = 0, 1, 2
-#: the help names the values and says what they cost (63 characters: the spare help lines' room)
-MENU_HELP = "0 Off. 1 Classic. 2 Enhanced. Games on start menu. Insider off"
+#: 0 Off, 1 Classic, 2 Enhanced (DoomWalrus666); which game is the start menu's pick. PAD-1443 took the row away.
+#: Simon (2026-11-27, agreed with daveyvandy): "PAD - Item for coop play in service menu OFF/ON. SERVICE MENU - if
+#: set to have the item on will be able to turn coop off/on.. thats it."
+#: Back as Off / On, ticked on the Service menu tab: On plays exactly as a card with no row (the start menu's own
+#: games and style step); Off, the game is the stock game and reports to Insider Connected as it always has. coop.cfg
+#: says ``switch`` so the runtime reads it so (coop_row_styles); a card of the old three-value row keeps its meaning.
+MENU_VALUES = 2
+MENU_OFF, MENU_ON = 0, 1
+#: On to start with, so a fresh card plays as one with no row until the operator says Off. menu_settings.plan counts an
+#: Off / On row's default from 1 (1 Off, 2 On): seen in the emulator as "Default Value = Off" with 1
+MENU_DEFAULT = MENU_ON + 1
+#: the sidecar's key for that tick. Not round 2's ``menu``: PAD-1443 made co-op always on the start menu and left that
+#: flag in projects and co-op files that asked for the old row, and those owners keep the always-on start menu they have
+#: now (David, PR #53 review: "We need to maintain the existing option of just getting to coop in the menu. We need
+#: flexibility for each person since this is a modular setup"). Only a tick made since asks for the row.
+ROW_KEY = "row"
+#: WHERE THE STYLE IS PICKED (David, PR #53 review: "The user should have the option to place the co-op selection style
+#: in either place ... Do we have options for either or both?"), the sidecar's ``place``, Spike 2:
+#:   start    the start menu's own style step (PAD-1449), as every card has it; CO-OP PLAY, when ticked, is Off / On
+#:   service  CO-OP PLAY is Off / Normal / Characters / Enhanced and every co-op and team game plays that style; no step
+#:   both     the same row, and the start menu's step still asks, starting on the row's style
+#: service and both put the row on the card (menu_asked). coop.cfg ``styles service|both`` (place_line).
+PLACES = ("start", "service", "both")
+PLACE_LABELS = {"start": "On the start menu", "service": "In the service menu", "both": "Both"}
+#: the row's values where the service menu picks the style (stored 0-3: 0 Off, then STYLES_DEFAULT's 1-3)
+MENU_STYLE_NAMES = ("Off", "Normal", "Characters", "Enhanced")
+MENU_STYLE_HELP = {"service": "Off: no co-op. Else the style every co-op game plays",
+                   "both": "Off: no co-op. Else the style the start menu starts on"}
+#: the help says what On does and costs (63 characters: the spare help lines' room)
+MENU_HELP = "On: co-op games on the start menu; they stay off Insider"
 #: how a teammate joins, for the tab and the log. PAD-1443: the games are always on the start menu, no service row
 HOW = ("hold both flipper buttons in attract for the start menu: CO-OP PLAY (each Start in the first ball adds a "
        "teammate, 2-4 players share one game) and TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1. With characters, a game "
@@ -126,11 +151,18 @@ def load(project):
 
 def menu_asked(project):
     """Round 2: whether co-op is switched in the service menu (CO-OP PLAY) rather than always on. PAD-1443
-    (daveyvandy: "I don't think we need to make it a setting in the service menu"): never now - the games are always
-    on the start menu, the co-op styles picked there, and a game played as one of them stays off Insider Connected
-    (the runtime's per-game gate, coop.cfg ``only``). A project that asked for the row (``menu``) gets none."""
-    del project
-    return False
+    (daveyvandy: "I don't think we need to make it a setting in the service menu") made it never; Simon (2026-11-27,
+    agreed with daveyvandy): "PAD - Item for coop play in service menu OFF/ON. SERVICE MENU - if set to have the item
+    on will be able to turn coop off/on.. thats it." - so it is the sidecar's ``menu`` again (the Service menu tab's Co-op Play tick), only while co-op play is on. Unticked,
+    PAD-1443's always-on start menu is unchanged."""
+    if not load(project):
+        return False
+    from ...core import staged_changes
+    try:
+        raw = staged_changes.load(project).get(STAGED_KEY)
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: no
+        return False
+    return bool(isinstance(raw, dict) and (raw.get(ROW_KEY) or _place_of(raw.get("place")) != "start"))
 
 
 def save(project, on, menu=None):
@@ -141,9 +173,9 @@ def save(project, on, menu=None):
     data = staged_changes.load(project)
     raw = data.get(STAGED_KEY) if isinstance(data.get(STAGED_KEY), dict) else {}
     was = bool(raw.get("on"))
-    keep = {k: v for k, v in raw.items() if k in ("awards", "characters", "style")}   # PAD-1558: the style too
-    if on and (raw.get("menu") if menu is None else menu):
-        keep["menu"] = True
+    keep = {k: v for k, v in raw.items() if k in ("awards", "characters", "style", "place")}   # PAD-1558: the style too
+    if on and (raw.get(ROW_KEY) if menu is None else menu):
+        keep[ROW_KEY] = True                            # round 2's "menu" is not kept (ROW_KEY)
     if on or keep:
         data[STAGED_KEY] = dict(keep, on=bool(on))
     else:
@@ -163,6 +195,61 @@ STYLE_LABELS = {"normal": "Normal", "characters": "Characters", "enhanced": "Enh
 def _style_of(v):
     v = str(v or "").strip().lower()
     return v if v in STYLES_DEFAULT else "normal"
+
+
+def _place_of(v):
+    v = str(v or "").strip().lower()
+    return v if v in PLACES else "start"
+
+
+def load_place(project):
+    """Where the project's co-op style is picked (:data:`PLACES`), "start" when none is kept."""
+    if not project:
+        return "start"
+    from ...core import staged_changes
+    try:
+        raw = staged_changes.load(project).get(STAGED_KEY)
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: the start menu
+        return "start"
+    return _place_of(raw.get("place")) if isinstance(raw, dict) else "start"
+
+
+def save_place(project, place):
+    """Keep *place* (:data:`PLACES`; "start" keeps none); returns what it was."""
+    from ...core import staged_changes
+    data = staged_changes.load(project)
+    raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
+    was = _place_of(raw.get("place"))
+    place = _place_of(place)
+    if place == "start":
+        raw.pop("place", None)
+    else:
+        raw["place"] = place
+    if raw == {"on": False}:
+        data.pop(STAGED_KEY, None)
+    else:
+        data[STAGED_KEY] = raw
+    staged_changes.save(project, data)
+    return was
+
+
+def menu_row(project):
+    """``(values, names, default, help)`` of the CO-OP PLAY row this project's card gets (Spike 2): Off / On, or, where
+    the service menu picks the style, Off / Normal / Characters / Enhanced starting on the project's default style."""
+    place = load_place(project)
+    if place == "start":
+        return MENU_VALUES, (), MENU_DEFAULT, MENU_HELP
+    return (len(MENU_STYLE_NAMES), MENU_STYLE_NAMES, STYLES_DEFAULT.index(load_style(project)) + 2,
+            MENU_STYLE_HELP[place])
+
+
+def place_line(project, game_elf):
+    """coop.cfg's ``styles service|both`` line for a Spike 2 card whose row picks the style, else ""."""
+    from .adjustments import is_wide
+    place = load_place(project)
+    if place == "start" or is_wide(bytes(game_elf[:0x40])):
+        return ""
+    return "styles %s\n" % place
 
 
 def load_style(project):
@@ -243,10 +330,13 @@ def cfg_text(game_elf, awards=None, characters=None, sites=(), values=None, sett
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) != 2:
         raise CoopError(NO_BUTTON)
+    wide = is_wide(bytes(game_elf[:0x40]))
     head = ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
+            # Simon: the Spike 2 row is Off / On (MENU_VALUES): On plays as a card with no row, the gate per game
+            + ("switch\n" if setting and not wide else "")
             + ("only\n" if only else "")                 # PAD-1443: no setting - the gate holds per game
             + "".join(line + "\n" for line in insider_lines(game_elf)))
-    if is_wide(bytes(game_elf[:0x40])):
+    if wide:
         # PAD-1326: a Spike 3 program - co-op and the team games with the logins swapped; the awards and the
         # characters read 32-bit code, so they stay off (A64_LEFT_OUT says so on the Write). The setting is the
         # program's own address: the runtime adds the PIE's load address.
@@ -3622,7 +3712,7 @@ def export_settings(project, path):
     prof = project_title(project)
     head = {"kind": FILE_KIND, "version": FILE_VERSION,
             "from": {"label": prof.label if prof is not None else ""},
-            "on": bool(raw.get("on")), "menu": bool(raw.get("menu")), "awards": awards, "characters": chars}
+            "on": bool(raw.get("on")), ROW_KEY: bool(raw.get(ROW_KEY)), "awards": awards, "characters": chars}
     if _style_of(raw.get("style")) != "normal":
         head["style"] = _style_of(raw.get("style"))     # PAD-1558: the default co-op style
     as_zip = not path.lower().endswith(".json")
@@ -3915,8 +4005,8 @@ def import_settings(project, path):
     awards = {}
     if not head.get("preset"):
         raw = {"on": bool(head.get("on"))}
-        if head.get("on") and head.get("menu"):
-            raw["menu"] = True
+        if head.get("on") and head.get(ROW_KEY):          # a file's round 2 "menu" asks for no row (ROW_KEY)
+            raw[ROW_KEY] = True
         if _style_of(head.get("style")) != "normal":
             raw["style"] = _style_of(head.get("style"))  # PAD-1558: the default co-op style
         got = head.get("awards") if isinstance(head.get("awards"), dict) else {}

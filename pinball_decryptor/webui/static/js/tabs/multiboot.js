@@ -39,6 +39,20 @@ const setWayBack = (s, v) => {
   setField(NS, "back_hold", back ? String(Number(s.back_hold) > 0 ? Number(s.back_hold) : 3) : "0", { flush: true });
   setField(NS, "boot_menu", flip ? (s.boot_menu === "hidden" ? "hidden" : "flipper") : "menu", { flush: true });
 };
+// Simon (2026-11-27): "No boot menu with facility to enable/disable via service menu. Boot menu with ditto. Bootmenu -
+// no service menu option (always boots to menu)". One choice sets boot_menu= (hidden or shown) and menu_rows= (the
+// games' BOOT MENU / BOOT MENU TIMER rows may change it). Hidden needs the right flipper: it is the way into the menu.
+const POWER_UP_OPTS = [
+  { value: "hidden", label: "No boot menu: the service menu can turn it on" },
+  { value: "shown", label: "Boot menu: the service menu can turn it off" },
+  { value: "always", label: "Boot menu, always (the service menus cannot change it)" },
+];
+const powerUp = (s) => (s.boot_menu === "hidden" ? "hidden" : s.menu_rows ? "shown" : "always");
+const setPowerUp = (s, v) => {
+  setField(NS, "menu_rows", v !== "always", { flush: true });
+  if (v === "hidden") setField(NS, "boot_menu", "hidden", { flush: true });
+  else if (s.boot_menu === "hidden") setField(NS, "boot_menu", "flipper", { flush: true });
+};
 const fid = (k) => FID + k;
 
 // ------------------------------------------------- Tk's _Modal, on the page
@@ -693,7 +707,7 @@ function MenuDialog({ s, w }) {
     <${Box} legend="At power-up">
       <div class="kv mb-kv2">
         <label class="k" for=${fid("timeout")}>Countdown (s):</label>
-        <div class="row"><${Field} id=${fid("timeout")} ns=${NS} k="timeout" value=${s.timeout} ...${num} max=${600} /><span class="small muted">0 = wait for START</span></div>
+        <div class="row wrap"><${Field} id=${fid("timeout")} ns=${NS} k="timeout" value=${s.timeout} ...${num} max=${600} /><span class="small muted">0 = wait for START${md.flip_ok && s.menu_rows ? ". The games' service menus can change it to Off, 15 or 30 s (Boot Menu Timer)" : ""}</span></div>
         <label class="k" for=${fid("countdown_word")}>Countdown says:</label>
         <div class="row wrap"><${Field} id=${fid("countdown_word")} ns=${NS} k="countdown_word" value=${s.countdown_word} width=${180} /><span class="small muted">${md.example}</span></div>
         <label class="k" for=${fid("default")}>Default image:</label>
@@ -712,10 +726,17 @@ function MenuDialog({ s, w }) {
         <div class="row wrap"><${Select} id=${fid("flip_guard")} ns=${NS} k="flip_guard" value=${String(s.flip_guard)} width=${120}
             disabled=${(s.boot_menu || "menu") === "menu"} options=${FLIP_GUARD_OPTS} />
           <span class="small muted">the right flipper is always held for 5 s. So it can never fire by accident during play, that hold only works once no game has been running for this long (after a game ends, a tilt, or the bonus count). This is not how long to hold it.</span></div>
-        <span></span>
-        <${Check} checked=${s.boot_menu !== "hidden"} disabled=${(s.boot_menu || "menu") === "menu"} wrap
-          label="Show this menu at power-up. Unticked, the machine shows a short start-up screen and then starts the default image; holding the right flipper on that screen opens this menu."
-          onChange=${(on) => setField(NS, "boot_menu", on ? "flipper" : "hidden", { flush: true })} />`
+        <label class="k" for=${fid("power_up")}>Boot menu:</label>
+        <div class="row wrap"><${Select} id=${fid("power_up")} value=${powerUp(s)} width=${400}
+            title=${(s.boot_menu || "menu") === "menu" ? "No boot menu needs the right flipper in Back to this menu: holding it on the start-up screen is the way into a hidden menu." : ""}
+            options=${POWER_UP_OPTS.map((o) => (o.value === "hidden" && (s.boot_menu || "menu") === "menu"
+              ? { ...o, disabled: true, label: o.label + " (needs the right flipper, above)" }
+              : o))}
+            onChange=${(v) => setPowerUp(s, v)} />
+          <span class="small muted">${powerUp(s) === "hidden"
+            ? "no menu at power-up: a short start-up screen, then the last image played (the default until one is picked); holding the right flipper on that screen opens this menu."
+            : "this menu at power-up."}${powerUp(s) === "always" ? " The games' service menus cannot change it."
+            : " A game written with the Service menu tab's Boot Menu and Boot Menu Timer rows ticked can change it from its service menu; the last change in any game wins, for the whole card."}</span></div>`
         : md.back_hold_ok !== false && html`
         <label class="k" for=${fid("back_hold")}>Hold BACK (s):</label>
         <div class="row wrap"><${Field} id=${fid("back_hold")} ns=${NS} k="back_hold" value=${s.back_hold} ...${num} max=${60} />

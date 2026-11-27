@@ -10224,7 +10224,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if picture_prof is not None else [])
         from . import coop_play as _CP_m
         # PAD-1017 round 2: CO-OP PLAY, when the service menu switches co-op
-        coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)
+        coop_menu = (_CoopMenu(log, assets_dir) if _coop_on and _CP_m.menu_asked(assets_dir) else None)
         # PAD-1033: HANDICAP, the row that switches the players' handicaps (the last spare setting it takes)
         hand_menu = _HandicapMenu(log) if _hand_on else None
         # PAD-1589: COLOR BLIND (the project's preset to start with) and SPOKEN SCORES (once the words are in sounds.cfg)
@@ -10244,6 +10244,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         from . import service_menu as _SvM_f
         flip_menu = (_BootFlipMenu(log) if not _is_spike3(disk_f) and _SvM_f.FLIP_KEY in _SvM_f.on_keys(assets_dir)
                      else None)
+        # Simon (2026-11-27): BOOT MENU and BOOT MENU TIMER, the multi-boot card's power-up menu, when ticked
+        show_menu = (_BootShowMenu(log) if not _is_spike3(disk_f) and _SvM_f.SHOW_KEY in _SvM_f.on_keys(assets_dir)
+                     else None)
+        timer_menu = (_BootTimerMenu(log) if not _is_spike3(disk_f) and _SvM_f.TIMER_KEY in _SvM_f.on_keys(assets_dir)
+                      else None)
         # PAD-1382: the owner's own settings (Service menu tab) beside them, all in the owner's order
         from . import service_menu as _SvM
         if not _is_spike3(disk_f):
@@ -10257,7 +10262,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else:
                     image_menu = _ph
         _menu_list = _SvM.arrange(assets_dir, [music_menu, edition_menu, *picture_menus, coop_menu, hand_menu,
-                                              image_menu, saved_menu, cvd_menu, spk_menu, flip_menu], log)
+                                              image_menu, saved_menu, cvd_menu, spk_menu, flip_menu,
+                                              show_menu, timer_menu], log)
         menu_job = _MenuJobs(*_menu_list) if _menu_list else None
         picture_cfg = ""
         settings_cfg = ""
@@ -10297,9 +10303,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if hand_menu is not None and hand_menu.ok:
                 # PAD-1033: no HANDICAP row (no spare setting left): the handicaps are always on
                 hand_setting = hand_menu.setting.live
-            if flip_menu is not None and flip_menu.ok:
-                # the row's value word, for padmenu.so (a row of its own, or the runtime's word on MORE SETTINGS)
-                flip_cfg = _boot_flip_cfg(flip_menu, grow_work)
+            if any(m is not None and m.ok for m in (flip_menu, show_menu, timer_menu)):
+                # the rows' value words, for padmenu.so (a row of its own, or the runtime's word on MORE SETTINGS)
+                _ok = lambda m: m if m is not None and m.ok else None
+                flip_cfg = _boot_flip_cfg(_ok(flip_menu), grow_work, _ok(show_menu), _ok(timer_menu))
             if saved_menu is not None and saved_menu.ok:
                 # PAD-1402: no SAVED PROGRESS row (no spare setting left): the progress is kept, but nothing clears it
                 saved_setting = saved_menu.setting.live
@@ -12893,7 +12900,7 @@ class _BootFlipMenu(_MusicModeMenu):
 
     def done(self):
         self.ok = True
-        self.log("Boot menu flipper: BOOT MENU FLIPPER is in the operator menu (%s), 15 to start with (the "
+        self.log("Boot menu flipper: BOOT MENU VIA FLIPPER is in the operator menu (%s), 15 to start with (the "
                  "recommended minimum). On a "
                  "multi-boot card it sets the right flipper hold back to the boot menu: 0 Off, else the seconds the "
                  "flippers must have been off (no game on) first; it wins over the Multi-boot tab's setting."
@@ -12903,8 +12910,67 @@ class _BootFlipMenu(_MusicModeMenu):
         if self.why or self.ok:
             return
         self.why = str(why).rstrip(".") or "unknown"
-        self.log("Boot menu flipper: BOOT MENU FLIPPER could not be added to the operator menu (%s), so a multi-boot "
+        self.log("Boot menu flipper: BOOT MENU VIA FLIPPER could not be added to the operator menu (%s), so a multi-boot "
                  "card keeps the Multi-boot tab's flipper setting." % self.why, "warning")
+
+
+class _BootShowMenu(_MusicModeMenu):
+    """Simon (2026-11-27: "No boot menu with facility to enable/disable via service menu. Boot menu with ditto"): BOOT
+    MENU in the game's own service menu (:mod:`.boot_flip`): Off / On, whether a multi-boot card shows its boot menu at
+    power-up. One value for the whole card (padmenu.so's /data/padmenu.boot); padmenu.so reads it (``padmenu.cfg``)."""
+
+    KEY = "boot_show"
+
+    def __init__(self, log):
+        super().__init__(2, (), log)
+
+    def wanted(self):
+        from . import boot_flip as _BF
+        return self.KEY, 2, (), {"default": _BF.SHOW_DEFAULT, "help_text": _BF.SHOW_HELP, "onoff": True}
+
+    def done(self):
+        self.ok = True
+        self.log("Boot menu: BOOT MENU is in the operator menu (%s). On a multi-boot card whose Multi-boot tab lets the "
+                 "service menu decide, Off starts the last game played at power-up and On shows the boot menu; the "
+                 "last change in any game's menu wins, and every game's menu shows the card's value."
+                 % self.setting.where, "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Boot menu: BOOT MENU could not be added to the operator menu (%s), so this game cannot change the "
+                 "boot menu; the Multi-boot tab's choice (or another game's row) decides." % self.why, "warning")
+
+
+class _BootTimerMenu(_MusicModeMenu):
+    """Simon (2026-11-27: "We should also be able to set boot menu timer OFF/15 seconds. 30 seconds"): BOOT MENU TIMER
+    (:mod:`.boot_flip`): the boot menu's countdown, 0 (Off: it waits for START), 15 or 30 seconds, the card's one value
+    as BOOT MENU's."""
+
+    KEY = "boot_timer"
+
+    def __init__(self, log):
+        from . import boot_flip as _BF
+        super().__init__(_BF.TIMER_VALUES, (), log)
+
+    def wanted(self):
+        from . import boot_flip as _BF
+        return self.KEY, self.count, self.names, {"default": _BF.TIMER_DEFAULT, "help_text": _BF.TIMER_HELP,
+                                                  "from_zero": True}
+
+    def done(self):
+        self.ok = True
+        self.log("Boot menu timer: BOOT MENU TIMER is in the operator menu (%s): the seconds a multi-boot card's boot "
+                 "menu counts down before it starts the game highlighted, 0 (Off: it waits for START), 15 or 30. One "
+                 "setting for the whole card, as BOOT MENU's." % self.setting.where, "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Boot menu timer: BOOT MENU TIMER could not be added to the operator menu (%s), so this game cannot "
+                 "change the boot menu's countdown." % self.why, "warning")
 
 
 class _ImageSetMenu(_MusicModeMenu):
@@ -12970,27 +13036,41 @@ class _SavedProgressMenu(_MusicModeMenu):
 class _CoopMenu(_MusicModeMenu):
     """PAD-1017 round 2 (DoomWalrus666): CO-OP PLAY in the game's own service menu, on a spare setting; co-op (and, on
     a card of nothing else, the Insider Connected gate) only while it says On. PAD-1042: 0 Off, 1 Co-op, 2 Team 2v2.
-    PAD-1073: 0 Off, 1 Classic, 2 Enhanced; the game is the start menu's pick."""
+    PAD-1073: 0 Off, 1 Classic, 2 Enhanced; the game is the start menu's pick. PAD-1443 took it away; Simon
+    (2026-11-27, agreed with daveyvandy) put it back as Off / On, ticked on the Service menu tab: On is the card
+    with no row (the start menu's games and its own style step), Off the stock game."""
 
     KEY = "coop_play"
 
-    def __init__(self, log):
+    def __init__(self, log, project=None):
         from . import coop_play as _CP
-        super().__init__(_CP.MENU_VALUES, (), log)
+        # David (PR #53 review): where the style is picked is the owner's - Off / On, or Off and the three styles
+        self.row = (_CP.menu_row(project) if project else
+                    (_CP.MENU_VALUES, (), _CP.MENU_DEFAULT, _CP.MENU_HELP))
+        super().__init__(self.row[0], self.row[1], log)
 
     def wanted(self):
-        from . import coop_play as _CP
-        return self.KEY, _CP.MENU_VALUES, (), {"default": 1, "help_text": _CP.MENU_HELP, "from_zero": True}
+        values, names, default, help_text = self.row
+        if names:
+            return self.KEY, values, names, {"default": default, "help_text": help_text}
+        return self.KEY, values, (), {"default": default, "help_text": help_text, "onoff": True}
 
     def done(self):
         self.ok = True
-        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), 0 (Off) to start with: set it to 1 "
-                 "(Classic: a character each, no special abilities) or 2 (Enhanced: with the abilities) and the "
-                 "start menu offers CO-OP PLAY, TEAM PLAY 2 VS 2 (players 1 and 3 against 2 and 4), TEAM PLAY 2 "
-                 "VS 1 (players 1 and 3 against 2) and TEAM PLAY 3 VS 1 (players 1, 3 and 4 against 2); at 2 also "
-                 "ENHANCED STANDARD (competing players, a character each). While it is 1 or 2 most Insider "
-                 "Connected features are off; at 0 the card reports as it always has (with no modes on it)."
-                 % self.setting.where, "info")
+        if self.row[1]:                                 # the row picks the style (the Modes tab's "Style picked")
+            self.log("Co-op play: CO-OP PLAY is in the operator menu (%s): Off, Normal, Characters or Enhanced, %s to "
+                     "start with. Off, the game is the stock game; otherwise the start menu (both flipper buttons in "
+                     "attract) offers the co-op and team games, and %s." % (
+                         self.setting.where, self.row[1][self.row[2] - 1],
+                         "every one of them plays the style this row says, with no style step on the start menu"
+                         if "every" in self.row[3] else "the start menu's style step starts on this row's style"),
+                     "info")
+            return
+        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), On to start with. On, the start menu (both "
+                 "flipper buttons in attract) offers the co-op and team games as it does on a card with no such row, "
+                 "and a game played as one of them stays off Insider Connected. Off, the game is the stock game: "
+                 "no co-op or team games, and it reports to Insider Connected as it always has (with no modes on "
+                 "the card)." % self.setting.where, "info")
 
     def fail(self, why):
         if self.why or self.ok:
@@ -13055,13 +13135,19 @@ def _shared_settings_cfg(menu_job, work, log):
     return path
 
 
-def _boot_flip_cfg(flip_menu, work):
-    """BOOT MENU FLIPPER: ``padmenu.cfg`` in *work* (:func:`.boot_flip.cfg_text`), its path."""
+def _boot_flip_cfg(flip_menu, work, show_menu=None, timer_menu=None):
+    """BOOT MENU FLIPPER, BOOT MENU and BOOT MENU TIMER (Simon): ``padmenu.cfg`` in *work* (:func:`.boot_flip.cfg_text`,
+    :func:`.boot_flip.card_lines`) for the rows that went on (None: not on the card), its path."""
     from . import boot_flip as _BF
     os.makedirs(_lp(work), exist_ok=True)
     path = os.path.join(work, _BF.CFG_NAME)
+    text = (_BF.cfg_text(flip_menu.setting.live, flip_menu.KEY, flip_menu.setting.default)   # from_zero: seconds
+            if flip_menu is not None else "")
+    text += _BF.card_lines(
+        (show_menu.setting.live, show_menu.KEY, show_menu.setting.default) if show_menu is not None else None,
+        (timer_menu.setting.live, timer_menu.KEY, timer_menu.setting.default) if timer_menu is not None else None)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
-        f.write(_BF.cfg_text(flip_menu.setting.live, flip_menu.KEY, flip_menu.setting.default))   # from_zero: seconds
+        f.write(text)
     return path
 
 
@@ -14638,63 +14724,63 @@ def _coop_select_wav(assets_dir, log):
     return got
 
 
-def _coop_mode_wavs(assets_dir, log):
-    """PAD-1637: the co-op sounds' own files in music modes 2.. (coop_play.mode_sounds) as WAVs in the project's write
-    cache, ``[(role, music mode, WAV)]`` (role: the sound's pseudo mode in mode 1): [] when co-op is off or none has
-    one. Each named for its source as it is (as the intro's: the build reads the sound set several times), under a
-    prefix of its own, so making one never removes another's."""
-    from . import coop_play as _CP
-    from . import sound_modes as _SMo
-    try:
-        chars = _CP.load_characters(assets_dir) if _CP.load(assets_dir) else None
-        files = _CP.mode_sounds(assets_dir, chars) if chars else []
-    except Exception:  # noqa: BLE001 - an unreadable sidecar: none
-        files = []
-    if files and not chars["pick"]:
-        files = [f for f in files if not f[0].startswith("picked")]
-    if not files:
-        return []
-    from ...core.audio import find_ffmpeg
-    ff = find_ffmpeg()
-    if not ff:
-        log("Co-op sounds: their files for the other music modes are left out of this build: ffmpeg was not found.",
-            "warning")
-        return []
-    folder = os.path.join(assets_dir, _SMo.CACHE_DIR)
-    out, keep = [], set()
-    for kind, m, src in files:
-        if kind.startswith("picked"):
-            role = _SMo.INTRO_MODE + int(kind[6:])
-        else:
-            role = {"intro": _SMo.INTRO_MODE, "ceremony": _SMo.CEREMONY_MODE, "select": _SMo.SELECT_MODE}[kind]
-        what = _SMo._coop_what(_SMo.coop_mode(role, m))
-        try:
-            st = os.stat(src)
-            name = "coopmm_%s_m%d_%s.wav" % (kind, int(m), hashlib.md5(
-                ("%s|%d|%d" % (os.path.abspath(src), st.st_size, st.st_mtime_ns)).encode()).hexdigest()[:12])
-            path = os.path.join(folder, name)
-            keep.add(name)
-            os.makedirs(folder, exist_ok=True)
-            if not (os.path.isfile(path) and os.path.getsize(path) > 44):
-                got = _CP.mode_sound_audio(kind, src, path + ".part.wav", ff)
-                if not got:
-                    log("Co-op sounds: %s has no sound, so %s plays mode 1's." % (os.path.basename(src), what), "info")
-                    continue
-                os.replace(got, path)
-            out.append((role, int(m), path))
-        except (OSError, _CP.CoopError) as e:
-            log("Co-op sounds: %s is left out of this build: %s." % (what, e), "warning")
-    try:
-        for f in os.listdir(folder):                    # the files of sources there no longer
-            if f.startswith("coopmm_") and f.endswith(".wav") and f not in keep:
-                os.remove(os.path.join(folder, f))
-    except OSError:
-        pass
-    if out:
-        log("Co-op sounds: %d file(s) of their own for the other music modes." % len(out), "info")
-    return out
-
-
+def _coop_mode_wavs(assets_dir, log):
+    """PAD-1637: the co-op sounds' own files in music modes 2.. (coop_play.mode_sounds) as WAVs in the project's write
+    cache, ``[(role, music mode, WAV)]`` (role: the sound's pseudo mode in mode 1): [] when co-op is off or none has
+    one. Each named for its source as it is (as the intro's: the build reads the sound set several times), under a
+    prefix of its own, so making one never removes another's."""
+    from . import coop_play as _CP
+    from . import sound_modes as _SMo
+    try:
+        chars = _CP.load_characters(assets_dir) if _CP.load(assets_dir) else None
+        files = _CP.mode_sounds(assets_dir, chars) if chars else []
+    except Exception:  # noqa: BLE001 - an unreadable sidecar: none
+        files = []
+    if files and not chars["pick"]:
+        files = [f for f in files if not f[0].startswith("picked")]
+    if not files:
+        return []
+    from ...core.audio import find_ffmpeg
+    ff = find_ffmpeg()
+    if not ff:
+        log("Co-op sounds: their files for the other music modes are left out of this build: ffmpeg was not found.",
+            "warning")
+        return []
+    folder = os.path.join(assets_dir, _SMo.CACHE_DIR)
+    out, keep = [], set()
+    for kind, m, src in files:
+        if kind.startswith("picked"):
+            role = _SMo.INTRO_MODE + int(kind[6:])
+        else:
+            role = {"intro": _SMo.INTRO_MODE, "ceremony": _SMo.CEREMONY_MODE, "select": _SMo.SELECT_MODE}[kind]
+        what = _SMo._coop_what(_SMo.coop_mode(role, m))
+        try:
+            st = os.stat(src)
+            name = "coopmm_%s_m%d_%s.wav" % (kind, int(m), hashlib.md5(
+                ("%s|%d|%d" % (os.path.abspath(src), st.st_size, st.st_mtime_ns)).encode()).hexdigest()[:12])
+            path = os.path.join(folder, name)
+            keep.add(name)
+            os.makedirs(folder, exist_ok=True)
+            if not (os.path.isfile(path) and os.path.getsize(path) > 44):
+                got = _CP.mode_sound_audio(kind, src, path + ".part.wav", ff)
+                if not got:
+                    log("Co-op sounds: %s has no sound, so %s plays mode 1's." % (os.path.basename(src), what), "info")
+                    continue
+                os.replace(got, path)
+            out.append((role, int(m), path))
+        except (OSError, _CP.CoopError) as e:
+            log("Co-op sounds: %s is left out of this build: %s." % (what, e), "warning")
+    try:
+        for f in os.listdir(folder):                    # the files of sources there no longer
+            if f.startswith("coopmm_") and f.endswith(".wav") and f not in keep:
+                os.remove(os.path.join(folder, f))
+    except OSError:
+        pass
+    if out:
+        log("Co-op sounds: %d file(s) of their own for the other music modes." % len(out), "info")
+    return out
+
+
 def _coop_picked_wavs(assets_dir, log):
     """PAD-1123: each co-op character's sound once picked (its sound file, else its picked clip's own sound) as a WAV
     in the project's write cache, ``[(character number, WAV)]``: [] when co-op or the pick is off, or none has one.

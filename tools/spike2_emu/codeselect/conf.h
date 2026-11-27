@@ -48,6 +48,13 @@
  *                            menu (padmenu.so; default 3, 0 off).  A card that says
  *                            boot_menu= gets a line on the menu naming the ways back
  *                            that are on (BACK, the right flipper, both)
+ *   menu_rows=on             the games' service menus may change the menu (Simon,
+ *                            2026-11-27): their BOOT MENU (Off / On) and BOOT MENU
+ *                            TIMER rows; padmenu.so keeps the card's one value in
+ *                            /data/padmenu.boot ("menu <0|1>", "timer <s>"), which
+ *                            wins over boot_menu= (Off: hidden; On: shown, with the
+ *                            flipper way back if hidden had it) and timeout=.
+ *                            Absent or anything else: the file is never read
  *   flip_hold=<seconds>      the right flipper's hold for boot_menu=flipper|hidden
  *                            (default 5; 1..30)
  *   flip_guard=<seconds>     ...and how long the flippers must have been off - no
@@ -355,6 +362,7 @@ struct conf {
     int flip_guard;                  /* flip_guard= seconds (60; padmenu.so's) */
     int back_hold;                   /* back_hold= seconds (3; 0 off) - padmenu.so's, said on the menu */
     int boot_menu_set;               /* the card said boot_menu= at all: its menu names the ways back */
+    int menu_rows;                   /* menu_rows=on: the games' BOOT MENU rows decide (Simon, 2026-11-27) */
     int settings;                    /* settings=: 1 = offer the tile when it has something to set */
     int settings_card;               /* the tile's card index (always the last), or -1 */
     struct conf_image settings_face; /* what the tile draws */

@@ -1142,6 +1142,43 @@ grep -q "instructions the menu's own" "$T/ourfoot.log" || {
     echo "headless: FAIL a card with no footer= is not reported as ours"; grep "menu text" "$T/ourfoot.log"; exit 1; }
 
 python3 "$HERE/ppm2png.py" "$T/menu.ppm.loading.ppm" "$T/codeselect_loading.png"
+# THE SERVICE MENUS' BOOT MENU / BOOT MENU TIMER (PR #53): with images.conf menu_rows=on the card's one value
+# (padmenu.so's file, CODESELECT_BOOT_FILE here) wins over boot_menu= and timeout= at power-up; without it the file is
+# never read. No --timeout here: the countdown is the case's. `timeout 60` so a countdown not applied fails, not hangs.
+bootrows() {   # bootrows NAME CONF-LINES FILE-TEXT LAST
+    printf 'image=p3|A|one\nimage=p7|B|two\ndefault=0\n%b' "$2" > "$T/rows_$1.conf"
+    printf '%b' "$3" > "$T/rows_$1.boot"
+    rm -f "$T/choice" "$T/last" "$T/rows.log"
+    [ -z "$4" ] || printf '%s\n' "$4" > "$T/last"
+    timeout 60 "$QEMU" -L "$ROOT" -E CODESELECT_BOOT_FILE="$T/rows_$1.boot" -E CODESELECT_MENU_FLAG="$T/no-flag" \
+        "$BIN" --headless "$T/rows_$1.ppm" --conf "$T/rows_$1.conf" --input none --out "$T/choice" \
+        --last "$T/last" --log "$T/rows.log" --font "$FONT" --audio none --no-invert \
+        || { echo "headless: FAIL boot rows $1: the selector did not finish"; cat "$T/rows.log"; exit 1; }
+}
+says() {   # says NAME TEXT: the run's log has TEXT
+    grep -qF "$2" "$T/rows.log" || { echo "headless: FAIL boot rows $1: no '$2'"; cat "$T/rows.log"; exit 1; }
+}
+saysnot() {
+    ! grep -qF "$2" "$T/rows.log" || { echo "headless: FAIL boot rows $1: '$2'"; cat "$T/rows.log"; exit 1; }
+}
+# Off from a game's menu, on a card built with the menu shown: hidden, and the last game played boots
+bootrows off 'boot_menu=flipper\nmenu_rows=on\ntimeout=0\n' 'menu 0\n' 1
+says off "boot menu: the service menu says Off (hidden)"
+says off "boot menu hidden: no right flipper - booting card 2"
+expect "$T/choice" 1
+# On and a 2 s timer, on a card built hidden with no countdown: the menu shows and counts down
+bootrows on 'boot_menu=hidden\nmenu_rows=on\ntimeout=0\n' 'menu 1\ntimer 2\n' ''
+says on "boot menu: the service menu says On (shown)"
+says on "boot menu: the service menu's timer, 2 s"
+saysnot on "boot menu hidden:"
+expect "$T/choice" 0
+# no menu_rows= (the tab's "Boot menu, always"): the file says Off and 0, the card's own menu and countdown hold
+bootrows always 'boot_menu=flipper\ntimeout=2\n' 'menu 0\ntimer 0\n' ''
+saysnot always "the service menu"
+saysnot always "boot menu hidden:"
+expect "$T/choice" 0
+echo "headless: ok the service menus' boot menu rows (off, on, always)"
+
 python3 "$HERE/ppm2png.py" "$T/menu_default1.ppm" "$T/codeselect_menu_default1.png"
 python3 "$HERE/ppm2png.py" "$T/menu_invert.ppm" "$T/codeselect_menu_invert.png" --rot180-of "$T/menu.ppm"
 python3 "$HERE/ppm2png.py" "$T/menu_three.ppm" "$T/codeselect_menu_three.png"

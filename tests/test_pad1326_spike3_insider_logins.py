@@ -232,7 +232,7 @@ def test_the_runtime_arms_coop_on_64bit():
     assert "coop.setting = setting_addr(coop.setting);" in src             # the row's word, moved (PAD-1382)
     assert "return a + (pm_addr)game_base;" in src
     assert "pm_addr setting;" in src
-    assert "return only && v ? setting_addr(v) : 0;" in src                    # the Insider gate's too
+    assert "return only && v && !sw ? setting_addr(v) : 0;" in src                    # the Insider gate's too
     assert "static pm_addr insider_while;" in src and "pm_addr at = coop_setting_wanted();" in src
     assert src.count("ret = coop_add_game(r0, r1, r2, r3) & 0xffu;") == 2               # a bool in w0
     for fn in ("static void coop_scores_same(unsigned n)\n{",

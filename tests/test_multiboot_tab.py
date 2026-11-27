@@ -1925,6 +1925,8 @@ def test_a_half_written_state_costs_the_tab_its_state_not_the_startup():
                     "timeout": 15, "back_hold": 3, "default": 2,
                     # Simon, 2026-11-22: a state from before the Boot menu choice is a menu at power-up
                     "boot_menu": "menu", "flip_guard": 60, "test_entry": False,
+                    # Simon (2026-11-27): ...and before the service menus could change it, a menu always as built
+                    "menu_rows": False,
                     "machine_volume": True,
                     # PAD-135: a state written before the field existed
                     # described a menu that said SELECT GAME CODE

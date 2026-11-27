@@ -53,11 +53,12 @@ def test_every_route_without_a_step_takes_the_default():
     for name in ("normal", "characters", "enhanced"):
         assert 'str_starts(s, "style %s")' % name in src
     go = R._lift(src, "static void sty_menu_go(void)\n{")
-    assert "smn.go_style = sty_default_for(kind, coop.style_default);" in go      # Start on the entry, no Action
+    assert "smn.go_style = sty_default_for(kind, coop_card_style());" in go      # Start on the entry, no Action
     begin = R._lift(src, "static void sty_begin(unsigned kind)\n{")
-    assert "sty.preset = sty_default_for(kind, coop.style_default);" in begin     # the Home Team screen's own Action
+    assert "sty.preset = sty_default_for(kind, coop_card_style());" in begin     # the Home Team screen's own Action
     held = R._lift(src, "static void coop_style_held(void)\n{")
-    assert "if (!coop.style_default || coop.setting) return;" in held            # no line: as it always was
+    assert "unsigned d = coop_card_style();" in held and "if (!d || coop_row_styles()) return;" in held   # no line: as it was
+    assert "return coop.style_default;" in R._lift(src, "static unsigned coop_card_style(void)\n{")   # PR #53: or the row's
     assert "coop.plain = coop.style == 1u;" in held
     assert R._lift(src, "static void coop_solo_check(void)\n{").count("coop_style_held();") == 1   # right flipper
     assert R._lift(src, "static unsigned coop_add_wrap(unsigned r0, unsigned r1, unsigned r2, unsigned r3)\n{") \

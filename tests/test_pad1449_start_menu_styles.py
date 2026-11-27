@@ -111,7 +111,7 @@ def test_the_menu_and_the_game_wait_for_the_chooser():
     assert "if (sty.open) return;" in R._lift(src, "static void coop_pick_open(unsigned t)\n{")
     assert "sty.open && sty.ready && id" in R._lift(src, "static int coop_hides(unsigned id)\n{")
     assert "!coop_insider_free()" in R._lift(src, "static int insider_holding_now(void)")
-    assert "if (!coop.setting) return coop.style == 2u;" in R._lift(src, "static int coop_classic(void)")
+    assert "if (!coop_row_styles()) return coop.style == 2u;" in R._lift(src, "static int coop_classic(void)")
     disp = R._lift(src, "static void on_team_dispatch(pm_reg *r)\n{")
     assert "sty_begin(own);" in disp and "if (kind == 1u && sty_wanted()) sty_begin(kind);" in disp
     assert "sty_open(" not in disp                                  # round 2: the menu's style first, else the card

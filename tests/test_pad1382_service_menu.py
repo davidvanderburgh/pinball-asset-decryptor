@@ -36,7 +36,7 @@ def test_the_apps_rows_go_on_a_page_of_their_own():
     assert [r["caption"] for r in own["rows"]] == ["Co-op Play", "Handicap"] and all(r["ours"] for r in own["rows"])
     by = {r["caption"]: r for r in own["rows"]}
     assert [v["text"] for v in by["Handicap"]["values"]] == ["Off", "On"]
-    assert [v["text"] for v in by["Co-op Play"]["values"]] == ["0", "1", "2"]
+    assert [v["text"] for v in by["Co-op Play"]["values"]] == ["Off", "On"]      # Simon: Off / On now
     # the game's own pages stay as they were
     attract = _page(menu, "Attract Mode")
     assert [r["caption"] for r in attract["rows"]] == GAME_ROWS and not attract["ours"]
@@ -53,7 +53,7 @@ def test_shared_rows_are_drawn_as_the_machine_drew_them():
     more = own["rows"][0]
     assert more["key"] == MS.MORE_SELECT and [v["v"] for v in more["values"]] == [1, 2, 3, 4, 5]
     assert [o["caption"] for o in more["options"]] == ["Brightness", "Contrast", "Saturation", "Co-op Play", "Handicap"]
-    assert more["options"][3]["help"].startswith("0 Off. 1 Classic.")
+    assert more["options"][3]["help"].startswith("On: co-op games on the start menu")   # Simon: Off / On
     assert own["rows"][1]["shared_value"] and own["rows"][1]["value"] == "5"
 
 
@@ -80,7 +80,10 @@ def test_the_project_asks_for_what_its_tabs_switched(tmp_path):
     p = str(tmp_path)
     with open(os.path.join(p, ".staged_changes.json"), "w", encoding="utf-8") as f:
         json.dump({"coop_play": {"on": True, "menu": True}, "handicap": {"on": True}}, f)
-    assert [r[0] for r in SM.wanted(p)] == ["handicap"]           # PAD-1443: co-op play has no row
+    assert [r[0] for r in SM.wanted(p)] == ["handicap"]           # PAD-1443: round 2's flag asks for no row
+    with open(os.path.join(p, ".staged_changes.json"), "w", encoding="utf-8") as f:
+        json.dump({"coop_play": {"on": True, "row": True}, "handicap": {"on": True}}, f)
+    assert [r[0] for r in SM.wanted(p)] == ["coop_play", "handicap"]   # Simon: the Service menu tab's tick
     with open(os.path.join(p, ".staged_changes.json"), "w", encoding="utf-8") as f:
         json.dump({"coop_play": {"on": True}}, f)                 # co-op always on: no row
     assert SM.wanted(p) == []

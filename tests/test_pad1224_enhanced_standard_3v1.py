@@ -157,7 +157,7 @@ def test_enhanced_standard_extra_ball_and_two_players(tmp_path):
 def test_enhanced_standard_leaves_the_game_its_own():
     src = _src()
     kinds = R._lift(src, "static unsigned team_menu_kinds(unsigned *kinds)\n{")
-    assert "if (coop.setting && !coop_classic()) kinds[n++] = 2u;" in kinds   # Enhanced only (PAD-1449: the row's)
+    assert "if (coop_row_styles() && !coop_classic()) kinds[n++] = 2u;" in kinds   # Enhanced only (PAD-1449: the row's)
     disp = R._lift(src, "static void on_team_dispatch(pm_reg *r)\n{")
     assert "if (kind == 2u) {" in disp and "coop.standard = 1;" in disp and "coop.n = *coop_players_byte;" in disp
     assert "coop_awards_begin" not in disp.split("if (kind == 2u) {")[1].split("return;\n    }")[1]

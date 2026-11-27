@@ -9,7 +9,8 @@ from pinball_decryptor.plugins.stern import menu_settings as MS
 
 
 def test_the_power_up_settings_are_image_set_and_edition():
-    assert MS.POWER_UP == {MS.IMAGE_SET, MS.EDITION}
+    # + the multi-boot card's BOOT MENU and BOOT MENU TIMER (Simon, 2026-11-27): codeselect reads them at power-up
+    assert MS.POWER_UP == {MS.IMAGE_SET, MS.EDITION, MS.BOOT_SHOW, MS.BOOT_TIMER}
 
 
 def test_the_caption_is_marked_where_it_has_room():

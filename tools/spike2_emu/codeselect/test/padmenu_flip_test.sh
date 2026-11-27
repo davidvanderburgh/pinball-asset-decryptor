@@ -43,11 +43,14 @@ CF="-std=gnu17 -O2 -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fno-stack-protector -n
 cat > "$T/driver.c" <<'EOF'
 #define _GNU_SOURCE
 #include <fcntl.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 #include <unistd.h>
-volatile unsigned row_word;                /* the game's BOOT MENU FLIPPER value (padmenu.cfg names its address) */
+volatile unsigned row_word;
+/* BOOT MENU / BOOT MENU TIMER (PR #53): a settings record as the game keeps one, the word and its check byte at +4 */
+volatile unsigned char card_rec[8] __attribute__((aligned(4)));                /* the game's BOOT MENU FLIPPER value (padmenu.cfg names its address) */
 static long long ms(void) { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); return t.tv_sec * 1000LL + t.tv_nsec / 1000000; }
 static unsigned char ck(const unsigned char *b, int n) { unsigned s = 0; int i; for (i = 0; i < n; i++) s += b[i]; return (unsigned char)(0x100 - (s & 0xff)); }
 static void rule(int fd, int node, int coil, int input, int on)
@@ -71,6 +74,9 @@ int main(int argc, char **argv)
     unsigned key = 0;
     if (fd < 0) return 2;
     if (argc > 4) row_word = (unsigned)atoi(argv[4]);
+    /* card: no button held; argv 5 the record's word to start with, 6 / 7 the operator's change (ms, value) */
+    int card = !strcmp(mode, "card"), chg_at = argc > 6 ? atoi(argv[6]) : 0;
+    if (argc > 5) *(volatile unsigned *)card_rec = (unsigned)atoi(argv[5]);
     if (!strcmp(mode, "game") || !strcmp(mode, "tilt") || !strcmp(mode, "tiltlate")) {
         rule(fd, 8, 0, 0x58, 1);
         rule(fd, 8, 5, 0x59, 1);
@@ -110,7 +116,11 @@ int main(int argc, char **argv)
             usleep(5000);
             continue;
         }
-        int right = strcmp(mode, "left") && (strcmp(mode, "tap") || (t % 360) < 300);
+        if (card && chg_at && t >= chg_at) {
+            *(volatile unsigned *)card_rec = (unsigned)atoi(argv[7]);
+            chg_at = 0;
+        }
+        int right = !card && strcmp(mode, "left") && (strcmp(mode, "tap") || (t % 360) < 300);
         key = (key * 37 + 11) & 0xff;
         if (plain) { f[0] = 0x88; f[1] = 2; f[2] = 0x11; f[3] = ck(f, 3); f[4] = 12; n = 5; }
         else { f[0] = 0x88; f[1] = 3; f[2] = 0x11; f[3] = key; f[4] = ck(f, 4); f[5] = 12; n = 6; }
@@ -128,6 +138,7 @@ int main(int argc, char **argv)
         read(fd, r, 12);
         usleep(5000);
     }
+    if (card) printf("card %u %u\n", *(volatile unsigned *)card_rec, (unsigned)card_rec[4]);
     return 0;
 }
 EOF
@@ -200,4 +211,37 @@ run shared-off  1200 0 $ROWFAST -E PADMENU_CONF="$T/conf-on" -E PADMENU_ROW_CFG=
     -E PADMENU_ROW_STATE="$T/state-off"
 run shared-none 1200 1 $ROWFAST -E PADMENU_CONF="$T/conf-off" -E PADMENU_ROW_CFG="$T/shared.cfg" \
     -E PADMENU_ROW_STATE="$T/no-such-state"
+# BOOT MENU and BOOT MENU TIMER (PR #53): the card's one value (PADMENU_CARD_FILE, "menu <0|1>" / "timer <s>") goes in
+# the game's own row - the word and its check byte, ~(byte sum) - once the game has settled; a later change in the row
+# is the operator's and becomes the card's value. Only on a card whose images.conf says menu_rows=on.
+CARD=$(nm "$T/driver" | awk '$3 == "card_rec" { print $1 }')
+[ -n "$CARD" ] || { echo "padmenu_flip_test: no card_rec in the driver"; exit 1; }
+printf 'boot_show\t0x%s\tboot_show\t2\n' "$CARD" > "$T/show.cfg"
+printf 'boot_timer\t0x%s\tboot_timer\t1\n' "$CARD" > "$T/timer.cfg"
+printf 'image=p3|A\nimage=p7|B\nboot_menu=hidden\ntimeout=15\nmenu_rows=on\n' > "$T/conf-rows"
+printf 'image=p3|A\nimage=p7|B\nboot_menu=hidden\ntimeout=15\n' > "$T/conf-norows"
+card() {   # card NAME CONF CFG FILE-TEXT|- START RUN_MS CHG_AT CHG_VAL WANT_OUT WANT_FILE|-
+    local name=$1 conf=$2 cfg=$3 text=$4 start=$5 run_ms=$6 chg=$7 val=$8 want=$9 wantf=${10}
+    rm -f "$T/calls" "$T/trace" "$T/card.boot" "$T/card.boot.tmp"
+    : > "$T/dev/ttymxc1"
+    [ "$text" = - ] || printf "$text" > "$T/card.boot"
+    "$QEMU" -L "$ROOT" -E LD_PRELOAD="$SO" -E PADMENU_CMD="$T/reboot.sh" -E PADMENU_TRACE="$T/trace" \
+        -E PADMENU_CONF="$conf" -E PADMENU_ROW_CFG="$cfg" -E PADMENU_CARD_FILE="$T/card.boot" \
+        -E PADMENU_CARD_SETTLE_MS=300 \
+        "$T/driver" card "$T/dev/ttymxc1" "$run_ms" 0 "$start" "$chg" "$val" > "$T/out" 2>"$T/err" \
+        || { echo "padmenu_flip_test: $name: driver failed"; cat "$T/err"; fail=1; return; }
+    local got gotf
+    got=$(cat "$T/out")
+    gotf=$( [ -f "$T/card.boot" ] && tr '\n' ' ' < "$T/card.boot" || echo -)
+    if [ "$got" != "$want" ] || [ "$gotf" != "$wantf" ] || [ -f "$T/calls" ]; then
+        echo "padmenu_flip_test: FAIL $name: '$got' file '$gotf', wanted '$want' file '$wantf'"
+        cat "$T/err" "$T/trace" 2>/dev/null; fail=1; return
+    fi
+    echo "padmenu_flip_test: ok $name ($got; the card's file '$gotf')"
+}
+card card-put     "$T/conf-rows"   "$T/show.cfg"  'menu 1\ntimer 30\n' 0 1500 0    0 "card 1 254" "menu 1 timer 30 "
+card card-change  "$T/conf-rows"   "$T/show.cfg"  'menu 1\ntimer 30\n' 0 2500 1300 0 "card 0 254" "menu 0 timer 30 "
+card card-timer   "$T/conf-rows"   "$T/timer.cfg" 'menu 1\ntimer 30\n' 0 1500 0    0 "card 30 225" "menu 1 timer 30 "
+card card-conf    "$T/conf-rows"   "$T/show.cfg"  -                    7 1500 0    0 "card 0 255" -
+card card-norows  "$T/conf-norows" "$T/show.cfg"  'menu 1\n'           0 2500 1300 0 "card 0 0" "menu 1 "
 [ "$fail" = 0 ] && echo "padmenu_flip_test: OK" || { echo "padmenu_flip_test: FAILED"; exit 1; }

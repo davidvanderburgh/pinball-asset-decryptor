@@ -2023,6 +2023,8 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
         if CP.load_characters(project).get("pick"):          # PAD-1449 round 2: the start menu's ENHANCED line
             text += "team_words %s\n" % CP.team_words(project).upper()
         text += CP.style_line(project)                       # PAD-1558: the style when none is chosen
+        if setting:
+            text += CP.place_line(project, game_elf)         # PR #53 review: the row picks the style
         if screens:
             text += "screens %s\n" % result.profile.hud_scene
             text += "award_cards on\n"            # PAD-1028 round 2: the awards on the winners' cards
@@ -2063,15 +2065,19 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
         result.lines.append("co-op play: %s" % CP.A64_LEFT_OUT)
         return result
     result.lines.append("co-op play: %s" % CP.HOW)
-    if setting:
-        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Classic, 2 Enhanced; "
-                            "CO-OP PLAY, TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1 on the start menu at 1 or 2, "
-                            "ENHANCED STANDARD at 2); %s" % (
-            "Insider Connected is off only while it is 1 or 2" if only
+    place = CP.load_place(project) if setting and not a64 else "start"
+    if place != "start":                                 # PR #53 review: the row picks the style
+        result.lines.append("co-op play: the style is picked in the service menu (CO-OP PLAY: Off, Normal, Characters "
+                            "or Enhanced, %s to start with); %s" % (
+                                CP.STYLE_LABELS[CP.load_style(project)],
+                                "the start menu has no style step" if place == "service"
+                                else "the start menu's style step starts on it"))
+    elif setting:
+        # Simon (2026-11-27): the row is Off / On (coop.cfg `switch`); On is the card with no row, as HOW says
+        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: Off or On, On to start with); at "
+                            "Off the game is the stock game, with no co-op or team games; %s" % (
+            "at Off every game reports to Insider Connected as it always has" if only
             else "the card's modes keep its scores off Insider Connected either way"))
-        result.lines.append("co-op play: Team 2v2, 2v1 and 3v1: %s" % CP.TEAMS_HOW)    # PAD-1042
-        result.lines.append("co-op play: %s" % CP.STANDARD_HOW)                   # PAD-1224
-        result.lines.append("co-op play: %s" % CP.CLASSIC_HOW)                     # PAD-1065
     got = [line.split(" ", 3)[3] for line in text.splitlines() if line.startswith("award ")]
     result.lines.append("co-op awards after each co-op game: %s" % (", ".join(got) if got else "none"))
     got = [line.split(" ", 2)[2].split("|")[0] for line in text.splitlines() if line.startswith("character ")]

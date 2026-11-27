@@ -858,6 +858,14 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 note = ("On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + ". " + _CP.INSIDER_HOW
                         + ("" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
                            else " This project's modes keep the card's scores off Insider Connected anyway."))
+            if _CP.menu_asked(project):                 # Simon: the Service menu tab's Off / On row
+                note += (" The operator switches it in the service menu: CO-OP PLAY, Off or On (On to start with; "
+                         "the Service menu tab's Co-op Play row)." if _CP.load_place(project) == "start" else
+                         " Style picked: the operator picks the style in the service menu (CO-OP PLAY: Off, Normal, "
+                         "Characters or Enhanced)" + (", and the start menu's step starts on it." if
+                                                      _CP.load_place(project) == "both" else
+                                                      " instead, so the start menu asks nothing and every co-op and "
+                                                      "team game plays that style."))
         self.set(coop_shown=bool(project), coop_on=on, coop_locked=locked, coop_note=note,
                  coop_note_kind=kind,
                  coop_awards_ok=on and kind != "err" and not a64,                               # PAD-1028/1326
@@ -866,7 +874,11 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                  coop_save_tip=self.COOP_SAVE_TIP, coop_load_tip=self.COOP_LOAD_TIP,            # PAD-1053
                  coop_style=_CP.load_style(project) if project else "normal",                    # PAD-1558
                  coop_style_opts=[{"value": k, "label": _CP.STYLE_LABELS[k]} for k in _CP.STYLES_DEFAULT],
-                 coop_style_tip=self.COOP_STYLE_TIP)
+                 coop_style_tip=self.COOP_STYLE_TIP,
+                 # David (PR #53 review): where the style is picked - the start menu, the service menu, or both
+                 coop_place=_CP.load_place(project) if project else "start",
+                 coop_place_opts=[{"value": k, "label": _CP.PLACE_LABELS[k]} for k in _CP.PLACES],
+                 coop_place_tip=self.COOP_PLACE_TIP)
 
     @staticmethod
     def _coop_locked(why):
@@ -1760,6 +1772,31 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                       "first ball (Enhanced with its special ability); Normal plays the game as it is. A style picked "
                       "on the start menu (both flipper buttons, Action on CO-OP) always wins, and the game's own "
                       "Standard and challenges are never changed. Needs the characters' pick on.")
+
+    COOP_PLACE_TIP = ("Where the co-op style (Normal, Characters or Enhanced) is picked. On the start menu: each game's "
+                      "own step on the start menu (both flipper buttons in attract, Action on CO-OP or a team game); "
+                      "the service menu's Co-op Play row, if you tick it on the Service menu tab, only switches co-op "
+                      "Off or On. In the service menu: the operator picks the style once, in the service menu's CO-OP "
+                      "PLAY row (Off, Normal, Characters, Enhanced), and every co-op and team game plays it, with no "
+                      "step on the start menu. Both: that row sets the style the start menu's step starts on, and "
+                      "players can still change it there. The row starts on the style chosen above.")
+
+    @rpc
+    def set_coop_place(self, place):
+        """Where the co-op style is picked (coop_play.PLACES): the service menu's row goes on the card for two of them."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as _CP
+        project = self.project()
+        if not project:
+            return False
+        was = _CP.save_place(project, place)
+        now = _CP.load_place(project)
+        hist = history_log.diff_scalar("modes  co-op style picked", _CP.PLACE_LABELS[was], _CP.PLACE_LABELS[now])
+        history_log.record(project, [hist] if hist else [])
+        self._say("co-op style picked: %s%s" % (_CP.PLACE_LABELS[now].lower(), "" if now == "start" else
+                                                 " (the service menu's CO-OP PLAY row goes on the card)"))
+        self._publish_coop(project)
+        return True
 
     @rpc
     def set_coop_style(self, style):

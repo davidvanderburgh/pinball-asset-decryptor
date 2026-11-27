@@ -1158,6 +1158,27 @@ function MachineRow({ r, on, remote, buttons }) {
   </div>`;
 }
 
+// PAD-1632 (David: "the 'my machines' page is more like a modal / tab so we should present it as such. instead of
+// 'back to stern pinball', it's more like a close button"): My machines and Getting started are SHEETS over the
+// app, opened and closed by their top-bar button. Nothing under them changes while they are up (the project stays
+// open), so they close with an X and with Escape, and never say "Back to" anywhere.
+function useSheetClose(close) {
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      // a dialog or a menu on top takes its own Escape first
+      if (document.querySelector(".scrim, body > div > .menu")) return;
+      e.preventDefault();
+      close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+}
+function SheetClose({ cls, onClick }) {
+  return html`<${Button} kind="ghost" icon="x" cls=${cx("sx-sheet-x", cls)} title="Close (Esc)" label="Close" onClick=${onClick} />`;
+}
+
 // PAD-1585: My machines is a page of its own, opened from the top bar (David: "it's out of place on the
 // manufacturer page"), as Getting started is.
 function MyMachines({ shell }) {
@@ -1165,10 +1186,10 @@ function MyMachines({ shell }) {
   const m = sx.machines || { rows: [] };
   const running = shell.running;
   useEffect(() => { call("shellx.machines_refresh"); }, []);
+  useSheetClose(() => call("shellx.machines_close"));
   const rows = m.rows || [];
   const net = m.network || [];
   const online = m.online || {};
-  const working = shell.view === "mfr";
   const found = net.map((n) => html`<div class=${cx("mach-item", m.remote === n.address && "open")} key=${n.address}><div class="mach-row mach-net">
     <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="globe" /></span>
     <div class="stack grow" style="gap:2px;min-width:0">
@@ -1199,13 +1220,13 @@ function MyMachines({ shell }) {
     : m.find_note ? html`<div class=${cx("mach-find small", m.find_kind === "err" ? "err-ink" : m.find_kind === "ok" ? "ok-ink" : "muted")}>${m.find_note}</div>` : null;
   const add = html`<${Button} drop icon="plus" kind=${rows.length ? "" : "primary"} disabled=${running} title=${MACH.add}
       onClick=${() => call("shellx.machines_add")}>${rows.length ? "Add machine…" : "Add a card image…"}<//>`;
-  return html`<div class="picker sx-mach-page"><div class="inner">
+  return html`<div class="picker sx-sheet-wrap sx-mach-page"><div class="inner sx-sheet" role="region" aria-label="My machines">
     <div class="row wrap" style="align-items:flex-end;gap:12px 24px">
       <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">My machines</h1>
         <p class="dim" style="margin:6px 0 0">${rows.length ? MACH.sum(rows, net, online, m.newer_count) : MACH.lede}</p></div>
       ${find}
       ${rows.length ? add : null}
-      <${Button} cls="sx-mach-close" onClick=${() => call("shellx.machines_close")}>${working && shell.mfr ? "Back to " + shell.mfr.display : "Choose a manufacturer"}<//>
+      <${SheetClose} cls="sx-mach-close" onClick=${() => call("shellx.machines_close")} />
     </div>
     ${findLine}
     ${rows.length ? html`<section class="mach"><div class="mach-list">${rows.map((r) => html`<${MachineRow} key=${r.id} r=${r} on=${online[r.address]} remote=${m.remote} buttons=${m.buttons} />`)}</div>
@@ -1288,13 +1309,14 @@ function GettingStarted({ shell }) {
   const vid = useRef(null);
   useEffect(() => { if (vid.current) vid.current.load(); }, [cur.id]);
   const close = () => call("shellx.getting_started_close");
-  return html`<div class="picker sx-gs"><div class="inner">
+  useSheetClose(close);
+  return html`<div class="picker sx-sheet-wrap sx-gs"><div class="inner sx-sheet" role="region" aria-label="Getting started">
     <div class="row wrap" style="align-items:flex-end;gap:12px 24px">
       <div class="grow"><div class="eyebrow">Pinball Asset Decryptor</div><h1 class="h1" style="font-size:28px">Getting started</h1>
         <p class="dim" style="margin:6px 0 0">Pick what you want to do. Each one is a short video and a few steps.</p></div>
       <${Check} checked=${!!gs.at_launch} label="Show this when the app opens"
         onChange=${(v) => call("shellx.getting_started_at_launch", v)} />
-      <${Button} cls="sx-gs-close" onClick=${close}>${working && shell.mfr ? "Back to " + shell.mfr.display : "Choose a manufacturer"}<//>
+      <${SheetClose} cls="sx-gs-close" onClick=${close} />
     </div>
     <ol class="sx-gs-flow">${(gs.flow || []).map((f, i) => html`<li><span class="n">${i + 1}</span><b>${f.tab}</b><span class="dim">${f.what}</span></li>`)}</ol>
     <div class="sx-gs-main">

@@ -376,6 +376,15 @@ input[type=range] { accent-color: var(--accent); }
 .w-stack .mach-row { flex-wrap: wrap; }
 /* PAD-1585: the page's empty state - what a machine is and the ways to add one */
 .sx-mach-page .inner { gap: 22px; }
+/* PAD-1632: My machines and Getting started are sheets over the app - a panel with an edge on a dimmed backdrop,
+   closed by the X in its corner (or Escape, or its top-bar button) */
+.picker.sx-sheet-wrap { padding: 18px 24px 28px; background: color-mix(in srgb, var(--bg) 82%, #000); }
+.picker .inner.sx-sheet { position: relative; background: var(--bg); border: 1px solid var(--line); border-radius: 16px;
+  padding: 24px 28px 28px; box-shadow: 0 10px 34px rgba(0, 0, 0, .18); min-height: min(520px, 100%); }
+.sx-sheet-x { align-self: flex-start; }
+.sx-sheet-x .i { width: 18px; height: 18px; }
+html.bp-1100 .picker.sx-sheet-wrap { padding: 8px; }
+html.bp-1100 .picker .inner.sx-sheet { padding: 16px; border-radius: 12px; }
 .mach-empty { display: flex; gap: 18px; align-items: flex-start; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; }
 .mach-empty .mach-ic { width: 44px; height: 44px; flex: 0 0 auto; }
 .mach-empty .mach-ic .i { width: 24px; height: 24px; }

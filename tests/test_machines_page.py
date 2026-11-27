@@ -510,3 +510,16 @@ def test_the_row_shows_the_cards_games(tmp_path, monkeypatch):
     assert card_preview.thumbs(str(tmp_path / "gone.raw")) == []
     js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "shell.js").read_text(encoding="utf-8")
     assert "function MachineArt(" in js and "<${MachineArt} r=${r} />" in js
+
+
+def test_my_machines_and_getting_started_are_sheets_that_close():
+    """David: "instead of 'back to stern pinball', it's more like a close button": both close with an X, with
+    Escape (unless a dialog or a menu is on top) and with their top-bar button; neither says "Back to"."""
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "shell.js").read_text(encoding="utf-8")
+    for name, end in (("function MyMachines(", "function Picker("), ("function GettingStarted(", "function Disclaimer(")):
+        body = js[js.index(name):js.index(end, js.index(name))] if end in js[js.index(name):] else js[js.index(name):]
+        body = body[:6000]
+        assert "useSheetClose(" in body and "<${SheetClose} cls=" in body and "sx-sheet" in body
+        assert '"Back to "' not in body
+    assert 'e.key !== "Escape"' in js and 'document.querySelector(".scrim, body > div > .menu")' in js
+    assert 'call(machOpen ? "shellx.machines_close" : "shellx.machines_open")' in js

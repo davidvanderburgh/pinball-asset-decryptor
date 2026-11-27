@@ -178,7 +178,7 @@ def main():
                 if "is ready" in text:
                     break
                 time.sleep(0.5)
-            back = page.locator("button:has-text('Back to Stern Pinball')")
+            back = page.locator("button.sx-gs-close, button:has-text('Back to Stern Pinball')")
             if back.count():                # off Getting started: no log there
                 back.first.click()
             time.sleep(2.5)

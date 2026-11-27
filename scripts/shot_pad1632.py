@@ -8,7 +8,8 @@ at --address is asked for its status and one picture of its screen. Both only re
 the real settings changes. Two screens:
 
 * <prefix>machines.png        - the page as it opens;
-* <prefix>machines_remote.png - the machine's Remote panel open, its status read and its screen captured.
+* <prefix>machines_remote.png - the machine's Remote panel open, its status read and its screen captured;
+* <prefix>getting_started.png - Getting started, the other sheet over the app, after Escape closed My machines.
 
 A build before PAD-1632 has no Remote on the row: both screens are then the page as it was.
 """
@@ -93,6 +94,15 @@ def main():
                 print(json.dumps({k: n.get(k) for k in ("address", "care_status", "care_note", "screen_note")}))
                 time.sleep(1.5)
             page.screenshot(path=os.path.join(a.out, a.prefix + "machines_remote.png"), full_page=True)
+            # the page is a sheet over the app: Escape closes it (a build before PAD-1632 stays open)
+            page.keyboard.press("Escape")
+            time.sleep(0.8)
+            print("open after Escape:", _machines(url).get("open"))
+            if _machines(url).get("open"):
+                ws.api(url, "shellx.machines_close")
+            ws.api(url, "shellx.getting_started_open")
+            time.sleep(1.5)
+            page.screenshot(path=os.path.join(a.out, a.prefix + "getting_started.png"))
             browser.close()
     finally:
         proc.kill()

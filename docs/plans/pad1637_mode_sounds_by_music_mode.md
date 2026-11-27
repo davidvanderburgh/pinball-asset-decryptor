@@ -21,36 +21,15 @@ job.sh, job_m1/m2.sh, run_m1/m2.sh run as root in PAD-Runtime; proof logs in art
   and length of the mode now (sndm_mode), else mode 1's, else none.
 - Dialog: Characters -> "By music mode..." grid (`ModesTab._coop_by_mode`, rpc `modes.coop_mode_sound`).
 
-## Left: a custom game mode's own sounds by music mode
+## Done in round 2 (commit 92e336874): a game mode's own sounds by music mode
 
-ModeSpec own sounds (mode_project.py ModeSpec `sound_start`, `sound_shot`, `sound_end`, `music`; Modes tab rows
-`_OWN_SOUNDS` in webui/tabs/modes.py ~322) have one file each and never follow MUSIC MODE.
+Neither route above: each music mode's file is ONE MORE OWN SOUND on a carrier of its own from the same allocator
+(own-sound key `music@2`, `sound_start@3`...: beds, swaps, banks as for the plain sound, so every title that carries a
+mode's sound carries these). ModeSpec.sound_modes {key: {"2": file}} (files in the mode folder); the mode file gets
+`<key>@<m> <request> ...` lines (mode_project.own_sound_lines); mode_file.c own_sounds_alt / own_sounds_music_mode
+put the MUSIC MODE's carriers in place at each start (pm_music_mode in pad_mode.h). Modes.own_top (load) and
+own_mm (engine, from mode_own_used) give the card MUSIC MODE and its setting line. Modes tab Sounds page: "By music
+mode" grid (ModesTab._own_modes_state, rpc modes.choose_own_mode). Emulator proof: Godzilla LE 1.16, mode starting
+at ball start, MUSIC MODE 1 -> bed 618, 2 -> bed 105 (C:	mp\PAD-1637ig mkset2.py / job2.sh).
 
-How they reach the card (engine order, line numbers approximate):
-1. `mode_write.choose_own_sounds` (~735) -> `mode_sounds.assign` (~358): a carrier request per sound; on swap titles
-   (`MS.swapped`) the engine picks it; Godzilla uses fixed carriers plus `music_sid` beds.
-2. `_sound_modes_for_build` (engine ~12022) runs BEFORE the carriers are known.
-3. `_mode_own_sounds_grow` (engine ~22921, called ~9389) converts (music: `MS.loop_wav` tiling, calls: raw + ms),
-   fills `mode_own_used` (idx, carrier_idx, request).
-4. `_sound_modes_grow` (~9461), `_sound_modes_for_banks` (~9501), `_plan_sound_banks` (~9537; `_bankable_idx`:
-   swap sounds and music beds can go to banks), `_repoint_descriptors` + `_mode_swap_keys` (~9742/9886: swap titles
-   get `swap <req> <stock key> <our key>` in the mode file; Godzilla's are re-pointed descriptors).
-5. `_sound_modes_cfg` (~9922) writes sounds.cfg; the mode file is planned after (~10719).
-Runtime: mode_file.c `own_call_try` -> `pm_sound_swap` fills `swaps[]`; `on_sound_lookup` matches
-`swaps[i].stock` -> `LOOKUP_TAKE(swaps[i].ours)`. `sndm_mode()` is runtime-internal (mode.so's mode_file.c is
-linked in the same object, so it can call it, but pad_mode.h has no accessor).
-
-Two routes, pick by the Godzilla case (the reporter's title is a re-point / bed title, NOT a swap title):
-- A (try first): after step 3, add the carrier's slot to `Modes.slots[carrier rel][m] = file` so the Audio tab's
-  own machinery (descriptor per sid per mode, `sound <m> <sid> <hex>`; banks via `bsid`) carries mode m's file.
-  Works for re-pointed carriers if `_sound_mode_descriptors` reads the carrier sid's descriptor AFTER the re-point;
-  on swap titles the mode's descriptor names a different record so the stock-key swap no longer matches and mode
-  m's record plays. Music needs the loop tiling (`MS.loop_wav` / bed_min_frames) applied to mode files too. Check
-  the MUSIC MODE count (`Modes.count` / `load()`) includes them (as `coop_top`).
-- B: `mown <m> <ours1> <oursM>` lines + a check in `on_sound_lookup`'s swaps match (swap titles only; banked sounds
-  and beds not covered).
-
-Then: storage on ModeSpec (e.g. `sound_modes: {key: {"2": file}}`, carried by mode packs / mode export), a
-per-mode
-chooser beside each own-sound row on the Modes tab, tests, and an emulator proof on Godzilla LE 1.16 with a mode's
-music in mode 1 vs mode 2 (the mode maker's rig recipes: PAD-474 / PAD-1031 kits).
+Not covered: code modes' and block modes' own sounds (`call:<cue>`, `music:<name>`), set in their own code / blocks.

@@ -386,29 +386,43 @@ def apply_to_build(original, output, config, log=None, cancel=None):
 
 # ------------------------------------------------------------------ on the machine, over remote access
 #: what the app asks before it offers a press: is the shim in the running game, and is the door open
-STATUS = ('read u _ < /proc/uptime; echo "up ${u%%.*}${u#*.}"; cat %s 2>/dev/null || echo none' % STATE)
+STATUS = ('read u _ < /proc/uptime; echo "up ${u%%.*}${u#*.}"; [ -f %s ] && echo "card on" || echo "card off"; '
+          'cat %s 2>/dev/null || echo none' % (SO, STATE))
+
+#: PAD-1634 (David, of "This machine's card has no remote buttons (or its game is not running). Tick Remote buttons
+#: below and write the card, or Send to machine.": "the red text here doesn't make sense in this context"): what
+#: is in the way is said as ONE thing, with no pointer at a control of some other page; ``need`` names it, and the
+#: page offers the step that fits right under the buttons ('install': Turn on remote buttons).
+NOT_ON_CARD = "Remote buttons are not on this machine's card yet."
+NOT_ANSWERING = ("Remote buttons are on this machine's card, but its game is not answering them. If the machine "
+                 'has just started, give it a minute.')
+DOOR_CLOSED = 'The coin door is closed: open it and the buttons work, as the real ones do.'
 
 
 def parse_status(text):
-    """``dict(ready, door_open, reason)`` from :data:`STATUS`'s answer."""
-    up, state = None, None
+    """``dict(ready, door_open, reason, need)`` from :data:`STATUS`'s answer.  ``need`` is what is in the way:
+    ``'install'`` (the card has no remote buttons), ``'wait'`` (it has, the game is not answering them),
+    ``'door'`` (the coin door is closed) or ``''``."""
+    up, state, card = None, None, None
     for line in (text or '').splitlines():
         a = line.split()
         if len(a) == 2 and a[0] == 'up' and a[1].isdigit():
             up = int(a[1])
+        elif len(a) == 2 and a[0] == 'card':
+            card = a[1] == 'on'
         elif len(a) == 2 and a[0].isdigit() and len(a[1]) == 16:
             state = a
     if state is None or up is None or up - int(state[0]) > 300:
-        return dict(ready=False, door_open=False,
-                    reason="This machine's card has no remote buttons (or its game is not running). Tick Remote "
-                           'buttons below and write the card, or Send to machine.')
+        if card:
+            return dict(ready=False, door_open=False, reason=NOT_ANSWERING, need='wait')
+        return dict(ready=False, door_open=False, reason=NOT_ON_CARD, need='install')
     try:
         word = bytes.fromhex(state[1])
     except ValueError:
-        return dict(ready=False, door_open=False, reason='The machine answered in a form this app does not read.')
+        return dict(ready=False, door_open=False, reason='The machine answered in a form this app does not read.',
+                    need='wait')
     door = ((word[DOOR_BIT >> 3] >> (DOOR_BIT & 7)) & 1) == DOOR_OPEN
-    return dict(ready=True, door_open=door,
-                reason='' if door else 'The coin door is closed: open it and the buttons work, as the real ones do.')
+    return dict(ready=True, door_open=door, reason='' if door else DOOR_CLOSED, need='' if door else 'door')
 
 
 def press_script(names, hold_cs=HOLD_CS):

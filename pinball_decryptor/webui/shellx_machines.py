@@ -404,7 +404,8 @@ class MachinesMixin:
                 # another machine's screen, status and notes are not this one's
                 self._remote_quiet()
                 net.set(check="", check_kind="", care_status=[], care_note="", care_kind="", care_log="",
-                        screen_path="", screen_note="", screen_kind="", buttons_note="", buttons_kind="")
+                        screen_path="", screen_note="", screen_kind="", buttons_note="", buttons_kind="",
+                        buttons_need="")
             net._show_machine()
             if read and self._mach_online.get(address) is True and not os.environ.get("PAD_UI_CAPTURE"):
                 net.machine_status()

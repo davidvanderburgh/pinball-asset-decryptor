@@ -4,6 +4,7 @@
 // (SSH, PR #38) is this tab's own (the `network` namespace).
 import { html, useState, useEffect, PageHead, Card, Field, Check, Note, Button, Select, Progress, call, cx, mediaUrl } from "../core/ui.js";
 import { useNs } from "../core/store.js";
+import { ButtonsNeed } from "../core/buttons_need.js";
 
 export const css = true;
 
@@ -488,11 +489,10 @@ function MachineScreen({ n }) {
         ${(n.buttons_labels || []).map(([key, label]) => html`<${Button} key=${key}
           disabled=${n.running || !n.address} onClick=${() => call("network.press_button", key)}>${label}<//>`)}
       </div>
-      <${Said} text=${n.buttons_note} kind=${n.buttons_kind} />
+      <${ButtonsNeed} n=${n} off=${n.running || !n.address} />
       <span class="small muted">The machine's coin-door service buttons, pressed from here: they work only while
         the coin door is open, as the real ones do (that is also when the machine's coil power is off). With Live
-        view running a press is immediate; without it each takes a second or two. The machine's card needs
-        Remote buttons on it (the box beside this card).</span>
+        view running a press is immediate; without it each takes a second or two.</span>
       ` : null}
     <span class="small muted">Live view shows a few frames a second, up to about 5 on 5 GHz Wi-Fi (measured on a Godzilla LE; less
       on 2.4 GHz), with no sound. It is for setting up and troubleshooting: while it runs it takes most of the machine's Wi-Fi and some of its processor, so do not leave it on during a game that matters. The pictures of the screen cross your home network on a plain connection, as
@@ -503,7 +503,7 @@ function MachineScreen({ n }) {
 // PAD-1467: the remote-buttons choice, with the other things a card can carry (the buttons themselves are under
 // the machine's screen)
 function RemoteButtonsOption({ n }) {
-  return html`<${Card} cls="net-opt" title="Remote buttons">
+  return html`<${Card} cls="net-opt" title="Remote buttons on the cards you write">
     <p class="net-does">Lets you press the machine's coin-door service buttons (Back, Minus, Plus, Enter) from this
       computer, under the machine's screen. They work only while the coin door is open, as the real
       ones do.</p>
@@ -598,10 +598,10 @@ export default function NetworkTab() {
           <div class="net-col">
             <${RemoteAccess} n=${n} />
             <${SendToMachine} n=${n} />
-            ${n.buttons_offered ? html`<${RemoteButtonsOption} n=${n} />` : null}
           </div>
           <div class="net-col">
             ${n.maker === "jjp" ? null : html`<${MachineScreen} n=${n} />`}
+            ${n.buttons_offered ? html`<${RemoteButtonsOption} n=${n} />` : null}
             <${MachineCare} n=${n} />
           </div>
         </div>

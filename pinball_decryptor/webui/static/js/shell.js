@@ -11,6 +11,7 @@ import { dismissPageBoot } from "./core/pageboot.js";
 import { tabLock } from "./core/locks.js";
 import { setLanguage } from "./core/i18n.js";
 import { Spike3KeyGuide } from "./core/spike3_guide.js";
+import { ButtonsNeed } from "./core/buttons_need.js";
 // The app-wide windows (Tips, Preview features, disk space, the Project
 // menu's windows) register themselves on import; ShellxOverlays draws the
 // progress windows the shellx service drives (docs/plans/web_ui_tabs/shellx.md).
@@ -973,7 +974,7 @@ const MACH = {
   projectHow: { linked: "picked by you (More > Choose its project…)", holds: "the project folder this card image is in" },
   screenTip: "One picture of what the machine's screen shows right now. It only reads the screen: the game goes on.",
   liveTip: "The machine's screen, a few frames a second, with no sound. For setting up and troubleshooting: it takes most of the machine's Wi-Fi while it runs, so not during a game that matters. It stops when you leave this page, and by itself after 30 minutes.",
-  buttonsTip: "The machine's coin-door service buttons, pressed from here. They work only while the coin door is open, and the machine's card needs Remote buttons on it (Network tab).",
+  buttonsTip: "The machine's coin-door service buttons, pressed from here. They work only while the coin door is open. A card without remote buttons gets them from here.",
   logsTip: "One zip: the system and kernel logs, PAD's mode log, the connectivity logs and a report of the machine's state. It names your network and the machine's addresses; it holds no password.",
   followTip: "PAD's mode log on the machine, its last lines read every two seconds until you stop.",
   backupTip: "Save the machine's adjustments, audits and high scores to a zip you choose. It only reads them: the game goes on.",
@@ -1029,7 +1030,7 @@ function MachineRemote({ address, name, mfr, on, buttons }) {
         <span class="muted small">Service buttons</span>
         ${buttons.map(([key, label]) => html`<${Button} size="sm" key=${key} disabled=${off || n.buttons_busy} onClick=${() => call("network.press_button", key)}>${label}<//>`)}
       </div>` : null}
-      ${mine ? said(n.buttons_note, n.buttons_kind) : null}
+      ${mine ? html`<${ButtonsNeed} n=${n} off=${off} size="sm" />` : null}
     </div>`}
     <div class="mach-remote-col">
       <div class="row mach-remote-bar">

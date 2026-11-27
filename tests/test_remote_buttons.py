@@ -66,9 +66,10 @@ def test_a_press_is_one_line_and_only_with_the_door_open():
     with pytest.raises(ExtrasError):
         B.press_script('start')
     open_word, closed_word = 'ffffffffffffffff', 'ffff7fffffffffff'
-    assert B.parse_status('up 5000\n4980 %s\n' % open_word) == dict(ready=True, door_open=True, reason='')
+    assert B.parse_status('up 5000\n4980 %s\n' % open_word) == dict(ready=True, door_open=True, reason='', need='')
     closed = B.parse_status('up 5000\n4980 %s\n' % closed_word)
     assert closed['ready'] and not closed['door_open'] and 'coin door is closed' in closed['reason']
+    assert closed['need'] == 'door'
     assert not B.parse_status('up 5000\nnone\n')['ready']
     assert not B.parse_status('up 9000\n4980 %s\n' % open_word)['ready']      # a state file from a game long gone
 
@@ -86,7 +87,7 @@ def test_a_press_is_one_line_and_only_with_the_door_open():
     assert not B.press(m, 'plus')['ok'] and len(m.ran) == 1                   # asked, never pressed
     m = M('up 5000\nnone\n')
     res = B.press(m, 'plus')
-    assert not res['ok'] and 'no remote buttons' in res['reason'] and len(m.ran) == 1
+    assert not res['ok'] and res['reason'] == B.NOT_ON_CARD and len(m.ran) == 1
 
 
 def test_project_choice_roundtrip_and_digest(tmp_path):
@@ -227,7 +228,95 @@ def test_network_tab_saves_the_choice_and_presses_a_button(tmp_path, monkeypatch
         assert w.call('network.press_button', 'back')
         _wait(w, lambda s: not s.get('buttons_busy'))
         st = w.state('network')
-        assert len(ran) == 2 and st['buttons_kind'] == 'err' and 'coin door is closed' in st['buttons_note']
+        # PAD-1634: what is in the way is said plainly, not as the user's error
+        assert len(ran) == 2 and st['buttons_kind'] == '' and 'coin door is closed' in st['buttons_note']
+        assert st['buttons_need'] == 'door'
         assert w.call('network.press_button', 'start') is False
     js = (ROOT / 'pinball_decryptor/webui/static/js/tabs/network.js').read_text(encoding='utf-8')
     assert 'network.press_button' in js and 'Put remote buttons on cards I write from this project' in js
+
+
+# ---- PAD-1634: what is in the way of the buttons, and the step that fits, where the buttons are ----
+def test_what_is_in_the_way_is_one_thing_and_names_no_other_page():
+    """David, of "This machine's card has no remote buttons (or its game is not running). Tick Remote buttons
+    below and write the card, or Send to machine." on My machines: "the red text here doesn't make sense in this
+    context"."""
+    assert '[ -f %s ]' % B.SO in B.STATUS
+    none = B.parse_status('up 5000\ncard off\nnone\n')
+    assert none == dict(ready=False, door_open=False, reason=B.NOT_ON_CARD, need='install')
+    assert B.parse_status('up 5000\nnone\n')['need'] == 'install'            # a machine that says nothing of it
+    late = B.parse_status('up 5000\ncard on\nnone\n')
+    assert late == dict(ready=False, door_open=False, reason=B.NOT_ANSWERING, need='wait')
+    assert B.parse_status('up 9000\ncard on\n4980 ffffffffffffffff\n')['need'] == 'wait'     # a game long gone
+    assert B.parse_status('up 5000\ncard on\n4990 ffffffffffffffff\n')['need'] == ''
+    for text in (B.NOT_ON_CARD, B.NOT_ANSWERING, B.DOOR_CLOSED):
+        assert 'below' not in text and 'Tick' not in text and ' or ' not in text.split('.')[0]
+    core = (ROOT / 'pinball_decryptor/webui/static/js/core/buttons_need.js').read_text(encoding='utf-8')
+    assert 'call("network.buttons_turn_on")' in core and 'n.buttons_need === "install"' in core
+    for page in ('tabs/network.js', 'shell.js'):
+        js = (ROOT / 'pinball_decryptor/webui/static/js' / page).read_text(encoding='utf-8')
+        assert '<${ButtonsNeed} n=${n}' in js and 'buttons_need.js"' in js
+        assert 'box beside this card' not in js
+    # the choice for cards you write sits under the screen and its buttons, not a column away
+    js = (ROOT / 'pinball_decryptor/webui/static/js/tabs/network.js').read_text(encoding='utf-8')
+    assert js.index('<${MachineScreen} n=${n} />') < js.index('<${RemoteButtonsOption} n=${n} />') \
+        < js.index('<${MachineCare} n=${n} />')
+
+
+def test_remote_buttons_go_on_the_machine_from_under_its_buttons(tmp_path, monkeypatch):
+    from pinball_decryptor.core import network_apply, pad_ssh_key, rawdevice, remote_send, ssh_card
+    with web_app(tmp_path, mfr='stern') as w:
+        w.window.current_mfr._era = 'spike2'
+        project = tmp_path / 'project'; project.mkdir()
+        monkeypatch.setattr(ssh_card, 'inspect_image', lambda path: dict(supported=False, reason='x', enabled=False,
+                                                                        public_keys=''))
+        monkeypatch.setattr(pad_ssh_key, 'KEY_DIR', tmp_path / 'keys')
+        # the project's card is the card in the reader (David's): the box is not greyed with "needs a regular
+        # card image file, not a device"
+        monkeypatch.setattr(rawdevice, 'is_device_path', lambda p: str(p).startswith('DEVICE'))
+        w.run(w.window.write_assets_var.set, str(project))
+        w.run(w.window.write_upd_var.set, 'DEVICE1')
+        svc = w.window.service('network')
+        w.run(svc.on_show)
+        st = w.state('network')
+        assert st['buttons_supported'] and not st['buttons_reason'] and "this computer's reader" in st['buttons_hint']
+        w.call('network.set_address', '192.168.1.40')
+        ran, put = [], []
+
+        class M:
+            def sh(self, script, timeout=20, check=True):
+                ran.append(script)
+                return 0, 'up 5000\ncard off\nnone\n'
+
+            def close(self):
+                ran.append('closed')
+        monkeypatch.setattr(remote_send, 'connect', lambda a: M())
+        # a press finds the card has none: said plainly, and the step is offered
+        assert w.call('network.press_button', 'enter')
+        _wait(w, lambda s: not s.get('buttons_busy'))
+        st = w.state('network')
+        assert (st['buttons_note'], st['buttons_kind'], st['buttons_need']) == (B.NOT_ON_CARD, '', 'install')
+        # not without a yes
+        w.answers.append('no')
+        assert w.call('network.buttons_turn_on') is False and not put
+
+        def to_machine(m, *, wifi=None, buttons=None, stern_module=None, log=None, restart=True):
+            put.append((wifi, buttons, restart))
+            return 'done'
+        monkeypatch.setattr(network_apply, 'to_machine', to_machine)
+        w.answers.append('yes')
+        assert w.call('network.buttons_turn_on')
+        _wait(w, lambda s: not s.get('buttons_busy'))
+        st = w.state('network')
+        assert put == [(None, {'enabled': True}, True)] and 'restart' in w.asked[-1]['message']
+        assert st['buttons_kind'] == 'ok' and st['buttons_need'] == '' and 'restarting' in st['buttons_note']
+        # the next card or Send built from the project keeps them
+        assert card_extras.load_buttons(str(project)) == {'enabled': True} and st['buttons_enabled']
+        # a failure says so and leaves the step on offer
+        monkeypatch.setattr(network_apply, 'to_machine',
+                            lambda m, **k: (_ for _ in ()).throw(ExtrasError('no room')))
+        w.answers.append('yes')
+        assert w.call('network.buttons_turn_on')
+        _wait(w, lambda s: not s.get('buttons_busy'))
+        st = w.state('network')
+        assert st['buttons_kind'] == 'err' and 'no room' in st['buttons_note'] and st['buttons_need'] == 'install'

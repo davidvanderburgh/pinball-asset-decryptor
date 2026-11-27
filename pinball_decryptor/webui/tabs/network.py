@@ -162,6 +162,12 @@ class NetworkTab(TabService):
             return dict(supported=False, reason=remote_buttons.NOT_SPIKE2, enabled=False)
         if not self._source():
             return dict(supported=True, reason='', enabled=False, unpicked=True)     # as the Wi-Fi boxes
+        from ...core.rawdevice import is_device_path
+        if is_device_path(self._source()):
+            # PAD-1634 (David: "i can't check the 'put remote buttons ...'"): the project's card is the card in
+            # the reader, which read as "needs a regular card image file, not a device" and greyed the box.  The
+            # tick is a choice, not a change: a build, or the two direct routes, check the card they change.
+            return dict(supported=True, reason='', enabled=False, unpicked=True, device=True)
         return remote_buttons.inspect_image(self._source())
 
     #: PAD-1467: the Wi-Fi and remote-buttons ticks with no project open: kept for this session, for the two
@@ -174,6 +180,9 @@ class NetworkTab(TabService):
         if not os.path.isdir(project or ''):
             return ('No project is open: these ticks are for the two buttons below. Open a project to save them '
                     'for the cards you build.')
+        if info.get('device'):
+            return ("The project's card is the one in this computer's reader: it, or the machine, is checked "
+                    'when the option is put on it.')
         if info.get('unpicked'):
             return ('No card image is picked yet: the card, or the machine, is checked when the option is put '
                     'on it.')
@@ -1014,6 +1023,9 @@ class NetworkTab(TabService):
             from ...core import machine_care
             rows = machine_care.status(m)
             self.ctx.loop.post(lambda: self.set(care_status=[list(r) for r in rows]))
+            # the machine's own kind, not the maker picked in the app: My machines shows this panel for any
+            if machine_care.kind(m) != 'jjp':
+                self._buttons_look(m)
             return 'Read from the machine at %s.' % time.strftime('%H:%M:%S')
         return self._care('Reading the status', work)
 
@@ -1407,7 +1419,7 @@ class NetworkTab(TabService):
 
         def work():
             from ...core import remote_send
-            text, kind = '', ''
+            text, kind, need = '', '', ''
             try:
                 shared = live.get('machine') if live and not live.get('done') else None
                 m = shared or remote_send.connect(address)
@@ -1417,14 +1429,85 @@ class NetworkTab(TabService):
                     if shared is None:
                         m.close()
                 if not res['ok']:
-                    text, kind = res['reason'], 'err'
+                    # PAD-1634: not an error of the user's: what is in the way, and (need) the step that fits
+                    text, kind, need = res['reason'], '', res.get('need') or ''
             except remote_send.SendError as e:
                 text, kind = str(e), 'err'
             except Exception as e:                      # noqa: BLE001 - said, never raised into the UI
                 text, kind = 'The button could not be pressed: %s' % e, 'err'
-            self.ctx.loop.post(lambda: self.set(buttons_busy=False, buttons_note=text, buttons_kind=kind))
+            self.ctx.loop.post(lambda: self.set(buttons_busy=False, buttons_note=text, buttons_kind=kind,
+                                                buttons_need=need))
         threading.Thread(target=work, daemon=True, name='pad-button-press').start()
         return True
+
+    def _buttons_look(self, m):
+        """PAD-1634: whether the machine's buttons can be pressed, read beside its status (one more line of
+        shell), so the panel says what is in the way before a press finds out."""
+        try:
+            st = remote_buttons.status(m)
+        except Exception:                               # noqa: BLE001 - the status read is what was asked for
+            return
+        self.ctx.loop.post(lambda: self.get('buttons_busy') or self.set(
+            buttons_note=st['reason'], buttons_kind='', buttons_need=st.get('need') or ''))
+
+    @rpc
+    def buttons_turn_on(self):
+        """PAD-1634: put remote buttons on the machine this panel shows, from right under its buttons: over
+        remote access, the machine restarts (asked first).  The open project's choice is ticked too, so the next
+        card or Send built from it keeps them."""
+        from ...core import network_apply
+        address = self.get('address')
+        if not address or self.get('running') or self.get('buttons_busy') or self.get('direct_busy'):
+            return False
+        if not compat.messagebox.askyesno(
+                'Turn on remote buttons',
+                "Put remote buttons on the machine at %s now?\n\nThey let you press its coin-door service buttons "
+                "(Back, Minus, Plus, Enter) from this computer, while its coin door is open.\n\nThe machine "
+                "restarts when it is done (about a minute), so a game being played ends. Its settings and high "
+                "scores stay as they are." % address, icon='warning'):
+            return False
+        self.set(buttons_busy=True, buttons_note='Putting remote buttons on the machine...', buttons_kind='',
+                 buttons_need='')
+        project = self._project()
+        loop = self.ctx.loop
+
+        def work():
+            from ...core import remote_send
+            need = ''
+            try:
+                m = remote_send.connect(address)
+                try:
+                    res = network_apply.to_machine(m, buttons={'enabled': True},
+                                                   log=lambda text, level='info': loop.post(self.log, text, level))
+                finally:
+                    m.close()
+                if res == 'already':
+                    text, kind, need = remote_buttons.NOT_ANSWERING, '', 'wait'
+                else:
+                    text, kind = ('Remote buttons are on the machine now. It is restarting; the buttons work in '
+                                  'about a minute, with the coin door open.'), 'ok'
+            except Exception as e:                      # noqa: BLE001 - said, never raised into the UI
+                text, kind, need = "Couldn't put remote buttons on the machine: %s" % (e or e.__class__.__name__), \
+                    'err', 'install'
+            loop.post(self._buttons_turned_on, text, kind, need, project)
+        threading.Thread(target=work, daemon=True, name='pad-buttons-on').start()
+        return True
+
+    def _buttons_turned_on(self, text, kind, need, project):
+        self.set(buttons_busy=False, buttons_note=text, buttons_kind=kind, buttons_need=need)
+        if kind == 'err' or project != self._project():
+            return
+        # the next card or Send built from here must not take them off again
+        if os.path.isdir(project or ''):
+            try:
+                card_extras.save_buttons(project, True)
+            except card_extras.ExtrasError as e:
+                self.publish()
+                self.set(buttons_error=str(e))
+                return
+        else:
+            self._unsaved = dict(self._unsaved, buttons={'enabled': True})
+        self.publish()
 
     @rpc
     def configure_wifi(self, enabled, project, band5=None):

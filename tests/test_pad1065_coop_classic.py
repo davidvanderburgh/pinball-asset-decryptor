@@ -36,7 +36,7 @@ int main(void)
 CHAR_UP_MAIN = r"""
 #include <stdio.h>
 struct coop_char { const char *name; };
-static struct { unsigned setting, turn, teams_always, style; } coop;   /* style: PAD-1449 */
+static struct { unsigned setting, turn, teams_always, style; int onoff; } coop;   /* style: PAD-1449; onoff: Simon */
 static unsigned row;
 static int coop_pick_of[5];
 static struct coop_char coop_ch[2] = { { "GODZILLA 1954" }, { "MECHAGODZILLA" } };
@@ -62,7 +62,8 @@ int main(void)
 
 def test_classic_has_no_character_up(tmp_path):
     src = _src()
-    fns = (R._lift(src, "static unsigned coop_row_mode(unsigned v)") + R._lift(src, "static int coop_classic(void)")
+    fns = (R._lift(src, "static unsigned coop_row_mode(unsigned v)") + R._lift(src, "static int coop_row_styles(void)")
+           + R._lift(src, "static int coop_classic(void)")
            + R._lift(src, "static const struct coop_char *coop_char_up(void)"))
     out = R._host_run(tmp_path, CHAR_UP_MAIN.replace("@FNS@", fns), flags=("-no-pie",)).strip()
     assert out == ("MECHAGODZILLA - MECHAGODZILLA MECHAGODZILLA - - - MECHAGODZILLA | up")   # PAD-1073: 1 Classic

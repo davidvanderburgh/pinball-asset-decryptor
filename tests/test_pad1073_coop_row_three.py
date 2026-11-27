@@ -18,12 +18,13 @@ def _fns(src, *sigs):
 
 
 ROW_FNS = ("static unsigned coop_row_mode(unsigned v)", "static int coop_switched_on(void)",
+           "static int coop_row_styles(void)",           # Simon: an Off / On row (coop.cfg `switch`)
            "static int coop_classic(void)", "static unsigned team_menu_kinds(unsigned *kinds)\n{")
 
 PRELUDE = r"""
 #include <stdio.h>
 #include <string.h>
-static struct { unsigned teams_always, setting, style; } coop;
+static struct { unsigned teams_always, setting, style; int onoff; } coop;
 static unsigned row;
 static int coop_ch_n, coop_pick_on;                   /* PAD-1443: characters to pick */
 static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";

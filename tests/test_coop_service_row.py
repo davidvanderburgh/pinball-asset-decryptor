@@ -119,3 +119,43 @@ def test_the_tab_ticks_co_op_on_and_off_again(tmp_path, monkeypatch):
         w.call("svcmenu.set_row", "coop_play", False)
         w.drain()
         assert not CP.load(p) and not CP.menu_asked(p)
+
+
+SWITCH_MAIN = r"""
+@FNS@
+static void kinds(const char *tag)
+{
+    unsigned k[6], n = team_menu_kinds(k), i;
+    printf(" %s:", tag);
+    for (i = 0; i < n; i++) printf("%u", k[i]);
+}
+int main(void)
+{
+    coop.setting = 0;                                   /* no row: PAD-1443's start menu */
+    kinds("none");
+    printf(",%d", coop_classic());
+    coop.setting = (unsigned)(unsigned long)&row;       /* an Off / On row (coop.cfg `switch`) */
+    coop.onoff = 1;
+    row = 0;
+    kinds("off");
+    printf(",%d", coop_switched_on());
+    row = 1;
+    kinds("on");
+    printf(",%d%d", coop_switched_on(), coop_classic());
+    coop.style = 2u;                                    /* the start menu's CHARACTERS pick, as with no row */
+    printf(",%d", coop_classic());
+    printf("\n");
+    return 0;
+}
+"""
+
+
+def test_an_off_on_row_gives_the_start_menu_of_a_card_with_no_row(tmp_path):
+    """Compiled from the runtime itself: On offers exactly what a card with no row offers (no ENHANCED STANDARD
+    entry, the style the start menu's own pick), Off offers nothing."""
+    from tests import test_pad1073_coop_row_three as T
+    from tests import test_spike2_mode_roster as R
+    R._cc()                                             # skips with no ELF toolchain (Windows, macOS)
+    main = T.PRELUDE + SWITCH_MAIN.replace("@FNS@", T._fns(_src(), *T.ROW_FNS))
+    out = R._host_run(tmp_path, main, flags=("-no-pie",)).strip()
+    assert out == "none:1435,0 off:,0 on:1435,10,1"

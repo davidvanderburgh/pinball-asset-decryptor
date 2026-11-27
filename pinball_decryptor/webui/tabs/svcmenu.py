@@ -30,9 +30,9 @@ SETTINGS = (
                            "card of one edition has none to pick."),
     # Simon (2026-11-27, agreed with daveyvandy): "PAD - Item for coop play in service menu OFF/ON. SERVICE MENU - if
     # set to have the item on will be able to turn coop off/on.. thats it." (PAD-1443 had taken the row away)
-    ("coop_play", "Co-op Play", "Modes tab: Co-op play. On the machine the row is Off / On: On, the start menu "
-                                "offers the co-op and team games (as with no row); Off, the stock game, reporting "
-                                "to Insider Connected as it always has."),
+    ("coop_play", "Co-op Play", "Ticking it switches co-op play on too. On the machine the row is Off / On: On, the "
+                                "start menu offers the co-op and team games (as with no row); Off, the stock game, "
+                                "reporting to Insider Connected as it always has."),
     ("handicap", "Handicap", ""),
     ("colour_blind", "Color Blind", "Play options tab: color-blind insert colors."),
     ("spoken_scores", "Spoken Scores", "Play options tab: the machine says each player's score."),

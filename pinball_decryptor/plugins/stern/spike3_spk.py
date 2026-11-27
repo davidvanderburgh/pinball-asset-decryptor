@@ -40,8 +40,20 @@ _LUKS2_MAGIC = spike3.LUKS2_MAGIC
 
 def is_spk_input(path):
     """True if *path* looks like a Spike 3 ``.spk`` package (a ``.spk.zip``, a
-    raw ``.spk`` with a LUKS2 header at offset 0, or a split ``.spk.NNN.000``)."""
+    raw ``.spk`` with a LUKS2 header at offset 0, or a split ``.spk.NNN.000``).
+
+    A Spike 2 package has the very same names (Stern's page publishes both
+    as ``<title>-<version>.spk.zip``), so a package that can be read is told
+    by its content: a SquashFS one is Spike 2 (:mod:`.spike2_spk`, PAD-1641)
+    and never this."""
+    from . import spike2_spk as _s2
     low = path.lower()
+    if os.path.isfile(path):
+        kind = _s2.package_kind(path)
+        if kind is not None:
+            return kind == "spike3"
+    if "_spike2." in os.path.basename(low):
+        return False
     if low.endswith(".spk.zip") or ".spk." in low:
         return True
     if low.endswith(".spk"):
@@ -64,7 +76,12 @@ def reconstruct_spk(zip_path, out_path, progress=None, cancel=None):
     """Concatenate a split ``.spk.zip``'s parts (in name order) into *out_path*.
 
     Members are decompressed as they are read.  ``progress(done_bytes,
-    total_bytes)`` is called as it runs."""
+    total_bytes)`` is called as it runs.  A split set's parts on disk
+    (``x.spk.006.000`` ...) are joined the same way."""
+    if not zipfile.is_zipfile(zip_path):
+        from .spike2_spk import unpack_package
+        return unpack_package(zip_path, out_path, progress=progress,
+                              cancel=cancel)
     with zipfile.ZipFile(zip_path) as z:
         parts = sorted((m for m in z.infolist() if ".spk." in m.filename.lower()),
                        key=lambda m: m.filename)

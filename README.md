@@ -50,7 +50,7 @@ macOS and Linux.
 | Sega (Whitestar DMD) | 18 | Capture DMD animations + sound with PinMAME |
 | Spooky Pinball | 14 | Extract, Write, Mod Pack, Replace Audio/Video, Emulate, Multi-boot |
 | Stern Spike 3 | 6 | Extract, Replace, Write, Emulate (decrypts the card's encrypted games partition from a LUKS/ext4 SD image or `.spk` and plays it on this PC; Write puts your edits back through the card's own encryption; needs your own OTP key, pasted or as a keyfile) |
-| Stern Spike 2 | 28 | Extract, Write, Direct-SD, Replace Audio/Video/Images/Text, Scenes, Partition Explorer, Emulate, Multi-boot |
+| Stern Spike 2 | 28 | Extract (from a card or Stern's own `.spk.zip` download), Write, Direct-SD, Replace Audio/Video/Images/Text, Scenes, Partition Explorer, Emulate, Multi-boot |
 | Stern Spike 1 | 6 | Extract, Write, Replace Audio, Replace Images, Replace Text, Emulate |
 | Stern SAM | 26 | Extract, Write, Replace Audio, Replace Images (stills, fonts and DMD animation frames), Mod Pack; capture DMD animations with PinMAME |
 | Stern Whitestar | 17 | Capture DMD animations + sound with PinMAME |

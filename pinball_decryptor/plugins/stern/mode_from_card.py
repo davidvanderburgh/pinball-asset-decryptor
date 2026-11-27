@@ -39,6 +39,11 @@ class CardModesError(MP.ModeProjectError):
     pass
 
 
+def _engine_part_reader(f, part):
+    from .engine import part_reader
+    return part_reader(f, part)
+
+
 def read_padmode(image, parts=None, open_disk=None):
     """``{name: bytes}``: every file of ``/usr/local/padmode`` on the card image ``image``, or
     ``{}`` when no partition of it has that folder (a card with no modes). Raises
@@ -60,9 +65,9 @@ def read_padmode(image, parts=None, open_disk=None):
     if not parts:
         raise CardModesError("%s is not a card image: it has no Linux partitions" % name)
     with (open_disk() if open_disk else open(image, "rb")) as f:
-        for off, size in parts:
+        for part in parts:
             try:
-                reader = Ext4Reader(f, off, size)
+                reader = _engine_part_reader(f, part)
                 node = MW.lookup(reader, PADMODE)
             except Exception:                           # noqa: BLE001 - not an ext partition
                 continue

@@ -288,8 +288,16 @@ sound. Needs libpinmame and ffmpeg; you supply the ROMs.
 ## Stern Pinball (Spike 2)
 
 - **Games:** 28 (Godzilla, Jurassic Park, Deadpool, Star Wars, Iron Maiden, Led Zeppelin, James Bond, The Beatles, etc.)
-- **Reads:** raw SD-card `.img` / `.bin` / `.raw`, or **directly from the SD card**
+- **Reads:** raw SD-card `.img` / `.bin` / `.raw`, **directly from the SD card**,
+  or (Extract only) **Stern's own update download**, the `<title>-<version>.spk.zip`
+  from Stern's game-code page: no card or machine needed
 - **Tabs:** every tab the app has
+
+Stern publishes Spike 2 and Spike 3 updates under the same `.spk.zip` name;
+the app tells them apart by what is inside. A Spike 2 package is not
+encrypted, so it needs no key: Extract takes the same videos, pictures, text
+and sounds out of it that it takes from the card. Write, Emulate and the other
+build tabs still need a card image to work on.
 
 Spike 2 cards are unencrypted ext4: videos and pictures are loose files.
 The sounds are the hard part: each is scrambled with a keystream only the

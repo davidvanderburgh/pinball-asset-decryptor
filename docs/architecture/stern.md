@@ -400,6 +400,26 @@ Two GUI features ride these passes:
 
 ---
 
+## Stern's Spike 2 update package (`.spk`, PAD-1641)
+
+Stern's game-code page publishes every Spike 2 build as
+`<title>-<a>_<b>_<c>.spk.zip` (sometimes with `_spike2`), the same name shape
+as a Spike 3 package, so a package is classified by its first bytes, never its
+name (`spike2_spk.package_kind`): `hsqs` = Spike 2, a LUKS2 header = Spike 3.
+The zip's members are the parts of one raw `.spk` (`.spk.002.000`, `.001`, ...,
+DEFLATE-compressed, so it is unpacked to temp once; a raw `.spk` is read in
+place). That raw file is a plain gzip **SquashFS** (`squashfs.py`, a pure-Python
+reader) holding one file, `<title>-<version>.spk`: the same **SPKS** archive
+(`spks.py`) a Spike 3 package keeps behind LUKS. Its `spike` section is the OS
+partition's files (`usr/local/spike/...`, including the boot menu's own
+`spike_menu/image.bin` + `game`), and a section named for the game
+(`iron_maiden_le/...`) is the games partition. Every file is stored verbatim,
+so `spike2_spk.SpkVolume` presents each section as an `Ext4Reader` (block size
+1, every file one run at its archive offset) and `engine.extract_all` runs over
+them unchanged: the game volume first, so `_locate` takes the game's
+`image.bin`, not the boot menu's. Proven on Iron Maiden LE 1.18.0's download:
+971/971 sounds, 231 videos, 149 images in ~140 s; all 10,965 files byte-identical to an extract of the 1.18.0 card. Directory entries come in archive order, which IS the card's directory order (Stern's updater writes the card from the archive), so first-seen choices (radium image occurrences, atlas font names) match too.
+
 ## Scope — what Spike 2 is *not*
 
 - **Spike 1** (2015-2016 DMD generation: WrestleMania, KISS, Whoa Nellie,

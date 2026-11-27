@@ -1094,6 +1094,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                           # PAD-1611: the character select's own music
                           "select_sound": os.path.basename(_CP.select_sound_path(project, chars)) if project else "",
                           "select_max": _CP.SELECT_SOUND_MAX_SECONDS,
+                          "by_mode": self._coop_by_mode(project, chars),                        # PAD-1637
                           "bonus": bool(chars.get("bonus")),                                     # PAD-1123
                           "picked_max": _CP.PICKED_MAX_SECONDS, "still_s": _CP.PICKED_STILL_SECONDS,
                           "videos": "" if prof is None or _CP.can_video(prof) else (
@@ -1396,6 +1397,95 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 self._say(str(e))
                 return False
             self._say("co-op characters: %s loops while a teammate picks a character" % os.path.basename(path))
+        self._publish_coop_chars(project)
+        return True
+
+    def _coop_by_mode(self, project, chars):
+        """PAD-1637: the Characters dialog's By music mode grid: ``{"modes": [{"m", "name"}], "rows": [{"kind",
+        "label", "plain", "files": {"<m>": file name}}], "off"}`` - a row per co-op sound (the intro's, the select's,
+        the ceremony's, each character's once picked), a column per music mode 2.. (the Audio tab's names; at least
+        modes 2 to 4, as the Audio tab offers)."""
+        from ...plugins.stern import coop_play as _CP
+        from ...plugins.stern import service_menu as _SvM
+        from ...plugins.stern import sound_modes as _SMo
+        if not project:
+            return {"modes": [], "rows": [], "off": ""}
+        modes = _SMo.load(project)
+        top = min(_CP.MODE_SOUND_MAX, max(4, modes.count, len(modes.names)))
+        cols = [{"m": m, "name": modes.name(m)} for m in range(2, top + 1)]
+        have = {}
+        for kind, m, path in _CP.mode_sounds(project, chars):
+            have.setdefault(kind, {})[str(m)] = os.path.basename(path)
+        b = os.path.basename
+        rows = []
+        if _CP.intro_path(project, chars) or have.get("intro"):    # the intro's sound plays only over an intro video
+            rows.append({"kind": "intro", "label": "Intro sound", "plain": b(_CP.intro_path(project, chars)),
+                         "none": "no intro video", "files": have.get("intro", {})})
+        if chars["pick"]:
+            rows.append({"kind": "select", "label": "Select music", "plain": b(_CP.select_sound_path(project, chars)),
+                         "files": have.get("select", {})})
+            rows.append({"kind": "ceremony", "label": "Awards music",
+                         "plain": b(_CP.ceremony_sound_path(project, chars)), "files": have.get("ceremony", {})})
+            for i, c in enumerate(chars["list"]):
+                k = "picked%d" % (i + 1)
+                rows.append({"kind": k, "label": "%s once picked" % c["name"],
+                             "plain": b(_CP.picked_sound_source(project, c)), "none": "none",
+                             "files": have.get(k, {})})
+        off = ""
+        try:
+            if "music_mode" in _SvM.off_keys(project):
+                off = ("MUSIC MODE is not ticked on the Service menu tab, so a Write leaves these out and each sound "
+                       "plays its own. Tick its row there to put them on the card.")
+        except Exception:                               # noqa: BLE001 - unreadable: say nothing
+            pass
+        return {"modes": cols, "rows": rows, "off": off}
+
+    @rpc
+    def coop_mode_sound(self, kind, mode, clear=False):
+        """PAD-1637: a cell of the By music mode grid: co-op sound *kind* (intro, select, ceremony, picked<n>)'s own
+        file in music mode *mode* (2..); *clear* takes it off (that mode plays mode 1's)."""
+        from ...plugins.stern import coop_play as _CP
+        from ...plugins.stern import sound_modes as _SMo
+        project = self.project()
+        if not project:
+            return False
+        kind, mode = str(kind), int(mode)
+        chars = _CP.load_characters(project)
+        if kind.startswith("picked"):
+            try:
+                i = int(kind[6:]) - 1
+            except ValueError:
+                return False
+            if not 0 <= i < len(chars["list"]):
+                return False
+            what = "%s's sound once picked" % chars["list"][i]["name"]
+        elif kind in _CP.MODE_SOUND_KINDS:
+            i = -1
+            what = {"intro": "the intro's sound", "select": "the select music", "ceremony": "the awards music"}[kind]
+        else:
+            return False
+        name = _SMo.load(project).name(mode)
+        try:
+            if clear:
+                if i >= 0:
+                    _CP.save_picked_mode_sound(project, i, mode, None)
+                else:
+                    _CP.save_mode_sound(project, kind, mode, None)
+                self._say("co-op: in music mode %d (%s) %s is mode 1's again" % (mode, name, what))
+            else:
+                path = self.window.ask_open("modes_file", "Choose %s in music mode %d (%s)" % (what, mode, name),
+                                            [("Sounds", " ".join("*" + e for e in _CP.SOUND_EXTS)),
+                                             ("A video's sound", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+                if not path:
+                    return False
+                if i >= 0:
+                    _CP.save_picked_mode_sound(project, i, mode, path)
+                else:
+                    _CP.save_mode_sound(project, kind, mode, path)
+                self._say("co-op: in music mode %d (%s) %s is %s" % (mode, name, what, os.path.basename(path)))
+        except _CP.CoopError as e:
+            self._say(str(e))
+            return False
         self._publish_coop_chars(project)
         return True
 

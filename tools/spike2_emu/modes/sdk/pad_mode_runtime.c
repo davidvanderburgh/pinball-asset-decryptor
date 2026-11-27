@@ -1964,6 +1964,10 @@ static volatile int cpk_live;
 static int ccer_lookup(pm_reg *r);        /* PAD-1317: the co-op awards ceremony's music */
 static volatile int ccer_live;
 static int cselm_lookup(pm_reg *r);       /* PAD-1611: the co-op character select's music */
+static int cmm_use(int kind, int n, unsigned char host[8], unsigned *ms);   /* PAD-1637: by music mode */
+static unsigned cpk_have_now(void);
+static unsigned sndm_mode(void);
+enum { CMM_INTRO = 1, CMM_PICK, CMM_CER, CMM_SELM };
 static volatile int cselm_live;
 #if PM_A64
 static int msw_lookup(pm_reg *r);         /* PAD-1324: a music mode's record for a stock sound (Spike 3) */
@@ -22897,6 +22901,7 @@ static void ccer_begin(void)
 {
     unsigned long now = pm_ms();
     if (!ccer_has(ccer.request, ccer_live)) return;
+    if (!cmm_use(CMM_CER, 0, ccer.host, &ccer.sound_ms)) return;   /* PAD-1637: none in this music mode */
     ccer.on = 1;
     ccer.n_quiet = 0;
     ccer_quiet();
@@ -24330,6 +24335,7 @@ static void ci_sound_start(unsigned long now)
 {
     ci_show_start();
     if (!ci.request) return;
+    if (!cmm_use(CMM_INTRO, 0, ci.host, &ci.sound_ms)) return;   /* PAD-1637: none in this music mode */
     if (pm_sound_active(ci.request)) pm_sound_stop(ci.request);
     ci.swap_until = now + (ci.sound_ms ? ci.sound_ms : ci.ms) + 1000ul;
     if (pm_sound_priority(ci.request, CI_PRIO_PLAYING, 0) >= 0) ci_prio_lifted = 1;
@@ -24770,9 +24776,9 @@ static int cpk_has(int c, const char *clip, unsigned have_sound, unsigned reques
 /* from coop_pick_close: character c was just taken by the teammate up */
 static void coop_picked_begin(int c)
 {
-    int has = cpk_has(c, c >= 0 && c < CPK_CHARS ? cpk.clip[c] : 0, cpk.have_sound, cpk.request);
+    int has = cpk_has(c, c >= 0 && c < CPK_CHARS ? cpk.clip[c] : 0, cpk_have_now(), cpk.request);
     if (!has) return;
-    if (has & 2) {
+    if ((has & 2) && cmm_use(CMM_PICK, c + 1, cpk.host[c], &cpk.sound_ms[c])) {   /* PAD-1637: this mode's */
         if (pm_sound_active(cpk.request)) pm_sound_stop(cpk.request);
         cpk.snd = c;
         cpk.looked = 0;
@@ -24957,6 +24963,7 @@ static void cselm_play(unsigned long now)
 static void cselm_begin(void)
 {
     unsigned long now = pm_ms();
+    if (!cmm_use(CMM_SELM, 0, cselm.host, &cselm.sound_ms)) return;   /* PAD-1637: none in this music mode */
     cselm.on = 1;
     cselm.n_quiet = cselm.n_music = 0;
     cselm.plays = 0;
@@ -24992,7 +24999,7 @@ static void cselm_end(int fade, const char *how)
  * faded: a fade's end would stop that sound) */
 static int cselm_picked_follows(int c)
 {
-    return coop_done.on && (cpk_has(c, 0, cpk.have_sound, cpk.request) & 2);
+    return coop_done.on && (cpk_has(c, 0, cpk_have_now(), cpk.request) & 2);
 }
 
 /* from coop_tick: the music follows the pick */
@@ -30987,34 +30994,119 @@ static int gms_bad;
 
 /* PAD-1114: sounds.cfg `cintro <request> <carrier's key> <the intro sound's key> <ms>` */
 static int ci_bad;
-static void ci_sound_line(const char *rs, const char *ks, const char *hs, const char *mss)
+/* ---- PAD-1637: the co-op sounds by MUSIC MODE ------------------------------------------------------------------
+ * An owner asked for the co-op intro's sound, the character select's music and the awards ceremony's (and each
+ * character's sound once picked) to change with the MUSIC MODE the operator picks, as the card's other sounds do.
+ * Each of their sounds.cfg lines (cintro, cpick, ccer, cselm) may end in a music mode m: the record, and its length,
+ * the sound plays in mode m. A line with no mode field is mode 1's. A mode with no file of its own plays mode 1's;
+ * with neither, that sound does not play at all (the game's own, as on a card without it). The setting is read at
+ * each play (sndm_mode), so a change in the menu is heard from the next intro, pick or ceremony. */
+#define CMM_MAX 160
+static struct cmm { unsigned char kind, n, mode, host[8]; unsigned ms; } cmm[CMM_MAX];
+static int n_cmm, cmm_dropped;
+
+/* a line's mode field: 1 with none, -1 for one that is not a mode */
+static int cmm_mode_of(const char *mds)
+{
+    const char *p = mds;
+    int ok;
+    unsigned m;
+    if (!mds || !mds[0]) return 1;
+    m = (unsigned)number(&p, &ok);
+    return ok && m >= 1 && m <= SNDM_MODES ? (int)m : -1;
+}
+
+static void cmm_add(int kind, int n, int m, const unsigned char host[8], unsigned ms)
+{
+    int i, k;
+    for (i = 0; i < n_cmm && !(cmm[i].kind == kind && cmm[i].n == n && cmm[i].mode == m); i++) ;
+    if (i == n_cmm) {
+        if (n_cmm >= CMM_MAX) { cmm_dropped++; return; }
+        n_cmm++;
+    }
+    cmm[i].kind = (unsigned char)kind;
+    cmm[i].n = (unsigned char)n;
+    cmm[i].mode = (unsigned char)m;
+    for (k = 0; k < 8; k++) cmm[i].host[k] = host[k];
+    cmm[i].ms = ms;
+}
+
+/* the file kind/n (n: a character, 1-based; else 0) plays now: the setting's mode's own, else mode 1's, else none */
+static const struct cmm *cmm_now(int kind, int n)
+{
+    unsigned m = sndm_mode();
+    const struct cmm *one = 0;
+    int i;
+    for (i = 0; i < n_cmm; i++)
+        if (cmm[i].kind == kind && cmm[i].n == n) {
+            if (cmm[i].mode == m) return &cmm[i];
+            if (cmm[i].mode == 1) one = &cmm[i];
+        }
+    return one;
+}
+
+static const char *cmm_what(int kind)
+{
+    return kind == CMM_INTRO ? "co-op intro sound" : kind == CMM_PICK ? "co-op character's sound once picked"
+         : kind == CMM_CER ? "co-op awards ceremony's music" : "co-op character select's music";
+}
+
+/* at a play: the record and length of kind/n in the mode now, over the carrier's; 0 when this mode has none */
+static int cmm_use(int kind, int n, unsigned char host[8], unsigned *ms)
+{
+    const struct cmm *e = cmm_now(kind, n);
+    int k;
+    if (!e) {
+        if (n_cmm) say("music modes: music mode %u has no %s - none plays", sndm_mode(), cmm_what(kind));
+        return 0;
+    }
+    for (k = 0; k < 8; k++) host[k] = e->host[k];
+    *ms = e->ms;
+    if (e->mode > 1) say("music modes: music mode %u's own %s plays (%u ms)", e->mode, cmm_what(kind), e->ms);
+    return 1;
+}
+
+/* the characters with a sound once picked in the mode now (bit n-1) */
+static unsigned cpk_have_now(void)
+{
+    unsigned b = 0;
+    int c;
+    for (c = 0; c < CPK_CHARS; c++)
+        if (cmm_now(CMM_PICK, c + 1)) b |= 1u << c;
+    return b;
+}
+
+static void ci_sound_line(const char *rs, const char *ks, const char *hs, const char *mss, const char *mds)
 {
     const char *p = rs;
-    int ok, ok2;
+    int ok, ok2, m = cmm_mode_of(mds);
     unsigned r = (unsigned)number(&p, &ok), ms;
     p = mss;
     ms = (unsigned)number(&p, &ok2);
-    if (!ok || !ok2 || !r || !key_hex(ks, ci.key) || !key_hex(hs, ci.host)) { ci_bad++; return; }
+    if (!ok || !ok2 || !r || m < 0 || !key_hex(ks, ci.key) || !key_hex(hs, ci.host)) { ci_bad++; return; }
     ci.request = r;
     ci.sound_ms = ms;
+    cmm_add(CMM_INTRO, 0, m, ci.host, ms);   /* PAD-1637: music mode m's (no mode field: mode 1's) */
 }
 
 /* PAD-1123: sounds.cfg `cpick <n> <request> <carrier's key> <the sound's key> <ms>` (the intro's carrier) */
 static int cpk_bad;
-static void cpk_sound_line(const char *ns, const char *rs, const char *ks, const char *hs, const char *mss)
+static void cpk_sound_line(const char *ns, const char *rs, const char *ks, const char *hs, const char *mss,
+                           const char *mds)
 {
     const char *p = ns;
-    int ok, ok2, ok3;
+    int ok, ok2, ok3, m = cmm_mode_of(mds);
     unsigned n = (unsigned)number(&p, &ok), r, ms;
     p = rs;
     r = (unsigned)number(&p, &ok2);
     p = mss;
     ms = (unsigned)number(&p, &ok3);
-    if (!ok || !ok2 || !ok3 || !r || n < 1 || n > CPK_CHARS || (cpk.request && cpk.request != r)
+    if (!ok || !ok2 || !ok3 || !r || n < 1 || n > CPK_CHARS || (cpk.request && cpk.request != r) || m < 0
         || !key_hex(ks, cpk.key) || !key_hex(hs, cpk.host[n - 1])) { cpk_bad++; return; }
     cpk.request = r;
     cpk.sound_ms[n - 1] = ms;
     cpk.have_sound |= 1u << (n - 1);
+    cmm_add(CMM_PICK, (int)n, m, cpk.host[n - 1], ms);   /* PAD-1637 */
 }
 
 /* from sndm_arm: the record lookup's hook for the characters' sounds */
@@ -31041,16 +31133,17 @@ static void cpk_sound_arm(void)
 
 /* PAD-1317: sounds.cfg `ccer <request> <carrier's key> <the music's key> <ms>` (the intro's carrier) */
 static int ccer_bad;
-static void ccer_sound_line(const char *rs, const char *ks, const char *hs, const char *mss)
+static void ccer_sound_line(const char *rs, const char *ks, const char *hs, const char *mss, const char *mds)
 {
     const char *p = rs;
-    int ok, ok2;
+    int ok, ok2, m = cmm_mode_of(mds);
     unsigned r = (unsigned)number(&p, &ok), ms;
     p = mss;
     ms = (unsigned)number(&p, &ok2);
-    if (!ok || !ok2 || !r || !key_hex(ks, ccer.key) || !key_hex(hs, ccer.host)) { ccer_bad++; return; }
+    if (!ok || !ok2 || !r || m < 0 || !key_hex(ks, ccer.key) || !key_hex(hs, ccer.host)) { ccer_bad++; return; }
     ccer.request = r;
     ccer.sound_ms = ms;
+    cmm_add(CMM_CER, 0, m, ccer.host, ms);   /* PAD-1637: music mode m's (no mode field: mode 1's) */
 }
 
 /* from sndm_arm: the record lookup's hook for the ceremony's music */
@@ -31076,16 +31169,17 @@ static void ccer_sound_arm(void)
 
 /* PAD-1611: sounds.cfg `cselm <request> <carrier's key> <the music's key> <ms>` (the intro's carrier) */
 static int cselm_bad;
-static void cselm_sound_line(const char *rs, const char *ks, const char *hs, const char *mss)
+static void cselm_sound_line(const char *rs, const char *ks, const char *hs, const char *mss, const char *mds)
 {
     const char *p = rs;
-    int ok, ok2;
+    int ok, ok2, m = cmm_mode_of(mds);
     unsigned r = (unsigned)number(&p, &ok), ms;
     p = mss;
     ms = (unsigned)number(&p, &ok2);
-    if (!ok || !ok2 || !r || !key_hex(ks, cselm.key) || !key_hex(hs, cselm.host)) { cselm_bad++; return; }
+    if (!ok || !ok2 || !r || m < 0 || !key_hex(ks, cselm.key) || !key_hex(hs, cselm.host)) { cselm_bad++; return; }
     cselm.request = r;
     cselm.sound_ms = ms;
+    cmm_add(CMM_SELM, 0, m, cselm.host, ms);   /* PAD-1637: music mode m's (no mode field: mode 1's) */
 }
 
 /* from sndm_arm: the record lookup's hook for the character select's music */
@@ -31776,15 +31870,15 @@ static void sndm_line(char *s)
         return;
     }
     if (n >= 5 && str_eq(f[0], "cintro")) {   /* PAD-1114: the co-op intro's sound */
-        ci_sound_line(f[1], f[2], f[3], f[4]);
+        ci_sound_line(f[1], f[2], f[3], f[4], n >= 6 ? f[5] : 0);   /* PAD-1637: [mode] */
         return;
     }
     if (n >= 5 && str_eq(f[0], "cselm")) {    /* PAD-1611: the co-op character select's music */
-        cselm_sound_line(f[1], f[2], f[3], f[4]);
+        cselm_sound_line(f[1], f[2], f[3], f[4], n >= 6 ? f[5] : 0);   /* PAD-1637: [mode] */
         return;
     }
     if (n >= 5 && str_eq(f[0], "ccer")) {     /* PAD-1317: the co-op awards ceremony's music */
-        ccer_sound_line(f[1], f[2], f[3], f[4]);
+        ccer_sound_line(f[1], f[2], f[3], f[4], n >= 6 ? f[5] : 0);   /* PAD-1637: [mode] */
         return;
     }
     if (n >= 6 && str_eq(f[0], "sword")) {    /* PAD-1589: a spoken score's word */
@@ -31792,7 +31886,7 @@ static void sndm_line(char *s)
         return;
     }
     if (n >= 6 && str_eq(f[0], "cpick")) {    /* PAD-1123: a co-op character's sound once picked */
-        cpk_sound_line(f[1], f[2], f[3], f[4], f[5]);
+        cpk_sound_line(f[1], f[2], f[3], f[4], f[5], n >= 7 ? f[6] : 0);   /* PAD-1637: [mode] */
         return;
     }
 #if PM_A64
@@ -32159,6 +32253,12 @@ static void sndm_arm(void)
     cpk_sound_arm();                          /* PAD-1123: nor the co-op characters' sounds once picked */
     ccer_sound_arm();                         /* PAD-1317: nor the co-op awards ceremony's music */
     cselm_sound_arm();                        /* PAD-1611: nor the co-op character select's music */
+    if (n_cmm || cmm_dropped) {               /* PAD-1637 */
+        int i, own = 0;
+        for (i = 0; i < n_cmm; i++) own += cmm[i].mode > 1;
+        say("music modes: %d co-op sound(s), %d of them a music mode's own%s", n_cmm, own,
+            cmm_dropped ? " (some not read: the table is full)" : "");
+    }
     juke_arm();                               /* PAD-685: nor the jukebox */
 #if PM_A64
     if (n_msw) {                              /* PAD-1324: Spike 3's music modes swap records, no descriptors */

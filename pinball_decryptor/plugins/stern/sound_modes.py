@@ -324,6 +324,13 @@ class Modes:
     #: PAD-1611: the co-op character select's music (a WAV, coop_play.select_audio), on the intro's carrier (a build
     #: sets it; never saved)
     select: str = ""
+    #: PAD-1637: the co-op sounds' own files in music modes 2.., ``[(role, music mode, WAV)]`` (role: the pseudo mode
+    #: of the sound in mode 1, :data:`INTRO_MODE` .. :data:`SELECT_MODE`), on the intro's carrier (a build sets them;
+    #: never saved)
+    coop_modes: list = field(default_factory=list)
+    #: PAD-1637: the highest music mode a co-op sound has a file of its own for in the project (:func:`load` sets it
+    #: from coop_play; never saved), so the card's MUSIC MODE offers it before a build has made the WAVs
+    coop_top: int = 0
     #: PAD-1589: the spoken scores' number words, ``[(word number, WAV)]`` (accessibility.WORDS), on a carrier of their
     #: own: its slot and the build's carrier ``{"request", "slot"}`` (a build sets them; never saved)
     speak: list = field(default_factory=list)
@@ -334,7 +341,7 @@ class Modes:
     def coop(self):
         """PAD-1123: whether a build carries a co-op sound: the intro's, a character's once picked or (PAD-1317) the
         awards ceremony's music or (PAD-1611) the character select's."""
-        return bool(self.intro or self.picks or self.ceremony or self.select)
+        return bool(self.intro or self.picks or self.ceremony or self.select or self.coop_modes)
 
     @property
     def any(self):
@@ -346,6 +353,7 @@ class Modes:
     def count(self):
         """How many modes the card offers: the highest mode a file is set for (2 or more), else 0."""
         top = max((m for files in self.slots.values() for m in files), default=0)
+        top = max([top, int(self.coop_top or 0)] + [int(m) for _r, m, _f in self.coop_modes])   # PAD-1637: co-op's
         return top if top >= 2 else 0
 
     def name(self, mode):
@@ -388,6 +396,7 @@ class Modes:
                 + ([(self.intro_rel, INTRO_MODE + int(n), f) for n, f in self.picks] if self.intro_rel else [])
                 + ([(self.intro_rel, CEREMONY_MODE, self.ceremony)] if self.intro_rel and self.ceremony else [])
                 + ([(self.intro_rel, SELECT_MODE, self.select)] if self.intro_rel and self.select else [])
+                + ([(self.intro_rel, coop_mode(r, m), f) for r, m, f in self.coop_modes] if self.intro_rel else [])
                 + ([(self.speak_rel, speak_mode(k), f) for k, f in self.speak] if self.speak_rel else []))
 
     def level(self, rel, mode):
@@ -470,10 +479,38 @@ CEREMONY_MODE = INTRO_MODE + PICKED_MAX + 1
 SELECT_MODE = CEREMONY_MODE + 1
 
 
+#: PAD-1637: a co-op sound's own file in music mode m (2..MAX_MODES) is built under COOP_MM_BASE + (m - 2) *
+#: COOP_MM_STRIDE + (its role - INTRO_MODE): above the spoken words, below the jukebox
+COOP_MM_BASE = 4200
+COOP_MM_STRIDE = 32
+
+
+def coop_mode(role, m):
+    """PAD-1637: the pseudo mode co-op sound *role* (:data:`INTRO_MODE` .. :data:`SELECT_MODE`) is built under in
+    music mode *m* (mode 1: *role* itself)."""
+    return int(role) if int(m) <= 1 else COOP_MM_BASE + (int(m) - 2) * COOP_MM_STRIDE + int(role) - INTRO_MODE
+
+
+def _is_coop_mm(mode):
+    k = int(mode) - COOP_MM_BASE
+    return 0 <= k < (MAX_MODES - 1) * COOP_MM_STRIDE and k % COOP_MM_STRIDE <= SELECT_MODE - INTRO_MODE
+
+
+def coop_role(mode):
+    """PAD-1637: the co-op sound a pseudo mode is (its mode 1 pseudo mode), whatever music mode it is for."""
+    return INTRO_MODE + (int(mode) - COOP_MM_BASE) % COOP_MM_STRIDE if _is_coop_mm(mode) else int(mode)
+
+
+def coop_music_mode(mode):
+    """PAD-1637: the music mode a co-op sound built under *mode* plays in (1: the plain one, mode 1's)."""
+    return 2 + (int(mode) - COOP_MM_BASE) // COOP_MM_STRIDE if _is_coop_mm(mode) else 1
+
+
 def is_intro(mode):
     """The co-op intro's sound, or (PAD-1123) a co-op character's once picked, or (PAD-1317) the awards ceremony's
-    music, or (PAD-1611) the character select's: the sounds on the co-op intro's carrier."""
-    return INTRO_MODE <= int(mode) <= SELECT_MODE
+    music, or (PAD-1611) the character select's: the sounds on the co-op intro's carrier (PAD-1637: in any music
+    mode)."""
+    return INTRO_MODE <= int(mode) <= SELECT_MODE or _is_coop_mm(mode)
 
 
 #: PAD-1589: the spoken scores' word k (accessibility.WORDS, 0..SPEAK_MAX - 1) is built under SPEAK_BASE + k: above the
@@ -504,29 +541,32 @@ def _speak_what(mode):
 
 
 def is_ceremony(mode):
-    """PAD-1317: the co-op awards ceremony's music."""
-    return int(mode) == CEREMONY_MODE
+    """PAD-1317: the co-op awards ceremony's music (PAD-1637: in any music mode)."""
+    return coop_role(mode) == CEREMONY_MODE
 
 
 def is_select(mode):
-    """PAD-1611: the co-op character select's music."""
-    return int(mode) == SELECT_MODE
+    """PAD-1611: the co-op character select's music (PAD-1637: in any music mode)."""
+    return coop_role(mode) == SELECT_MODE
 
 
 def picked_of(mode):
     """PAD-1123: the co-op character a sound built under *mode* is for (1-based), 0 for the intro's (and the
     ceremony's, and the character select's)."""
+    mode = coop_role(mode)                                  # PAD-1637: in any music mode
     return int(mode) - INTRO_MODE if INTRO_MODE <= int(mode) <= INTRO_MODE + PICKED_MAX else 0
 
 
 def _coop_what(mode):
     """The words for a sound on the co-op intro's carrier."""
+    mm = coop_music_mode(mode)
+    tail = " in music mode %d" % mm if mm > 1 else ""       # PAD-1637
     if is_ceremony(mode):
-        return "the co-op awards ceremony's music"
+        return "the co-op awards ceremony's music" + tail
     if is_select(mode):
-        return "the co-op character select's music"
+        return "the co-op character select's music" + tail
     return ("co-op character %d's sound once picked" % picked_of(mode) if picked_of(mode)
-            else "the co-op intro's sound")
+            else "the co-op intro's sound") + tail
 
 
 def shot_of(mode):
@@ -642,13 +682,15 @@ def tag(rel, mode):
 
 def when(mode):
     """When the game plays a file built under *mode*: "while MUSIC MODE is 2", "every 2nd time"."""
+    mm = coop_music_mode(mode) if is_intro(mode) else 1
+    tail = ", while MUSIC MODE is %d" % mm if mm > 1 else ""   # PAD-1637
     if is_ceremony(mode):
-        return "as the award cards show at a co-op or team game's end"
+        return "as the award cards show at a co-op or team game's end" + tail
     if is_select(mode):
-        return "looped while a teammate picks a character"
+        return "looped while a teammate picks a character" + tail
     if is_intro(mode):
         return ("when a teammate picks co-op character %d" % picked_of(mode) if picked_of(mode)
-                else "as a co-op or team game's intro plays")
+                else "as a co-op or team game's intro plays") + tail
     if is_speak(mode):
         return "when the machine says a score"
     if is_juke(mode):
@@ -886,9 +928,23 @@ def load(project):
         return Modes()
     from ...core import staged_changes
     try:
-        return clean(staged_changes.load(project).get(STAGED_KEY))
+        modes = clean(staged_changes.load(project).get(STAGED_KEY))
     except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
-        return Modes()
+        modes = Modes()
+    modes.coop_top = coop_top(project)
+    return modes
+
+
+def coop_top(project):
+    """PAD-1637: the highest music mode one of the project's co-op sounds has a file of its own for (0: none, or
+    co-op is off)."""
+    from . import coop_play as _CP
+    try:
+        if not _CP.load(project):
+            return 0
+        return max((int(m) for _k, m, _p in _CP.mode_sounds(project)), default=0)
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
+        return 0
 
 
 def slot_idx(rel):
@@ -1364,7 +1420,9 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
     ``picks`` ``[(character number, record key, ms)]``, the co-op characters' sounds once picked on the same carrier: a
     ``cpick`` line each (with no ``host`` of the intro's, no ``cintro`` line). PAD-1317: its ``ceremony`` ``(record
     key, ms)``, the co-op awards ceremony's music on the same carrier: a ``ccer`` line. PAD-1611: its ``select``
-    ``(record key, ms)``, the character select's music on the same carrier: a ``cselm`` line."""
+    ``(record key, ms)``, the character select's music on the same carrier: a ``cselm`` line. PAD-1637: its
+    ``by_mode`` ``[(role, music mode, record key, ms)]``, a co-op sound's own file in a music mode 2..: its line with
+    the mode as a last field."""
     lines = ["# PAD-494 music modes: the operator's MUSIC MODE picks which descriptor each sound id plays"]
     if only:
         lines.append("only")
@@ -1421,6 +1479,14 @@ def cfg_text(live, count, sounds, only, record=(), turns=(), bsids=(), tsids=(),
         host, ms = intro["select"]
         lines.append("cselm\t%d\t%s\t%s\t%d" % (int(intro["request"]), bytes(intro["key"]).hex(), bytes(host).hex(),
                                                  int(ms)))
+    for role, m, host, ms in (intro or {}).get("by_mode") or ():   # PAD-1637: a co-op sound's own in music mode m
+        req, key = int(intro["request"]), bytes(intro["key"]).hex()
+        n = picked_of(role)
+        if n:
+            lines.append("cpick\t%d\t%d\t%s\t%s\t%d\t%d" % (n, req, key, bytes(host).hex(), int(ms), int(m)))
+        else:
+            lines.append("%s\t%d\t%s\t%s\t%d\t%d" % ("ccer" if is_ceremony(role) else "cselm" if is_select(role)
+                                                       else "cintro", req, key, bytes(host).hex(), int(ms), int(m)))
     for k, host, ms in (speak or {}).get("words") or ():     # PAD-1589: a spoken score's word
         lines.append("sword\t%d\t%d\t%s\t%s\t%d" % (int(k), int(speak["request"]), bytes(speak["key"]).hex(),
                                                      bytes(host).hex(), int(ms)))

@@ -1431,6 +1431,8 @@ def _characters(got):
                         # PAD-1123: what plays full screen once it is picked, and the sound with it
                         "picked_clip": str(c.get("picked_clip") or ""),
                         "picked_sound": str(c.get("picked_sound") or "")})
+            if clean_mode_files(c.get("picked_modes")):     # PAD-1637: its sound once picked in music modes 2..
+                out[-1]["picked_modes"] = clean_mode_files(c.get("picked_modes"))
     theme = got.get("theme") if isinstance(got.get("theme"), dict) else {}
     out = {"pick": bool(got.get("pick")), "time": pick_time(got.get("time")), "list": out[:MAX_CHARACTERS]}
     if got.get("intro"):                                # PAD-1114: the co-op and team games' intro video
@@ -1447,6 +1449,11 @@ def _characters(got):
         out["ceremony_sound"] = str(got["ceremony_sound"])
     if got.get("select_sound"):                         # PAD-1611: the music looped while the character select is up
         out["select_sound"] = str(got["select_sound"])
+    mode_sounds = {k: clean_mode_files(v) for k, v in (got.get("mode_sounds") or {}).items()
+                   if k in MODE_SOUND_KINDS} if isinstance(got.get("mode_sounds"), dict) else {}
+    mode_sounds = {k: v for k, v in mode_sounds.items() if v}
+    if mode_sounds:                                     # PAD-1637: the intro's, select's and ceremony's by music mode
+        out["mode_sounds"] = mode_sounds
     if got.get("bonus"):                                # PAD-1123: the teammate's character on their End of Ball Bonus
         out["bonus"] = True
     if theme:
@@ -1462,7 +1469,8 @@ def save_characters(project, characters):
     chars = _characters(characters)
     data = staged_changes.load(project)
     raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
-    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "select_sound", "bonus")):
+    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "select_sound", "bonus",
+                                                                  "mode_sounds")):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)
@@ -2250,6 +2258,155 @@ def intro_audio(src, out, ffmpeg, max_seconds=None):
     if r.returncode != 0:
         raise CoopError("ffmpeg could not take the sound out of %s: %s" % (src, (r.stderr or "").strip()[-300:]))
     return out
+
+
+
+# ---- PAD-1637: the co-op sounds by MUSIC MODE ------------------------------------------------------------------------
+# DoomWalrus666: "a different audio track assigned for co-op teams: intro video music, awards ceremony music, character
+# select music ... the flexibility to alter those music selections with their music mode choices." Each of the co-op
+# intro's sound, the character select's music, the awards ceremony's and every character's sound once picked can have
+# a file of its own for each MUSIC MODE 2.. (the plain file is mode 1's, the card as the operator first finds it). The
+# build makes each a record of its own on the co-op intro's carrier (sound_modes "the co-op sounds by music mode"),
+# sounds.cfg names it with its mode (a 6th / 7th field of cintro, ccer, cselm, cpick) and the runtime plays the file of
+# the mode the operator's MUSIC MODE says at each play: a mode with no file of its own plays mode 1's (pad_mode_runtime.c
+# "PAD-1637"). A card with any gets the MUSIC MODE setting, as one with music mode files on the Audio tab does.
+#: the co-op sounds the project keeps by music mode, beside the characters' own sounds once picked
+MODE_SOUND_KINDS = ("intro", "select", "ceremony")
+#: their files: kind and mode (a character's: CHAR_MODE_SOUND_FILE, its number and the mode)
+MODE_SOUND_FILE = "%s_sound_mode_%d"
+CHAR_MODE_SOUND_FILE = "character_%d_picked_sound_mode_%d"
+#: the highest music mode (sound_modes.MAX_MODES)
+MODE_SOUND_MAX = 8
+
+
+def clean_mode_files(got):
+    """``{"<m>": file}`` for music modes 2..:data:`MODE_SOUND_MAX` out of *got* (junk dropped)."""
+    out = {}
+    if isinstance(got, dict):
+        for m, f in got.items():
+            try:
+                m = int(m)
+            except (TypeError, ValueError):
+                continue
+            if 2 <= m <= MODE_SOUND_MAX and f:
+                out[str(m)] = str(f)
+    return out
+
+
+def _mode_ok(kind, mode):
+    if kind not in MODE_SOUND_KINDS:
+        raise CoopError("There is no co-op sound called %r." % (kind,))
+    if not 2 <= int(mode) <= MODE_SOUND_MAX:
+        raise CoopError("Music mode %d is not one a card can have (2 to %d)." % (int(mode), MODE_SOUND_MAX))
+
+
+def mode_sound_path(project, kind, mode, characters=None):
+    """The absolute path of music mode *mode*'s own file for co-op sound *kind* (one of :data:`MODE_SOUND_KINDS`),
+    ``""`` when it has none (it plays mode 1's) or the file is gone."""
+    chars = _characters(characters) if characters is not None else load_characters(project)
+    rel = ((chars.get("mode_sounds") or {}).get(kind) or {}).get(str(int(mode))) or ""
+    return picture_path(project, {"picture": rel})
+
+
+def picked_mode_sound_path(project, character, mode):
+    """The absolute path of *character*'s own sound once picked in music mode *mode* (``""``: none, or gone)."""
+    rel = ((character or {}).get("picked_modes") or {}).get(str(int(mode))) or ""
+    return picture_path(project, {"picture": rel})
+
+
+def mode_sounds(project, characters=None):
+    """Every co-op sound's file of its own in a music mode that is there: ``[(kind, mode, path)]``, kind one of
+    :data:`MODE_SOUND_KINDS` or ``"picked<n>"`` (character n, 1-based), in kind then mode order."""
+    chars = _characters(characters) if characters is not None else load_characters(project)
+    out = []
+    for kind in MODE_SOUND_KINDS:
+        for m in sorted(int(k) for k in ((chars.get("mode_sounds") or {}).get(kind) or {})):
+            p = mode_sound_path(project, kind, m, chars)
+            if p:
+                out.append((kind, m, p))
+    for i, c in enumerate(chars["list"]):
+        for m in sorted(int(k) for k in (c.get("picked_modes") or {})):
+            p = picked_mode_sound_path(project, c, m)
+            if p:
+                out.append(("picked%d" % (i + 1), m, p))
+    return out
+
+
+def _put_sound_file(project, source, stem):
+    """*source* copied into the co-op folder as *stem* plus its extension (another extension's file of that stem goes),
+    or with None the file of that stem removed; returns its project-relative name, ``""`` with None."""
+    import os
+    import shutil
+    folder = os.path.join(project, PICTURE_DIR)
+    if source is not None:
+        ext = os.path.splitext(source)[1].lower()
+        if ext not in SOUND_EXTS + VIDEO_EXTS or not os.path.isfile(source):
+            raise CoopError("That is not a sound file the app can take (%s)." % ", ".join(SOUND_EXTS + VIDEO_EXTS))
+    if os.path.isdir(folder):
+        for f in os.listdir(folder):
+            if os.path.splitext(f)[0] == stem and (source is None or f != stem + os.path.splitext(source)[1].lower()):
+                os.remove(os.path.join(folder, f))
+    if source is None:
+        return ""
+    os.makedirs(folder, exist_ok=True)
+    ext = os.path.splitext(source)[1].lower()
+    shutil.copyfile(source, os.path.join(folder, stem + ext))
+    return "%s/%s%s" % (PICTURE_DIR, stem, ext)
+
+
+def save_mode_sound(project, kind, mode, source=None):
+    """Copy *source* (a sound file, or a video whose sound is taken) into the project as co-op sound *kind*'s own file
+    in music mode *mode* (2..), or with None forget it (that mode plays mode 1's); returns the characters as stored.
+    Raises :class:`CoopError` when the file is not one the app takes."""
+    _mode_ok(kind, mode)
+    rel = _put_sound_file(project, source, MODE_SOUND_FILE % (kind, int(mode)))
+    chars = load_characters(project)
+    got = dict((chars.get("mode_sounds") or {}).get(kind) or {})
+    if rel:
+        got[str(int(mode))] = rel
+    else:
+        got.pop(str(int(mode)), None)
+    ms = dict(chars.get("mode_sounds") or {})
+    if got:
+        ms[kind] = got
+    else:
+        ms.pop(kind, None)
+    if ms:
+        chars["mode_sounds"] = ms
+    else:
+        chars.pop("mode_sounds", None)
+    return save_characters(project, chars)
+
+
+def save_picked_mode_sound(project, index, mode, source=None):
+    """Copy *source* into the project as the sound character *index* plays once picked in music mode *mode* (2..), or
+    with None forget it (that mode plays the character's own); returns the characters as stored."""
+    if not 2 <= int(mode) <= MODE_SOUND_MAX:
+        raise CoopError("Music mode %d is not one a card can have (2 to %d)." % (int(mode), MODE_SOUND_MAX))
+    chars = load_characters(project)
+    if not 0 <= int(index) < len(chars["list"]):
+        raise CoopError("There is no character %d." % (int(index) + 1))
+    rel = _put_sound_file(project, source, CHAR_MODE_SOUND_FILE % (int(index) + 1, int(mode)))
+    c = chars["list"][int(index)]
+    got = dict(c.get("picked_modes") or {})
+    if rel:
+        got[str(int(mode))] = rel
+    else:
+        got.pop(str(int(mode)), None)
+    c["picked_modes"] = got
+    return save_characters(project, chars)
+
+
+def mode_sound_audio(kind, src, out, ffmpeg):
+    """*src*'s sound as the WAV co-op sound *kind* takes (each kind's own longest: the intro's, the select's, the
+    ceremony's, a character's once picked); ``""`` when it has none."""
+    if kind == "select":
+        return select_audio(src, out, ffmpeg)
+    if kind == "ceremony":
+        return ceremony_audio(src, out, ffmpeg)
+    if kind.startswith("picked"):
+        return picked_audio(src, out, ffmpeg)
+    return intro_audio(src, out, ffmpeg)
 
 
 # ---- PAD-1123: a clip and a sound once a character is picked; the character on its teammate's End of Ball Bonus ------
@@ -3506,6 +3663,18 @@ def export_settings(project, path):
             c[field] = "%s/%d_%s_%s%s" % (FILE_PICTURES, i + 1, picture_file_name(c["name"]) or "character", tag,
                                           os.path.splitext(src)[1].lower())
             pictures.append((src, c[field]))
+        got = {}                                                # PAD-1637: its sounds once picked by music mode
+        for m in sorted(int(k) for k in (c.get("picked_modes") or {})):
+            src = picked_mode_sound_path(project, c, m)
+            if not src:
+                continue
+            if not as_zip:
+                left_out += 1
+                continue
+            got[str(m)] = "%s/%d_%s_picked_sound_mode_%d%s" % (
+                FILE_PICTURES, i + 1, picture_file_name(c["name"]) or "character", m, os.path.splitext(src)[1].lower())
+            pictures.append((src, got[str(m)]))
+        c["picked_modes"] = got
     for key, stem, path_of in (("intro", INTRO_FILE, intro_path),          # PAD-1114: the co-op games' intro video
                                ("ceremony", CEREMONY_FILE, ceremony_path),    # PAD-1219: the awards' background
                                ("ceremony_sound", CEREMONY_SOUND_FILE, ceremony_sound_path),   # PAD-1317: music
@@ -3518,6 +3687,19 @@ def export_settings(project, path):
                 pictures.append((got, chars[key]))
             else:
                 left_out += 1
+    ms = {}                                                     # PAD-1637: the co-op sounds by music mode
+    for kind, m, src in mode_sounds(project, chars):
+        if kind not in MODE_SOUND_KINDS:
+            continue
+        if not as_zip:
+            left_out += 1
+            continue
+        rel = "%s/%s%s" % (FILE_PICTURES, MODE_SOUND_FILE % (kind, m), os.path.splitext(src)[1].lower())
+        ms.setdefault(kind, {})[str(m)] = rel
+        pictures.append((src, rel))
+    chars.pop("mode_sounds", None)
+    if ms:
+        chars["mode_sounds"] = ms
     back = backdrop_path(project, chars.get("theme"))          # PAD-1079: the pick's background picture
     if back:
         if as_zip:
@@ -3665,6 +3847,19 @@ def import_settings(project, path):
                 f.write(blob)
             c[field] = "%s/%s" % (PICTURE_DIR, name)
             pictures += 1
+        got = {}                                                # PAD-1637: its sounds once picked by music mode
+        for m, rel in clean_mode_files(c.get("picked_modes")).items():
+            blob = read(rel) if read and rel else None
+            ext = os.path.splitext(rel)[1].lower()
+            if not blob or ext not in SOUND_EXTS + VIDEO_EXTS:
+                continue
+            os.makedirs(folder, exist_ok=True)
+            name = (CHAR_MODE_SOUND_FILE % (i + 1, int(m))) + ext
+            with open(os.path.join(folder, name), "wb") as f:
+                f.write(blob)
+            got[m] = "%s/%s" % (PICTURE_DIR, name)
+            pictures += 1
+        c["picked_modes"] = got
     for key, stem, exts in (("intro", INTRO_FILE, VIDEO_EXTS), ("ceremony", CEREMONY_FILE, VIDEO_EXTS),
                             # PAD-1114 / PAD-1219: the videos; PAD-1317: the ceremony's music
                             ("ceremony_sound", CEREMONY_SOUND_FILE, SOUND_EXTS + VIDEO_EXTS),
@@ -3681,6 +3876,26 @@ def import_settings(project, path):
                 f.write(blob)
             chars[key] = "%s/%s%s" % (PICTURE_DIR, stem, ext)
             pictures += 1
+    ms = {}                                                     # PAD-1637: the co-op sounds by music mode
+    for kind, files in (chars.pop("mode_sounds", None) or {}).items():
+        if kind not in MODE_SOUND_KINDS:
+            continue
+        for m, rel in clean_mode_files(files).items():
+            blob = read(rel) if read and rel else None
+            ext = os.path.splitext(rel)[1].lower()
+            if not blob or ext not in SOUND_EXTS + VIDEO_EXTS:
+                continue
+            os.makedirs(folder, exist_ok=True)
+            stem = MODE_SOUND_FILE % (kind, int(m))
+            for f in os.listdir(folder):
+                if os.path.splitext(f)[0] == stem:
+                    os.remove(os.path.join(folder, f))
+            with open(os.path.join(folder, stem + ext), "wb") as f:
+                f.write(blob)
+            ms.setdefault(kind, {})[m] = "%s/%s%s" % (PICTURE_DIR, stem, ext)
+            pictures += 1
+    if ms:
+        chars["mode_sounds"] = ms
     theme = chars.get("theme") or {}                            # PAD-1079: the pick's background picture
     rel = theme.pop("backdrop", "")
     blob = read(rel) if read and rel else None
@@ -3715,7 +3930,8 @@ def import_settings(project, path):
                 awards[str(k)] = a
         if awards:
             raw["awards"] = awards
-    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "select_sound", "bonus")):
+    if chars["list"] or chars["pick"] or any(chars.get(k) for k in ("intro", "ceremony", "ceremony_sound", "select_sound", "bonus",
+                                                                  "mode_sounds")):
         raw["characters"] = chars
     else:
         raw.pop("characters", None)

@@ -173,6 +173,7 @@ class TestCardList(object):
         self.source = ""          # the Spike 2 card image the boot and system come from
         self.out = ""             # where the last test card was written
         self.network = dict(NETWORK_DEFAULTS)   # space for network updates, remote access, Wi-Fi
+        self.built = {}           # the last card built: {out, sig, size, mtime} (built_card)
         self.load()
 
     # -- the file
@@ -191,11 +192,12 @@ class TestCardList(object):
             self.source = str(d.get("source") or "")
             self.out = str(d.get("out") or "")
             self.network = clean_network(d.get("network"))
+            self.built = d.get("built") if isinstance(d.get("built"), dict) else {}
 
     def save(self):
         with _LOCK:
             d = {"items": [it.to_json() for it in self.items], "source": self.source, "out": self.out,
-                 "network": self.network}
+                 "network": self.network, "built": self.built}
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             tmp = self.path + ".part"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -625,6 +627,48 @@ def _prune_layered(home):
                 os.remove(os.path.join(home, g))
             except OSError:
                 pass
+
+
+def _stamp(path):
+    try:
+        st = os.stat(path)
+        return [path, st.st_size, int(st.st_mtime)]
+    except (OSError, TypeError, ValueError):
+        return [path, None]
+
+
+def build_signature(lst, items=None):
+    """What a test card is built from: the list, the card image, the network settings, each item's file and each
+    project's scenes and edits (a file's size and time).  Two builds with the same signature make the same card."""
+    import hashlib
+    items = list(lst.ordered() if items is None else items)
+    projects = sorted({it.project for it in items if it.project})
+    parts = [[it.to_json() for it in items], _stamp(lst.source), clean_network(lst.network),
+             [_stamp(it.path) for it in items],
+             [[_stamp(os.path.join(p, ".staged_changes.json")),
+               _stamp(os.path.join(p, "images", "scene_textures", "scene_tree.json"))] for p in projects]]
+    return hashlib.sha1(json.dumps(parts, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def note_built(lst, out, sig):
+    """Remember *out* as the card built from *sig* (:func:`build_signature` taken when the build started)."""
+    st = os.stat(out)
+    lst.built = {"out": out, "sig": sig, "size": st.st_size, "mtime": int(st.st_mtime)}
+    lst.save()
+
+
+def built_card(lst):
+    """Simon (2026-11-27): "if I "build" the card... it asks me to save it. If I send the card it also asks me to save
+    it.. Seems that Sending doesn't check to see if it is already built?" - the card last built, when it is still
+    on disk as it was written and nothing it was built from has changed since; else ''."""
+    b = lst.built or {}
+    out = b.get("out") or ""
+    if not out or not os.path.isfile(out) or os.path.exists(str(out) + ".ssh-pending"):
+        return ""
+    st = os.stat(out)
+    if st.st_size != b.get("size") or int(st.st_mtime) != b.get("mtime"):
+        return ""
+    return out if b.get("sig") == build_signature(lst) else ""
 
 
 def place_layered_clip(item, clip, work, n, log=print, cancel=None):

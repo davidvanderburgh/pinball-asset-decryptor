@@ -191,7 +191,7 @@ def test_send_builds_then_hands_the_card_to_the_apps_send(tmp_path, monkeypatch)
     asked = []
     monkeypatch.setattr(rs, "connect", lambda address: _Machine("PAD_TESTCARD\n"))
     monkeypatch.setattr(compat.messagebox, "askyesno", lambda *a, **k: asked.append(a) or True)
-    monkeypatch.setattr(tab, "build", lambda send_to="": sent.append(("build", send_to)) or True)
+    monkeypatch.setattr(tab, "build", lambda send_to="", out="": sent.append(("build", send_to)) or True)
     assert tab.send() is True
     assert sent == [("build", "192.168.1.50")]
     assert "The machine runs a PAD test card" in asked[0][1]
@@ -218,7 +218,7 @@ def test_send_may_replace_a_multiboot_card_when_asked(tmp_path, monkeypatch):
     asked = []
     monkeypatch.setattr(rs, "connect", lambda address: _Machine("PAD_MENU_CARD\n"))
     monkeypatch.setattr(compat.messagebox, "askyesno", lambda *a, **k: asked.append(a) or True)
-    monkeypatch.setattr(tab, "build", lambda send_to="": sent.append(("build", send_to)) or True)
+    monkeypatch.setattr(tab, "build", lambda send_to="", out="": sent.append(("build", send_to)) or True)
     assert tab.send() is True
     assert "Replace the multi-boot card" in asked[0][1] and "every game on it are deleted" in asked[0][1]
     sent[:] = []
@@ -235,6 +235,66 @@ def test_send_may_replace_a_multiboot_card_when_asked(tmp_path, monkeypatch):
     monkeypatch.setattr(rs, "connect", lambda address: _Machine(""))
     with pytest.raises(RpcError, match="its game would be deleted"):
         tab.send()
+
+
+def test_send_takes_the_card_already_built_when_nothing_changed(tmp_path, monkeypatch):
+    """Simon (2026-11-27): "if I "build" the card... it asks me to save it. If I send the card it also asks me to save
+    it.. Seems that Sending doesn't check to see if it is already built?" - a card built from what the list holds now
+    goes as it is (no build, no Save As); anything changed since and it is built again over the same file, still
+    without asking where."""
+    from pinball_decryptor.core import remote_send as rs
+    from pinball_decryptor.webui import compat
+    sent, asked, built = [], [], []
+    tab = _tab(send=lambda path, address: sent.append((path, address)))
+    lst = tc.shared()
+    src = tmp_path / "stock.raw"
+    src.write_bytes(b"stock")
+    lst.source = str(src)
+    lst.network = tc.clean_network({"ssh": True})
+    out = str(tmp_path / "pad_test_card.raw")
+    open(out, "wb").write(b"card")
+    lst.out = out
+    lst.save()
+    tc.note_built(lst, out, tc.build_signature(lst))
+    assert tc.built_card(lst) == out
+    monkeypatch.setattr(rs, "connect", lambda address: _Machine("PAD_TESTCARD\n"))
+    monkeypatch.setattr(compat.messagebox, "askyesno", lambda *a, **k: asked.append(a) or True)
+    monkeypatch.setattr(compat.filedialog, "asksaveasfilename", lambda **k: pytest.fail("no Save As on a Send"))
+    monkeypatch.setattr(tab, "build", lambda send_to="", out="": built.append((send_to, out)) or True)
+    assert tab.send() is True
+    assert built == [] and sent == [(out, "192.168.1.50")]
+    assert "goes as it is: nothing in the list has changed" in asked[0][1]
+    # the network settings changed: built again, over the same file, not asked where
+    sent[:], asked[:] = [], []
+    lst.network = tc.clean_network({"ssh": True, "room": True})
+    lst.save()
+    assert tc.built_card(lst) == ""
+    assert tab.send() is True
+    assert built == [("192.168.1.50", out)] and sent == []
+    assert "built first, as %s (replacing that file)" % out in asked[0][1]
+    # the file on disk changed since (another program, a half-finished build): not taken as it is
+    lst.network = tc.clean_network({"ssh": True})
+    lst.save()
+    assert tc.built_card(lst) == out
+    open(out, "ab").write(b"more")
+    assert tc.built_card(lst) == ""
+
+
+def test_a_finished_build_is_remembered_for_send(tmp_path):
+    tab = _tab(send=lambda *a: None)
+    lst = tc.shared()
+    src = tmp_path / "stock.raw"
+    src.write_bytes(b"stock")
+    lst.source = str(src)
+    lst.save()
+    out = str(tmp_path / "t.raw")
+    open(out, "wb").write(b"x")
+    tab._build_sig = tc.build_signature(lst)
+    tab._finish(True, "", out)
+    assert tc.built_card(tc.TestCardList()) == out, "kept in the list's file"
+    tab._build_sig = tc.build_signature(lst)
+    tab._finish(False, "boom", out)
+    assert tc.TestCardList().built["out"] == out, "a failed build is not remembered"
 
 
 def test_a_plain_build_does_not_send(tmp_path):

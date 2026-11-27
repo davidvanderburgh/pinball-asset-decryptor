@@ -4340,6 +4340,9 @@ class ModeSpec:
     sound_shot: str = ""                 # played on scoring shots; "" = none
     sound_shot_every: int = 1            # ... on every Nth scoring shot
     music: str = ""                      # looped under the mode, stopped when it ends; "" = none
+    # PAD-1637: a file of its own for MUSIC MODE 2.. for any of the four: {"music": {"2": "music_music_mode_2.wav"}},
+    # WAVs in the mode folder, each on a carrier of its own; a music mode with none plays the one above
+    sound_modes: dict = field(default_factory=dict)
     # cut from a film (item 142): WHERE a cut came from, never the film itself. The cut is
     # the mode's clip_file / end_sound / screen_art as usual; these only name the film and
     # the span, so the tab can say what was cut from where. Never in the runtime file.
@@ -6743,6 +6746,61 @@ def _validate_own_sounds(spec, folder):
     return out
 
 
+#: PAD-1637: the own sounds a music mode can have a file of its own for, and the highest music mode
+OWN_MODE_KEYS = ("sound_start", "sound_shot", "sound_end", "music")
+OWN_MODE_MAX = 8
+
+
+def alt_key(key, m):
+    """PAD-1637: the own-sound key of *key*'s file for music mode *m* (``music@2``)."""
+    return "%s@%d" % (key, int(m))
+
+
+def split_key(key):
+    """PAD-1637: ``(key, music mode)`` of an own-sound key: ``music@2`` -> ``("music", 2)``, ``music`` -> 1."""
+    k, _sep, m = str(key).partition("@")
+    return (k, int(m)) if m.isdigit() else (str(key), 1)
+
+
+def own_mode_files(spec):
+    """PAD-1637: ``[(key, music mode, file name)]`` of the files *spec* has for music modes 2.., in key then mode
+    order (junk dropped)."""
+    got = getattr(spec, "sound_modes", None)
+    out = []
+    if not isinstance(got, dict):
+        return out
+    for key in OWN_MODE_KEYS:
+        files = got.get(key)
+        if not isinstance(files, dict):
+            continue
+        for m, name in files.items():
+            try:
+                m = int(m)
+            except (TypeError, ValueError):
+                continue
+            if 2 <= m <= OWN_MODE_MAX and name:
+                out.append((key, m, str(name)))
+    return sorted(out, key=lambda t: (OWN_MODE_KEYS.index(t[0]), t[1]))
+
+
+def own_mode_file_name(key, m, ext=".wav"):
+    """PAD-1637: the mode folder's name for *key*'s file in music mode *m*."""
+    return "%s_music_mode_%d%s" % (key, int(m), ext)
+
+
+def set_own_mode_file(spec, key, m, name):
+    """PAD-1637: *spec*'s file for *key* in music mode *m* is *name* ("" forgets it)."""
+    if key not in OWN_MODE_KEYS or not 2 <= int(m) <= OWN_MODE_MAX:
+        raise ModeProjectError("%s in music mode %s is not one a mode can have" % (key, m))
+    got = {k: dict(v) for k, v in (spec.sound_modes or {}).items() if isinstance(v, dict)}
+    files = got.setdefault(key, {})
+    if name:
+        files[str(int(m))] = name
+    else:
+        files.pop(str(int(m)), None)
+    spec.sound_modes = {k: v for k, v in got.items() if v}
+
+
 def own_sound_lines(spec, own_sounds, ms=None):
     """The mode-file lines for the sounds this mode has a WAV for AND a carrier: the
     ``sound_start`` / ``sound_shot`` / ``sound_end`` / ``music`` keys mode_file.c reads. The
@@ -6759,6 +6817,17 @@ def own_sound_lines(spec, own_sounds, ms=None):
         picked["music_sid"] = own_sounds["music_sid"]      # item 150 follow-up: its own bed
     lines = MS.cfg_lines(picked, shot_every=int(spec.sound_shot_every or 1), ms=ms)
     carried = {int(r) for k, r in picked.items() if k in MS.SOUND_KEYS}
+    # PAD-1637: a music mode's own file for a sound, on its own carrier: `<key>@<m> <request> ...`
+    for key, r in sorted(own_sounds.items()):
+        base, m = split_key(key)
+        if m < 2 or base not in MS.SOUND_KEYS or not isinstance(r, int):
+            continue
+        one = {base: r}
+        if base == "music" and own_sounds.get(key + "_sid"):
+            one["music_sid"] = own_sounds[key + "_sid"]
+        for ln in MS.cfg_lines(one, shot_every=int(spec.sound_shot_every or 1), ms={base: (ms or {}).get(key)}):
+            lines.append("%s@%d %s" % (base, m, ln[len(base):].strip()))
+        carried.add(int(r))
     # item 163: the carriers whose own record key the mode swaps for its appended record's
     lines += ["swap           %d %s %s" % (int(r), stock, ours)
               for r, stock, ours in own_sounds.get("swaps") or () if int(r) in carried]

@@ -31972,6 +31972,12 @@ static unsigned sndm_mode(void)
     return v >= 1 && v <= sndm_n ? v : 1;
 }
 
+/* PAD-1637: the MUSIC MODE for the modes' own sounds (mode_file.c picks a music mode's own carriers at a start) */
+unsigned pm_music_mode(void)
+{
+    return sndm_mode();
+}
+
 /* get_asset_descriptor(id, out), wrapped: the game's own first, then mode m's bytes for the asset */
 static unsigned sndm_resolve(unsigned id, unsigned *out)
 {

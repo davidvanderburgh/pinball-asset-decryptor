@@ -331,6 +331,10 @@ class Modes:
     #: PAD-1637: the highest music mode a co-op sound has a file of its own for in the project (:func:`load` sets it
     #: from coop_play; never saved), so the card's MUSIC MODE offers it before a build has made the WAVs
     coop_top: int = 0
+    #: PAD-1637: the highest music mode a game mode's own sound has a file for (:func:`load`; never saved), and
+    #: whether this build carries any of them (the engine sets it once the modes' sounds are on the card)
+    own_top: int = 0
+    own_mm: bool = False
     #: PAD-1589: the spoken scores' number words, ``[(word number, WAV)]`` (accessibility.WORDS), on a carrier of their
     #: own: its slot and the build's carrier ``{"request", "slot"}`` (a build sets them; never saved)
     speak: list = field(default_factory=list)
@@ -353,7 +357,8 @@ class Modes:
     def count(self):
         """How many modes the card offers: the highest mode a file is set for (2 or more), else 0."""
         top = max((m for files in self.slots.values() for m in files), default=0)
-        top = max([top, int(self.coop_top or 0)] + [int(m) for _r, m, _f in self.coop_modes])   # PAD-1637: co-op's
+        top = max([top, int(self.coop_top or 0), int(self.own_top or 0)]
+                  + [int(m) for _r, m, _f in self.coop_modes])   # PAD-1637: co-op's and the game modes' own
         return top if top >= 2 else 0
 
     def name(self, mode):
@@ -932,7 +937,18 @@ def load(project):
     except Exception:                                   # noqa: BLE001 - an unreadable sidecar: none
         modes = Modes()
     modes.coop_top = coop_top(project)
+    modes.own_top = own_top(project)
     return modes
+
+
+def own_top(project):
+    """PAD-1637: the highest music mode one of the project's game modes has a sound file of its own for (0: none)."""
+    from . import mode_project as _MP
+    try:
+        specs, _broken = _MP.list_modes(project)
+    except Exception:                                   # noqa: BLE001 - unreadable: none
+        return 0
+    return max((m for _slug, spec in specs for _k, m, _f in _MP.own_mode_files(spec)), default=0)
 
 
 def coop_top(project):

@@ -9912,7 +9912,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                     int(_u["host"])), "warning")
                         sound_mode_used = [u for u in sound_mode_used
                                            if int(u["host"]) not in _dead]
-                    if sound_mode_used:
+                    if sound_modes is not None:   # PAD-1637: the game modes' sounds for a music mode
+                        sound_modes.own_mm = any(_MW_split_key(u.get("key"))[1] > 1 for u in mode_own_used or ())
+                    if sound_mode_used or (sound_modes is not None and sound_modes.own_mm):
                         # PAD-494: every sound id that plays a slot with a
                         # mode file, that mode's descriptor, off the bank as
                         # it now stands
@@ -12032,6 +12034,8 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     from . import sound_modes as _SMo
     modes = _SMo.load(assets_dir)
     mm_off = "music_mode" in _SvM.off_keys(assets_dir)
+    if modes.own_top and mm_off:                        # PAD-1637: nor the game modes' (mode_write says so)
+        modes.own_top = 0
     if modes.coop_top and mm_off:                       # PAD-1637: nor co-op's own files in a music mode
         log("Co-op sounds: MUSIC MODE is not ticked on the Service menu tab, so their files for the other music "
             "modes are left out: each plays its own. Tick its row there to put them on the card.", "info")
@@ -14088,7 +14092,8 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     except (RuntimeError, ValueError, OSError, struct.error) as e:
         log("%s: not put on this card: %s. Every sound plays its own." % (who, e), "warning")
         return ""
-    coop_mm = bool((intro or {}).get("by_mode"))     # PAD-1637: co-op's own files in a music mode want it too
+    coop_mm = bool((intro or {}).get("by_mode")) or bool(getattr(modes, "own_mm", False))
+    # PAD-1637: co-op's own files in a music mode want it too, and the game modes' own sounds' (on carriers of theirs)
     if modes.count and not sounds and not bsids and not coop_mm:
         log("Music modes: none of the files for the other modes can be played on this card, so "
             "MUSIC MODE is not added.", "warning")
@@ -14096,7 +14101,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
             return ""
         modes.slots, modes.names = {}, []
     if not sounds and not turns and not bsids and not tsids and not attract and not jukebox and not shots \
-            and not intro and not speak:
+            and not intro and not speak and not coop_mm:
         log("%s: none of the files can be played on this card; every sound plays its "
             "own." % ("Sounds in turn" if modes.turns or not (modes.attract or modes.shots)
                       else "Attract flipper sounds" if modes.attract else "Sounds on shots"), "warning")
@@ -25849,3 +25854,9 @@ def _safe_remove(path):
         os.remove(_lp(path))
     except OSError:
         pass
+
+
+def _MW_split_key(key):
+    """PAD-1637: ``(sound key, music mode)`` of a mode's own-sound key (``music@2`` -> ``("music", 2)``)."""
+    from . import mode_project as _MP
+    return _MP.split_key(key or "")

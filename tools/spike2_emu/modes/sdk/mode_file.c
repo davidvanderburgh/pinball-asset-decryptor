@@ -972,11 +972,19 @@ static void display_start(struct slot *M)
 struct own_sounds {
     unsigned start, shot, shot_every, end, music, music_restarts, start_ms, shot_ms, end_ms;
     unsigned music_sid;                 /* item 150 follow-up: the mode's own bed, 0 = none */
-    struct { unsigned request; unsigned char keys[16]; } swap[4];   /* item 163: stock, ours */
+    struct { unsigned request; unsigned char keys[16]; } swap[12];  /* item 163: stock, ours (PAD-1637: 12) */
     unsigned n_swap;
-    struct { unsigned request, sid; } point[8];   /* PAD-595: a call in a sound bank: its bank sid */
+    struct { unsigned request, sid; } point[16];  /* PAD-595: a call in a sound bank: its bank sid */
     unsigned n_point;
     unsigned long shot_until;           /* the previous shot call still sounds until then */
+    /* PAD-1637: a music mode's own file for a sound, on a carrier of its own: `sound_start@<m> <request> [ms]`,
+     * `sound_shot@<m> <request> [every] [ms]`, `sound_end@<m> <request> [ms]`, `music@<m> <request> [bed sid]`.
+     * At each start the mode plays the carriers of the operator's MUSIC MODE (pm_music_mode): that mode's own where
+     * it has one, the plain line's (mode 1's) where not. */
+    struct { unsigned char kind, mode; unsigned request, a, b; } alt[16];   /* kind: 0 start 1 shot 2 end 3 music */
+    unsigned n_alt;
+    int based;                          /* base[] holds the plain lines' values */
+    unsigned base[9];
 };
 
 #define OWN_STOPS_MAX 8
@@ -1160,10 +1168,71 @@ static void own_sounds_stops_tick(void)
 }
 static struct own_sounds own_sounds[MODES_MAX];
 
+/* PAD-1637: `<key>@<m>` - a music mode's own carrier for one of the mode's sounds */
+static int own_sounds_alt(struct own_sounds *S, const char *line)
+{
+    static const char *const keys[4] = { "sound_start@", "sound_shot@", "sound_end@", "music@" };
+    const char *a = 0, *w;
+    unsigned k, m, r, x, y;
+    for (k = 0; k < 4 && !a; k++) {
+        const char *p = line;
+        for (w = keys[k]; *w && *p == *w; w++, p++) ;
+        if (!*w) a = p;
+    }
+    if (!a) return 0;
+    k--;
+    m = (unsigned)num(&a);
+    r = (unsigned)num(&a);
+    x = (unsigned)num(&a);
+    y = (unsigned)num(&a);
+    if (m < 2 || m > 255 || !r || S->n_alt >= 16) {
+        pm_log("%s needs <music mode 2..> <request> (at most 16) - ignored", keys[k]);
+        return 1;
+    }
+    S->alt[S->n_alt].kind = (unsigned char)k;
+    S->alt[S->n_alt].mode = (unsigned char)m;
+    S->alt[S->n_alt].request = r;
+    S->alt[S->n_alt].a = x;
+    S->alt[S->n_alt].b = y;
+    S->n_alt++;
+    return 1;
+}
+
+/* PAD-1637: at a start, the carriers of the music mode now: the plain lines' put back, then that mode's own */
+static void own_sounds_music_mode(struct own_sounds *S)
+{
+    static const char *const words[4] = { "start call", "shot call", "end call", "music" };
+    unsigned m, i;
+    if (!S->n_alt) return;
+    if (!S->based) {
+        S->base[0] = S->start; S->base[1] = S->start_ms; S->base[2] = S->shot; S->base[3] = S->shot_every;
+        S->base[4] = S->shot_ms; S->base[5] = S->end; S->base[6] = S->end_ms; S->base[7] = S->music;
+        S->base[8] = S->music_sid;
+        S->based = 1;
+    }
+    S->start = S->base[0]; S->start_ms = S->base[1]; S->shot = S->base[2]; S->shot_every = S->base[3];
+    S->shot_ms = S->base[4]; S->end = S->base[5]; S->end_ms = S->base[6]; S->music = S->base[7];
+    S->music_sid = S->base[8];
+    m = pm_music_mode();
+    if (m < 2) return;
+    for (i = 0; i < S->n_alt; i++) {
+        if (S->alt[i].mode != m) continue;
+        switch (S->alt[i].kind) {
+        case 0: S->start = S->alt[i].request; S->start_ms = S->alt[i].a; break;
+        case 1: S->shot = S->alt[i].request; S->shot_every = S->alt[i].a ? S->alt[i].a : S->base[3];
+                S->shot_ms = S->alt[i].b; break;
+        case 2: S->end = S->alt[i].request; S->end_ms = S->alt[i].a; break;
+        default: S->music = S->alt[i].request; S->music_sid = S->alt[i].a; break;
+        }
+        pm_log("own sound: music mode %u's own %s rides request %u", m, words[S->alt[i].kind], S->alt[i].request);
+    }
+}
+
 static int own_sounds_key(struct slot *M, const char *line)
 {
     struct own_sounds *S = &own_sounds[M->index];
     const char *a;
+    if (own_sounds_alt(S, line)) return 1;              /* PAD-1637: before `music`, `sound_start`... */
     if ((a = key_is(line, "sound_start")) != 0) { S->start = (unsigned)num(&a); S->start_ms = (unsigned)num(&a); return 1; }
     if ((a = key_is(line, "sound_shot")) != 0) {
         S->shot = (unsigned)num(&a);
@@ -1175,7 +1244,7 @@ static int own_sounds_key(struct slot *M, const char *line)
     if ((a = key_is(line, "music")) != 0) { S->music = (unsigned)num(&a); S->music_sid = (unsigned)num(&a); return 1; }
     if ((a = key_is(line, "sid")) != 0) {           /* PAD-595: a call in a sound bank of the mode's own */
         unsigned r = (unsigned)num(&a), v = (unsigned)num(&a);
-        if (!r || !v || S->n_point >= 8) pm_log("sid needs <request> <sound id> (at most 8) - ignored");
+        if (!r || !v || S->n_point >= 16) pm_log("sid needs <request> <sound id> (at most 16) - ignored");
         else { S->point[S->n_point].request = r; S->point[S->n_point].sid = v; S->n_point++; }
         return 1;
     }
@@ -1191,7 +1260,7 @@ static int own_sounds_key(struct slot *M, const char *line)
             k[n++] = (unsigned char)((hi << 4) | lo);
             a += 2;
         }
-        if (!r || n != 16 || S->n_swap >= 4) {
+        if (!r || n != 16 || S->n_swap >= 12) {
             pm_log("swap needs <request> <stock key> <our key>, 16 hex digits each - ignored");
         } else {
             S->swap[S->n_swap].request = r;
@@ -1230,6 +1299,8 @@ static void own_sounds_clear(struct slot *M)
     S->n_swap = 0;
     S->n_point = 0;                     /* PAD-597: else every reload adds its sid lines again */
     S->shot_until = 0;
+    S->n_alt = 0;                       /* PAD-1637 */
+    S->based = 0;
 }
 
 /* Each sound bus (music, voice, each effect bus) plays one sound at a time, and a request
@@ -1291,6 +1362,7 @@ static void own_sounds_start(struct slot *M)
     int n, i, fading;
     S->music_restarts = 0;
     S->shot_until = 0;
+    own_sounds_music_mode(S);           /* PAD-1637: the carriers of the MUSIC MODE now */
     own_sounds_priorities(S);
     if (S->start) own_call(S->start, own_swap_of(S, S->start), own_sid_of(S, S->start), S->start_ms, own_prio[0], 1500, "start call");
     if (!S->music) return;

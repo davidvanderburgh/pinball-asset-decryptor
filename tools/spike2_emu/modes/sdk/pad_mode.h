@@ -193,6 +193,9 @@ int pm_sound_priority_stock(unsigned request);
  * pm_sound_playing fills up to `max` requests (and their bus bits: 0x01 music, 0x02 voice) of
  * the channels playing now; returns how many play, or -1 when the port has no channel table. */
 int pm_sound_sid(unsigned request, unsigned sid);
+/* PAD-1637: the operator's MUSIC MODE now, 1..n (1 on a card without one): a mode's own sounds can have a file of
+ * their own for each music mode, on carriers of their own (mode_file.c `music@2` and the like) */
+unsigned pm_music_mode(void);
 /* Item 163: a sound of your own with NO stock sound id touched. For ONE play, every lookup of the
  * carrier's own record key `stock` takes `ours` instead - a record the build appended that no
  * descriptor names - and `request` plays at `priority` (no steal flag); the key and priority come

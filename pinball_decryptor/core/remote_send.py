@@ -738,6 +738,9 @@ pad_say() {
 pad_resume() {
   touch $W/done
   for p in $(pids_named boot_display) $(pids_named jimg); do kill $p 2>/dev/null; done
+  c=$(cat $W/menu 2>/dev/null)
+  [ -n "$c" ] && kill -CONT $c 2>/dev/null
+  rm -f $W/menu
   m=$(cat $W/monitor 2>/dev/null)
   if [ -z "$m" ]; then echo "PAD_SEND_NOT_RUNNING"; return 0; fi
   old=" $(cat $W/game 2>/dev/null) "
@@ -807,6 +810,12 @@ for p in $m; do
   done
 done
 [ -n "$g" ] && kill -9 $g
+# Simon (2026-11-26): "This flickering is happening when the card is being updated" - a test card's menu (or a
+# multi-boot card's) is not a game: it kept drawing beside the message screen.  It is frozen, not ended: ended, its
+# select.sh would stop the menu network (padnet) the Send is using
+c=$(pids_named codeselect)
+echo "$c" > $W/menu
+[ -n "$c" ] && kill -STOP $c
 sleep 1
 # PAD-1587: a game the loop started as the hold began (its restart and the hold crossed) is ended too, so no game
 # runs on files a Send changes; the loop is stopped now, so none comes after it
@@ -3338,6 +3347,11 @@ _TESTCARD_ON = re.compile(rb"^[ \t]*testcard[ \t]*=[ \t]*on[ \t]*\r?$", re.M)
 TESTCARD_ONLY = ("This is a PAD test card, and the machine isn't running one: a Send makes the machine's "
                  "/games what the image has, so its game would be deleted. Write this test card to an SD card "
                  "for that machine; once it runs one, its test card can be sent over the network.")
+#: Simon (2026-11-26): "create a card which is only a test card no multiboot (over the network)" - a machine running
+#: a PAD multi-boot card may have it replaced by a test card, but only when the user was asked (Send to machine...)
+TESTCARD_OVER_MENU = ("This is a PAD test card, and the machine runs a PAD multi-boot card: a Send makes the "
+                      "machine's /games what the image has, so its games would be deleted. Send it from the Test "
+                      "card tab's Send to machine..., which asks before it replaces the multi-boot card.")
 
 
 def is_test_card(target):
@@ -3352,16 +3366,27 @@ def is_test_card(target):
         return False
 
 
-def check_test_card_target(target, machine):
+def machine_card_kind(machine):
+    """What the machine runs: "testcard" (a PAD test card), "menu" (a PAD multi-boot card: the boot menu's list on
+    its system partition) or "game" (a one-game card)."""
+    _rc, text = machine.sh("if grep -qE '^[[:space:]]*testcard[[:space:]]*=[[:space:]]*on[[:space:]]*$' %s; then "
+                           "echo PAD_TESTCARD; elif [ -f %s ]; then echo PAD_MENU_CARD; fi"
+                           % (TESTCARD_CONF, TESTCARD_CONF), check=False)
+    text = text or ""
+    return "testcard" if "PAD_TESTCARD" in text else "menu" if "PAD_MENU_CARD" in text else "game"
+
+
+def check_test_card_target(target, machine, replace_menu_card=False):
     """Simon (2026-11-22): a test card updated over the network.  Sending one to a machine running a GAME card
     would delete the game (a full Send makes /games the image's), so a test card goes only to a machine that runs
-    a test card already."""
+    a test card already - or, Simon (2026-11-26), to one running a PAD multi-boot card when *replace_menu_card*
+    says the user was asked and said yes."""
     if not is_test_card(target):
         return
-    _rc, text = machine.sh("grep -qE '^[[:space:]]*testcard[[:space:]]*=[[:space:]]*on[[:space:]]*$' %s "
-                           "&& echo PAD_TESTCARD" % TESTCARD_CONF, check=False)
-    if "PAD_TESTCARD" not in (text or ""):
-        raise SendError(TESTCARD_ONLY)
+    kind = machine_card_kind(machine)
+    if kind == "testcard" or (kind == "menu" and replace_menu_card):
+        return
+    raise SendError(TESTCARD_OVER_MENU if kind == "menu" else TESTCARD_ONLY)
 
 
 def _is_iso(path):
@@ -3369,9 +3394,10 @@ def _is_iso(path):
     return is_iso(path)
 
 
-def send_image(image, machine, log=None, progress=None, cancel=None):
+def send_image(image, machine, log=None, progress=None, cancel=None, replace_menu_card=False):
     """Send *image* to *machine*: the quick Send when it is a build of the card the machine runs, else the full
-    one.  Returns a summary line."""
+    one.  Returns a summary line.  *replace_menu_card*: a test card may replace a PAD multi-boot card (the user
+    was asked)."""
     log = log or (lambda *a, **k: None)
     from . import remote_send_jjp
     if remote_send_jjp.is_build(image) or _is_iso(image):
@@ -3379,7 +3405,7 @@ def send_image(image, machine, log=None, progress=None, cancel=None):
         return remote_send_jjp.send_build(image, machine, log, progress, cancel)
     with open_target(image, log) as target:
         check_layout(target, machine.layout())
-        check_test_card_target(target, machine)
+        check_test_card_target(target, machine, replace_menu_card)
         # PAD-1427 (David: "I'm concerned about letting the game run while we are doing updates and I want to make
         # sure we have a clean isolated update path"): the game is held, the machine's screen saying PAD is updating
         # it, before the Send reads or changes anything of the card - nothing of a Send runs beside a game
@@ -3421,9 +3447,11 @@ _PHASE_OF = (("Comparing", 1), ("Updating", 2), ("Uploading", 2), ("Writing", 2)
 class SendPipeline(BasePipeline):
     """A Send as one of the app's runs: its log, its progress bar, its Cancel (the Write tab's)."""
 
-    def __init__(self, image, address, log_cb, phase_cb, progress_cb, done_cb, connect_fn=None, backup_keep=None):
+    def __init__(self, image, address, log_cb, phase_cb, progress_cb, done_cb, connect_fn=None, backup_keep=None,
+                 replace_menu_card=False):
         super().__init__(log_cb, phase_cb, progress_cb, done_cb)
         self.image, self.address = image, address
+        self.replace_menu_card = bool(replace_menu_card)
         # PAD-1588: the machine's settings backed up before anything is sent (None: the owner turned that off)
         self.backup_keep = backup_keep
         self._connect = connect_fn or connect
@@ -3462,7 +3490,10 @@ class SendPipeline(BasePipeline):
                 machine_backups.before_send(machine, self.backup_keep, self._log)
             if hasattr(machine, "widen"):
                 machine.widen(self._log)
-            summary = send_image(self.image, machine, self._log, self._send_progress, lambda: self._cancelled)
+            # only when set: a test card replacing a PAD multi-boot card (the Test card tab asked)
+            more = {"replace_menu_card": True} if self.replace_menu_card else {}
+            summary = send_image(self.image, machine, self._log, self._send_progress, lambda: self._cancelled,
+                                 **more)
         except SendError as e:
             raise PipelineError("Send", str(e)) from None
         finally:

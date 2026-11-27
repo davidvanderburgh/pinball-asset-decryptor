@@ -22,7 +22,10 @@ from .. import compat
 from .. import testcard_core as tc
 from ...core import pad_temp
 
-KIND_ORDER = {k: n for n, k in enumerate(tc.KINDS)}
+# Simon (2026-11-26): "Layered tests have their own area rather than being grouped into videos" - their own list,
+# after the scenes, as on the machine's TEST CARD menu (LAYERED SCENE TESTS)
+SHOWN_KINDS = ("image", "video", "scene", "layered", "sound")
+KIND_ORDER = {k: n for n, k in enumerate(SHOWN_KINDS)}
 CARD_TYPES = [("Card images", "*.raw *.img"), ("All files", "*.*")]
 
 
@@ -54,7 +57,7 @@ class TestCardTab(TabService):
         lst = tc.shared()
         rows = []
         for i, it in enumerate(lst.items):
-            rows.append({"i": i, "kind": it.kind, "label": it.label,
+            rows.append({"i": i, "kind": "layered" if it.layers else it.kind, "label": it.label,
                          "from": it.game or os.path.basename(it.project.rstrip("/\\")) if it.project else "",
                          "where": (it.rel if it.project else it.path) + (
                              # the layered test: the scenes drawn over the clip
@@ -139,8 +142,16 @@ class TestCardTab(TabService):
         self._pub()
         return True
 
-    def _say(self, line):
+    def _say(self, line, level=None):
+        # *level*: the card helpers' log(text, level) (ssh_card.say_who_gets_in, menu_network, wifi_card) - Simon
+        # (2026-11-26): "remote access could not be added: TestCardTab._say() takes 2 positional arguments but 3
+        # were given"; the build's own log is plain lines
         self._lines.append(line)
+        # Simon (2026-11-26): "It takes a really long time to make the test card with no feedback that anything is
+        # going on" - while the items are made, each line is the step under the progress bar too (the log itself
+        # is shut away under "What it did")
+        if self._busy and isinstance(line, str) and line.startswith("test card: "):
+            self._step = line[len("test card: "):]
         self._pub_soon()
 
     def _pub_soon(self, now=None):
@@ -226,14 +237,49 @@ class TestCardTab(TabService):
             raise RpcError("Find the machine on the Network tab first: the test card goes to the machine there")
         if self.window.cb.get("on_send_image") is None:
             raise RpcError("Send to machine is not available here")
-        if not compat.messagebox.askyesno(
-                "Send test card to machine",
-                "Build the test card and send it to the machine at %s?\n\nThe machine must be running a PAD "
-                "test card already (a game card is refused: its game would be deleted). Only the files that "
-                "differ are copied, then the machine restarts into the test card menu; leave it switched on "
-                "until then." % address, icon="warning"):
+        # Simon (2026-11-26): "create a card which is only a test card no multiboot (over the network)" - what the
+        # machine runs is read first: a test card is updated, a PAD multi-boot card may be replaced (asked), a
+        # one-game card is refused (its game would be deleted)
+        from ...core import remote_send as rs
+        try:
+            machine = rs.connect(address)
+            try:
+                kind = rs.machine_card_kind(machine)
+            finally:
+                machine.close()
+        except rs.SendError as e:
+            raise RpcError(str(e)) from None
+        if kind == "game":
+            raise RpcError(rs.TESTCARD_ONLY)
+        ready = tc.built_card(lst)
+        out = lst.out if lst.out and os.path.isdir(os.path.dirname(os.path.abspath(lst.out))) and \
+            os.path.normcase(os.path.abspath(lst.out)) != os.path.normcase(os.path.abspath(lst.source)) else ""
+        if ready:
+            first = ("The test card built as %s goes as it is: nothing in the list has changed since it was built."
+                     % ready)
+        elif out:
+            first = "The test card is built first, as %s (replacing that file)." % out
+        else:
+            first = "The test card is built first (you are asked where to save it)."
+        if kind == "menu":
+            ask = ("Replace the multi-boot card on the machine at %s with this test card?\n\nThe machine runs a "
+                   "PAD multi-boot card. Its menu and every game on it are deleted: afterwards the machine has only "
+                   "the test card. Its remote access and settings are kept. Only the files that differ are copied, "
+                   "then the machine restarts into the test card menu; leave it switched on until then.\n\nTo "
+                   "have the games again, build the multi-boot card and write it to an SD card.\n\n%s"
+                   % (address, first))
+        else:
+            ask = ("Send the test card to the machine at %s?\n\n%s\n\nThe machine runs a PAD test card. Only the "
+                   "files that differ are copied, then the machine restarts into the test card menu; leave it "
+                   "switched on until then." % (address, first))
+        if not compat.messagebox.askyesno("Send test card to machine", ask, icon="warning"):
             return False
-        return self.build(send_to=address)
+        self._replace_menu_card = kind == "menu"
+        if ready:
+            self._send_to = address
+            self._finish(True, "", ready)
+            return True
+        return self.build(send_to=address, out=out)
 
     @rpc
     def grow(self):
@@ -275,15 +321,16 @@ class TestCardTab(TabService):
         return True
 
     @rpc
-    def build(self, send_to=""):
-        """Build test card… (and, from Send to machine…, send it to *send_to* once built)"""
+    def build(self, send_to="", out=""):
+        """Build test card… (and, from Send to machine…, send it to *send_to* once built; *out*: where, without
+        asking - Send to machine… builds over the last card it built)"""
         if self._busy:
             return False
         lst = tc.shared()
         if not lst.source or not os.path.isfile(lst.source):
             raise RpcError("Pick a Stern Spike 2 or Spike 3 card image first: the test card is made from it")
         start = lst.out or os.path.join(os.path.dirname(lst.source), "pad_test_card.raw")
-        out = compat.filedialog.asksaveasfilename(
+        out = str(out or "") or compat.filedialog.asksaveasfilename(
             title="Save the test card as", initialdir=os.path.dirname(start) or None,
             initialfile=os.path.basename(start), defaultextension=".raw", filetypes=CARD_TYPES)
         if not out:
@@ -299,6 +346,7 @@ class TestCardTab(TabService):
         self._msg = ("", "")
         self._pub()
         self._send_to = str(send_to or "")
+        self._build_sig = tc.build_signature(lst, items)
         threading.Thread(target=self._run, args=(lst.source, out, items, dict(lst.network)), daemon=True,
                          name="testcard").start()
         return True
@@ -469,6 +517,12 @@ class TestCardTab(TabService):
         self._busy, self._proc, self._pct, self._step = False, None, (100 if ok else None), ""
         self._last_pub = 0.0
         send_to, self._send_to = getattr(self, "_send_to", ""), ""
+        sig, self._build_sig = getattr(self, "_build_sig", ""), ""
+        if ok and sig and os.path.isfile(out):
+            try:
+                tc.note_built(tc.shared(), out, sig)
+            except OSError:
+                pass
         if ok and send_to:
             # the app's own Send (the Network tab's): its progress, log and finish are the app's
             self._msg = ("ok", "Test card built: %s. Sending it to the machine at %s: the status bar and the "
@@ -476,8 +530,12 @@ class TestCardTab(TabService):
                          % (out, send_to))
             self._pub_soon()
             fn = self.window.cb.get("on_send_image")
+            replace, self._replace_menu_card = getattr(self, "_replace_menu_card", False), False
             if fn is not None:
-                fn(out, send_to)
+                if replace:
+                    fn(out, send_to, replace_menu_card=True)
+                else:
+                    fn(out, send_to)
             return
         if ok:
             size = os.path.getsize(out) / float(1 << 30) if os.path.exists(out) else 0

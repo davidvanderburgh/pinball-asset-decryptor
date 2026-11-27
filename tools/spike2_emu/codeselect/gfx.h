@@ -36,6 +36,9 @@ void gfx_round_frame(struct gfx *g, int x, int y, int w, int h, int r, int t,
 void gfx_gear(struct gfx *g, int cx, int cy, int r, unsigned rgb);
 /* alpha-blend a w x h RGBA image (tightly packed rows) at x, y; clipped */
 void gfx_blit(struct gfx *g, int x, int y, const unsigned char *rgba, int w, int h);
+/* gfx_blit of the part rx, ry, rw x rh of that image alone, where it falls with the image at x, y */
+void gfx_blit_part(struct gfx *g, int x, int y, const unsigned char *rgba, int w, int h,
+                   int rx, int ry, int rw, int rh);
 
 struct gfx_font *gfx_font_load(const char *path);     /* NULL on failure */
 void gfx_font_free(struct gfx_font *f);

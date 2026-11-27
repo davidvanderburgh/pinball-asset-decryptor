@@ -360,6 +360,8 @@ def main():
                 "color_profile=0|1.10 1.20 1.35|1.00 1.00 1.00|0.00 0.00 0.00|0.90|Recommended\n"
                 "testcard=on\ntest_dir=%s\ntest_image=art0.png|Red square\ntest_video=clip.padv|Clip\n"
                 "test_video=bad.padv|Too big\ntest_scene=art0.png|Scene one\n"
+                # PR #52: a layered test (with its .pado beside it or not) is a list of its own
+                "test_layered=clip.padv|Layered clip\n"
                 "test_sound=art0.png|Not a sound\n" % tdir)
     tvals = os.path.join(t, "testcard.color")
     tout = os.path.join(t, "testcard.choice")
@@ -381,20 +383,25 @@ def main():
             + ["right", "start", "start", "action", "action"]     # IMAGES: Red square
             + ["right", "start", "start", "wait", "right", "action", "action"]   # VIDEOS: Clip, Too big
             + ["right", "start", "start", "action", "action"]     # SCENES: Scene one
+            + ["right", "start", "start", "hold", "action"]       # LAYERED SCENE TESTS: Layered clip
             + ["right", "start", "action"]                        # SOUNDS: none - nothing happens
             + ["right", "start",                                  # COLOR CORRECTION
                "right", "start", "right", "start",                # BRIGHTNESS +1
                ] + ["right"] * 11 + ["start"]                     # 1 -> 12 = SAVE
             + ["action"]                                          # ACTION: leave, back to the menu
-            + ["right"])                                          # six entries: round to the first
+            + ["right"])                                          # seven entries: round to the first
     for button in walk:
         if button == "wait":
             time.sleep(2.5)
             continue
+        # a playing clip: a quick ACTION freezes it, ACTION held (TEST_HOLD_BACK_MS, 700 ms) backs out
+        held = button == "hold"
+        if held:
+            button = "action"
         with open(tsw, "r+b") as f:
             f.seek(OFF_CAB + CAB_IDX[button])
             f.write(b"\x01")
-        time.sleep(0.15)
+        time.sleep(1.2 if held else 0.15)
         with open(tsw, "r+b") as f:
             f.seek(OFF_CAB + CAB_IDX[button])
             f.write(b"\x00")
@@ -422,14 +429,17 @@ def main():
                  "[select] test: the video is 4000x48, the screen 1360x768",
                  "[select] menu: SCENES (1)",
                  "[select] test: 1/1 Scene one (art0.png)",
+                 "[select] menu: LAYERED SCENE TESTS (1)",
+                 "[select] test: 1/1 Layered clip (clip.padv)",
+                 "[select] test: ACTION held: back",
                  "[select] menu: SOUNDS: none on this card",
                  "[select] settings: color correction, 1 adjustable image, on image 0 (TEST CARD)",
                  "[select] color: image 0 (TEST CARD) saved: ",
                  "[select] settings: left color correction"):
         if want not in o:
             fail("(testcard) no %r" % want, o, e)
-    if o.count("[select] menu: back") != 4:
-        fail("(testcard) ACTION backed out to the menu %d times, expected 4" % o.count("[select] menu: back"),
+    if o.count("[select] menu: back") != 5:
+        fail("(testcard) ACTION backed out to the menu %d times, expected 5" % o.count("[select] menu: back"),
              o, e)
     if "not a file that list shows" not in o + e:
         fail("(testcard) test_sound=art0.png was not refused", o, e)

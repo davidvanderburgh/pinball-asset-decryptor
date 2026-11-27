@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdint.h>
 #include <errno.h>
 #include <math.h>
 #include <unistd.h>
@@ -76,10 +77,11 @@ enum screen { S_LIST, S_COLOR, S_TEST, S_DONE, S_MENU, S_PICK };
  * VIDEOS / SCENES / SOUNDS"), and Color correction after them when the card
  * has a profile to tune.  G_FLAT is the multi-boot card's one list of
  * everything (Settings > Test pictures). */
-enum { G_CARD, G_IMAGES, G_VIDEOS, G_SCENES, G_SOUNDS, G_COLOR, G_NMENU, G_FLAT = -1 };
+/* Simon (2026-11-26): LAYERED SCENE TESTS, the layered tests' own list (a clip with scenes over it), after SCENES */
+enum { G_CARD, G_IMAGES, G_VIDEOS, G_SCENES, G_LAYERED, G_SOUNDS, G_COLOR, G_NMENU, G_FLAT = -1 };
 static const char *const G_TITLE[G_NMENU] = { "DEFAULT PAD TEST CARD", "IMAGES", "VIDEOS",
-                                              "SCENES", "SOUNDS", "COLOR CORRECTION" };
-static const char *const G_ONE[G_NMENU] = { "pattern", "picture", "video", "scene", "sound", "" };
+                                              "SCENES", "LAYERED SCENE TESTS", "SOUNDS", "COLOR CORRECTION" };
+static const char *const G_ONE[G_NMENU] = { "pattern", "picture", "video", "scene", "layered test", "sound", "" };
 /* the viewer's BACK entry (the flat list only) */
 #define T_BACK (TP_NBUILTIN + CONF_MAX_TESTS)
 #define T_MAX (TP_NBUILTIN + CONF_MAX_TESTS + 1)
@@ -128,6 +130,7 @@ struct state {
     int t_fw_s[FPS_WIN], t_fw_i, t_fw_n;
     long long t_fw_due, t_cap_due;
     const struct art_image *t_ovl_shown;     /* the scene's picture on the canvas now */
+    int t_ovl_x, t_ovl_y;                    /* ... and where, on the canvas */
     long long t_perf_due, t_draw_ms;         /* the video's 5 s account in the log */
     int t_draws;
     /* Simon (2026-11-22): on a moving test item "quick press to freeze, long press to back
@@ -377,6 +380,7 @@ static int group_of_kind(int kind)
     case TK_VIDEO: return G_VIDEOS;
     case TK_SCENE: return G_SCENES;
     case TK_SOUND: return G_SOUNDS;
+    case TK_LAYERED: return G_LAYERED;
     }
     return -2;
 }
@@ -900,6 +904,77 @@ static long long scene_ms(const struct state *st, long long now)
     return now - st->t_vstart;
 }
 
+/* where two pictures of the same size differ: 0 when they do not, else 1 and the rectangle (in the pictures) */
+static int picture_diff(const struct art_image *a, const struct art_image *b, int *rx, int *ry, int *rw, int *rh)
+{
+    size_t row = (size_t)a->w * 4;
+    int y0 = -1, y1 = -1, x0 = a->w, x1 = -1, y;
+    for (y = 0; y < a->h; y++)
+        if (memcmp(a->rgba + row * y, b->rgba + row * y, row)) { if (y0 < 0) y0 = y; y1 = y; }
+    if (y0 < 0) return 0;
+    for (y = y0; y <= y1; y++) {
+        const uint32_t *p = (const uint32_t *)(const void *)(a->rgba + row * y);
+        const uint32_t *q = (const uint32_t *)(const void *)(b->rgba + row * y);
+        int l = 0, r = a->w - 1;
+        while (l < x0 && p[l] == q[l]) l++;
+        if (l < x0) x0 = l;
+        while (r > x1 && p[r] == q[r]) r--;
+        if (r > x1) x1 = r;
+    }
+    if (x1 < x0) return 0;
+    *rx = x0; *ry = y0; *rw = x1 - x0 + 1; *rh = y1 - y0 + 1;
+    return 1;
+}
+
+static void unite(int *x0, int *y0, int *x1, int *y1, int x, int y, int w, int h)
+{
+    if (w <= 0 || h <= 0) return;
+    if (*x1 <= *x0 || *y1 <= *y0) { *x0 = x; *y0 = y; *x1 = x + w; *y1 = y + h; return; }
+    if (x < *x0) *x0 = x;
+    if (y < *y0) *y0 = y;
+    if (x + w > *x1) *x1 = x + w;
+    if (y + h > *y1) *y1 = y + h;
+}
+
+/* THE LAYERED TEST'S NEXT PICTURE, over a clip the graphics chip draws: only where it differs from the one shown.
+ * Simon (2026-11-27, the table): "still had the frame rate problem" - the menu's own log: while the Match digit
+ * zooms in (a new picture a frame), 27 of 57 frames late, against 17 of 121 before it.  Each new picture painted
+ * the whole canvas again (black, the clip's hole, the picture blended a pixel at a time - and, with the caption up,
+ * the whole test screen) and sent the whole screen to the graphics chip: ~1M pixels on the Cortex-A9 for a digit.
+ * Now only the rectangle where the old and new pictures differ is painted and sent; the caption band again only
+ * when that rectangle reaches it. */
+static void repaint_overlay(struct state *st, const struct art_image *was, int wx, int wy,
+                            const struct art_image *im, int ix, int iy, int cw, int ch)
+{
+    struct settings_env *e = st->e;
+    int W = e->g->w, H = e->g->h, cx = (W - cw) / 2, cy = (H - ch) / 2;
+    int vx = (W - st->t_vw) / 2, vy = (H - st->t_vh) / 2;
+    int x0 = 0, y0 = 0, x1 = 0, y1 = 0, rx, ry, rw, rh, a0, b0, a1, b1;
+    if (was && im && wx == ix && wy == iy && was->w == im->w && was->h == im->h) {
+        if (picture_diff(was, im, &rx, &ry, &rw, &rh)) unite(&x0, &y0, &x1, &y1, cx + ix + rx, cy + iy + ry, rw, rh);
+    } else {
+        if (was) unite(&x0, &y0, &x1, &y1, cx + wx, cy + wy, was->w, was->h);
+        if (im) unite(&x0, &y0, &x1, &y1, cx + ix, cy + iy, im->w, im->h);
+    }
+    st->t_ovl_shown = im;
+    st->t_ovl_x = ix;
+    st->t_ovl_y = iy;
+    /* inside the canvas */
+    if (x0 < cx) x0 = cx;
+    if (y0 < cy) y0 = cy;
+    if (x1 > cx + cw) x1 = cx + cw;
+    if (y1 > cy + ch) y1 = cy + ch;
+    if (x1 <= x0 || y1 <= y0) return;
+    gfx_rect(e->g, x0, y0, x1 - x0, y1 - y0, 0x000000);
+    /* the clip's hole, where it falls in the rectangle */
+    a0 = x0 > vx ? x0 : vx; b0 = y0 > vy ? y0 : vy;
+    a1 = x1 < vx + st->t_vw ? x1 : vx + st->t_vw; b1 = y1 < vy + st->t_vh ? y1 : vy + st->t_vh;
+    if (a1 > a0 && b1 > b0) gfx_clear(e->g, a0, b0, a1 - a0, b1 - b0);
+    if (im) gfx_blit_part(e->g, cx + ix, cy + iy, im->rgba, im->w, im->h,
+                          x0 - (cx + ix), y0 - (cy + iy), x1 - x0, y1 - y0);
+    if (st->t_caption && y1 > H - (int)(96 * S(e))) draw_caption(st, 1);
+}
+
 /* THE LAYERED TEST (overlay.h): the scene's frame for the clip's time, over the clip,
  * after the colour correction - the scene is the game's own drawing, not the picture
  * under test; the canvas is centred on the screen, as the clip is */
@@ -911,6 +986,8 @@ static void draw_overlay(struct state *st, long long now)
     if (!st->t_ovl) return;
     im = ovl_at(st->t_ovl, scene_ms(st, now), &x, &y);
     st->t_ovl_shown = im;
+    st->t_ovl_x = x;
+    st->t_ovl_y = y;
     if (!im) return;
     ovl_canvas(st->t_ovl, &cw, &ch);
     gfx_blit(e->g, (e->g->w - cw) / 2 + x, (e->g->h - ch) / 2 + y, im->rgba, im->w, im->h);
@@ -1046,15 +1123,12 @@ static void draw_test_frame(struct state *st)
         /* the frame went to the graphics chip already (test_tick): the canvas changes
          * only when the scene over it moves to another picture */
         int ox, oy, cw, ch;
+        const struct art_image *was = st->t_ovl_shown;
         if (!st->t_ovl || !st->t_vw) return;
-        if (ovl_at(st->t_ovl, scene_ms(st, sel_now_ms()), &ox, &oy) == st->t_ovl_shown) return;
+        im = ovl_at(st->t_ovl, scene_ms(st, sel_now_ms()), &ox, &oy);
+        if (im == was) return;
         ovl_canvas(st->t_ovl, &cw, &ch);
-        x = (W - st->t_vw) / 2;
-        y = (H - st->t_vh) / 2;
-        gfx_rect(e->g, (W - cw) / 2, (H - ch) / 2, cw, ch, 0x000000);
-        gfx_clear(e->g, x, y, st->t_vw, st->t_vh);
-        draw_overlay(st, sel_now_ms());
-        if (st->t_caption && y + st->t_vh > H - (int)(96 * S(e))) draw_test(st);
+        repaint_overlay(st, was, st->t_ovl_x, st->t_ovl_y, im, ox, oy, cw, ch);
         return;
     }
     im = st->t_vid ? vid_current(st->t_vid) : art_anim_frame(st->t_anim, st->t_frame);
@@ -1083,8 +1157,10 @@ static void draw_menu(struct state *st)
     struct settings_env *e = st->e;
     float s = S(e);
     int W = e->g->w, k, n = menu_count(st);
-    int rw = (int)(820 * s), rh = (int)(80 * s), gap = (int)(14 * s), x = (W - rw) / 2;
-    int y0 = (int)((n > 5 ? 128 : 150) * s);
+    /* seven rows (LAYERED SCENE TESTS and COLOR CORRECTION both there) are shorter, to stay above the footer */
+    int rw = (int)(820 * s), rh = (int)((n > 6 ? 68 : 80) * s), gap = (int)((n > 6 ? 10 : 14) * s);
+    int x = (W - rw) / 2;
+    int y0 = (int)((n > 6 ? 118 : n > 5 ? 128 : 150) * s);
     char sub[200];
 
     gfx_fill(e->g, TH(e, BACKGROUND));
@@ -1101,9 +1177,9 @@ static void draw_menu(struct state *st)
             snprintf(sub, sizeof sub, "%d %s%s", cnt, G_ONE[k], cnt == 1 ? "" : "s");
         gfx_round_frame(e->g, x, y, rw, rh, (int)(20 * s), (int)((on ? 7 : 3) * s),
                         on ? TH(e, FRAME_HL) : TH(e, FRAME), on ? TH(e, CARD_HL) : TH(e, CARD));
-        text_fit(e, G_TITLE[k], 34 * s, 20 * s, rw - (int)(60 * s), W / 2, y + (int)(38 * s), 0,
-                 !cnt ? TH(e, SUBTITLE) : on ? TH(e, TITLE_HL) : TH(e, TITLE));
-        text_fit(e, sub, 22 * s, 14 * s, rw - (int)(60 * s), W / 2, y + (int)(66 * s), 0,
+        text_fit(e, G_TITLE[k], (n > 6 ? 30 : 34) * s, 20 * s, rw - (int)(60 * s), W / 2,
+                 y + rh * 38 / 80, 0, !cnt ? TH(e, SUBTITLE) : on ? TH(e, TITLE_HL) : TH(e, TITLE));
+        text_fit(e, sub, (n > 6 ? 20 : 22) * s, 14 * s, rw - (int)(60 * s), W / 2, y + rh * 66 / 80, 0,
                  on ? TH(e, SUBTITLE_HL) : TH(e, SUBTITLE));
     }
     draw_footer(e, e->leave ? K_MOVE ": choose      " K_GO ": open      " K_BACK ": back to the games"
@@ -1476,7 +1552,7 @@ int settings_snapshot(struct settings_env *e, const char *screen, int row, int e
     memset(&st, 0, sizeof st);
     st.e = e;
     st.move_voice = -1;
-    static const char *const GNAME[G_COLOR] = { "card", "images", "videos", "scenes", "sounds" };
+    static const char *const GNAME[G_COLOR] = { "card", "images", "videos", "scenes", "layered", "sounds" };
     const char *colon = strchr(screen, ':');
     int group = e->testcard ? G_CARD : G_FLAT, k;
     size_t base = colon ? (size_t)(colon - screen) : strlen(screen);
@@ -1486,7 +1562,8 @@ int settings_snapshot(struct settings_env *e, const char *screen, int row, int e
             if (!strcmp(colon + 1, GNAME[k])) found = k;
         group = found;
         if (found < 0) {
-            snprintf(why, (size_t)whylen, "--screen %s: after ':' comes card, images, videos, scenes or sounds",
+            snprintf(why, (size_t)whylen,
+                     "--screen %s: after ':' comes card, images, videos, scenes, layered or sounds",
                      screen);
             return -1;
         }

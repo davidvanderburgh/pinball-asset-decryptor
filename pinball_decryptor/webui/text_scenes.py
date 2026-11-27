@@ -30,6 +30,11 @@ from ..core import pad_temp
 
 log = logging.getLogger(__name__)
 
+
+def LT_KEY(spec):
+    """A layered test's scene spec's hash part: '9d578751@MatchFrame' -> '9d578751' (plugins/stern/layered_test)."""
+    return str(spec).partition("@")[0].strip().lower()
+
 _RADIMG_NAME = re.compile(r"^radimg_(.+)_\d+x\d+_[0-9a-f]{8}\.png$",
                           re.IGNORECASE)
 #: A TMNT static loop is ~1900 frames; the preview plays the first 60.
@@ -1077,35 +1082,166 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
     # build draws the scenes per clip frame (plugins/stern/layered_test.py) and the machine plays the clip through
     # its own decoder with them on top.
     @rpc
-    def layered_options(self):
-        """What the Layered test… dialog offers: the shown scene, every scene, the project's videos (the shown
-        scene's own first), or ``why`` it cannot be made here."""
+    def layered_options(self, index=None):
+        """What the Layered test… dialog offers: every scene (with words to search by), the project's videos, and -
+        editing the layered test at list *index* - its scenes, video, video player state and name; or ``why`` it
+        cannot be made here.
+
+        Simon (2026-11-26): "user could have ticked loads to check and then wants a layered test... when we click
+        layered test it is the whole selection, we can choose any scenes and multiple" - a new one starts empty, not
+        from the TEST ticks (those are the card's still scenes)."""
         from . import testcard_core as tc
         if not tc.available(getattr(self.window, "current_mfr", None)):
             return {"why": "Test cards are for Stern Spike 2 and Spike 3 games."}
-        d = getattr(self, "_sel", None)
-        if not self.assets_dir or not d or d not in self._scenes:
-            return {"why": "Pick a scene in the list first."}
-        scenes = [{"d": k, "label": v.get("label") or os.path.basename(k), "hash": os.path.basename(k)[:8]}
-                  for k, v in sorted(self._scenes.items(), key=lambda kv: (kv[1].get("label") or "").lower())]
-        own = list(self._scenes[d].get("videos") or [])
+        if not self.assets_dir or not self._scenes:
+            return {"why": "Open a project with scenes first."}
+        editing = None
+        if index is not None:
+            got = dict(tc.shared().layered()).get(int(index))
+            if got is None:
+                return {"why": "That layered test is no longer on the list."}
+            if tc.norm_dir(got.project) != tc.norm_dir(self.assets_dir):
+                return {"why": "That layered test is from another project (%s): open it to edit the test."
+                        % (got.game or got.project)}
+            editing = got
+        start = []
+        if editing is not None:
+            for spec in editing.layers:
+                k = next((k for k in self._scenes if os.path.basename(k).lower().startswith(LT_KEY(spec))), None)
+                if k:
+                    start.append((k, spec.partition("@")[2]))
+
+        def one(k):
+            v = self._scenes.get(k) or {}
+            return {"d": k, "label": v.get("label") or os.path.basename(k), "hash": os.path.basename(k)[:8]}
+        scenes = []
+        for k, v in sorted(self._scenes.items(), key=lambda kv: (kv[1].get("label") or "").lower()):
+            row = one(k)
+            # what the search matches besides the name and hash: the scene's own lines of text
+            row["words"] = " · ".join(t.replace("\n", " ") for t in (v.get("texts") or []) if t)[:600]
+            scenes.append(row)
+        own = set()
+        for k, _pin in start:
+            own.update((self._scenes.get(k) or {}).get("videos") or [])
         clips = []
         vdir = os.path.join(self.assets_dir, "video")
         for root, _dirs, files in os.walk(vdir):
             for f in files:
                 if os.path.splitext(f)[1].lower() in tc.VIDEO_EXTS:
                     rel = os.path.relpath(os.path.join(root, f), self.assets_dir).replace("\\", "/")
-                    clips.append({"rel": rel, "label": os.path.splitext(f)[0], "own": rel in own})
+                    clips.append({"rel": rel, "label": os.path.splitext(f)[0], "file": f, "own": rel in own})
         clips.sort(key=lambda c: (not c["own"], c["label"].lower()))
-        return {"why": "" if clips else "This project has no videos to put under the scenes (Extract its videos).",
-                "scene": {"d": d, "label": self._scenes[d].get("label") or os.path.basename(d),
-                          "hash": os.path.basename(d)[:8]},
-                "scenes": scenes, "clips": clips, "clip": clips[0]["rel"] if clips and clips[0]["own"] else ""}
+        out = {"why": "" if clips else "This project has no videos to put under the scenes (Extract its videos).",
+               "start": [dict(one(k), pin=pin) for k, pin in start],
+               "scenes": scenes, "clips": clips, "clip": "", "index": None}
+        if editing is not None:
+            out.update(index=int(index), clip=editing.rel, player=editing.player, label=editing.label,
+                       plain=editing.plain)
+        return out
+
+    def _layered_rows(self):
+        """The layered tests on the Test card tab's list, for the Scenes tab's own list of them (Edit, remove)."""
+        from . import testcard_core as tc
+        rows = []
+        for i, it in tc.shared().layered():
+            mine = bool(self.assets_dir) and tc.norm_dir(it.project) == tc.norm_dir(self.assets_dir)
+            names = []
+            for spec in it.layers:
+                key = LT_KEY(spec)
+                hit = next((v.get("label") or os.path.basename(k) for k, v in (self._scenes or {}).items()
+                            if os.path.basename(k).startswith(key)), None) if mine else None
+                names.append((hit or key) + ("@" + spec.partition("@")[2] if "@" in spec else ""))
+            rows.append({"i": i, "label": it.label, "clip": os.path.basename(it.rel or it.path or ""),
+                         "player": it.player, "scenes": names, "mine": mine, "plain": it.plain,
+                         "game": it.game or os.path.basename((it.project or "").rstrip("/\\"))})
+        return rows
+
+    def _tc_publish(self):
+        """The TEST column, and the layered tests' own list (Simon, 2026-11-26: "Each one in the list has an edit
+        button and a bin button")."""
+        from . import testcard_core as tc
+        super()._tc_publish()
+        try:
+            self.set(layered=self._layered_rows(), layered_max=tc.MAX_LAYERED)
+        except Exception:                                       # noqa: BLE001
+            log.exception("layered tests")
 
     @rpc
-    def add_layered(self, layers, clip_rel, label=""):
+    def layered_remove(self, i):
+        """The bin button: layered test *i* off the Test card tab's list."""
+        from . import testcard_core as tc
+        lst = tc.shared()
+        if int(i) in dict(lst.layered()) and lst.remove(int(i)):
+            tc.changed(self.window)
+        self._tc_publish()
+
+    @rpc(loop=False)
+    def layered_thumb(self, d):
+        """A small picture of scene *d* at its resting frame, for the Layered test… dialog's lists ('' if it does
+        not draw).  Drawn as a ticked scene's picture is, once per scene while the app runs."""
+        import hashlib
+        from . import testcard_core as tc
+        if d not in self._scenes:
+            return ""
+        cache = getattr(self, "_lt_thumbs", None)
+        if cache is None:
+            cache = self._lt_thumbs = {}
+        key = (self.assets_dir, d)
+        if cache.get(key) and os.path.isfile(cache[key]):
+            return cache[key]
+        h = hashlib.sha1(("%s|%s" % (tc.norm_dir(self.assets_dir), d)).encode("utf-8")).hexdigest()[:16]
+        dst = os.path.join(os.path.dirname(tc.store_path()), "layered_thumbs", h + ".png")
+        try:
+            self.render_resting_frame(d, dst)
+            from PIL import Image
+            with Image.open(dst) as im:
+                im = im.convert("RGB")
+                im.thumbnail((240, 136), Image.LANCZOS)
+                im.save(dst + ".part.png", "PNG")
+            os.replace(dst + ".part.png", dst)
+        except Exception:                                       # noqa: BLE001 - shown without a picture
+            log.exception("layered thumb")
+            return ""
+        cache[key] = dst
+        return dst
+
+    @rpc(loop=False)
+    def layered_clip(self, rel):
+        """The video *rel* for the Layered test… dialog: its file (to preview), name with extension, length, size,
+        and the states the game's video player can show it in (Simon: "the number overlay ... is in the wrong
+        place" - Godzilla shows Match in its ScoreFrame state), with the one it starts on."""
+        from . import testcard_core as tc
+        from ..plugins.stern import layered_test as LT
+        path = os.path.join(self.assets_dir, *str(rel or "").split("/"))
+        vdir = os.path.realpath(os.path.join(self.assets_dir, "video"))
+        if (not rel or not os.path.isfile(path) or os.path.splitext(path)[1].lower() not in tc.VIDEO_EXTS
+                or not os.path.realpath(path).startswith(vdir + os.sep)):
+            return {}
+        out = {"path": path, "file": os.path.basename(path), "bytes": os.path.getsize(path)}
+        try:
+            from ..core import video
+            info = video.detect_video_info(path)
+            if info is not None:
+                out.update(w=info.width, h=info.height, seconds=round(float(info.duration or 0), 2),
+                           fps=round(float(info.fps or 0), 2))
+        except Exception:                                       # noqa: BLE001
+            pass
+        try:
+            states = LT.clip_states(self.assets_dir, os.path.splitext(os.path.basename(path))[0])
+        except Exception:                                       # noqa: BLE001
+            log.exception("layered clip states")
+            states = []
+        out["states"] = [{"label": lab, "zoom": round(m[0], 2), "x": int(round(m[2])), "y": int(round(m[3]))}
+                         for lab, m in states]
+        out["state"] = LT.default_state(states)
+        return out
+
+    @rpc
+    def add_layered(self, layers, clip_rel, label="", player="", index=None, plain=False):
         """Put a layered test on the Test card tab's list: *layers* ``[{"d": scene dir, "pin": frame or label}]``,
-        the lowest first, over the project's video *clip_rel*. Returns '' or why not."""
+        the lowest first, over the project's video *clip_rel*, shown in the player's state *player* (a label of
+        layered_test.clip_states).  *index*: the layered test it replaces (Edit).  *plain*: its pictures without each
+        file's colour profile (an A/B test of the overlay's colour, Simon 2026-11-26).  Returns '' or why not."""
         from . import testcard_core as tc
         specs = []
         for ly in layers or []:
@@ -1125,9 +1261,11 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
         name = tc.clean_label(label or "%s over %s" % (self._scenes[layers[-1]["d"]].get("label") or "scene",
                                                         os.path.splitext(os.path.basename(path))[0]), "layered test")
         why = tc.shared().add_layered(tc.Item("video", name, path, self.assets_dir, clip_rel, self._tc_game(),
-                                              layers=specs))
+                                              layers=specs, player=str(player or ""), plain=bool(plain)),
+                                      replace=None if index is None else int(index))
         if not why:
             tc.changed(self.window)
+            self._tc_publish()
         return why
 
     @rpc

@@ -489,16 +489,26 @@ fail:
 }
 
 /* at the end, back to the start: by position when the clip says its length,
- * else when no frame has come for a second */
+ * else when no frame has come for a second.
+ * Simon (2026-11-26, the table): "the strange stutter in play back as the '0' overlay ends" - the clip held its
+ * last frame ~0.4 s at every loop: the end was only taken once no frame had come for 300 ms.  With the length
+ * known, the end is now the last frame's own time: no new frame for a little over one frame there, and the
+ * position at the last frame. */
 static void maybe_loop(struct gclip *g, long long now)
 {
     int fmt = GST_FORMAT_TIME;
-    long long pos = 0, quiet;
+    long long pos = 0, quiet, frame_ms;
     if (g->paused) return;                  /* no frames while frozen: not the end */
     pthread_mutex_lock(&g->mu);
     quiet = now - g->last_frame_ms;
     pthread_mutex_unlock(&g->mu);
-    if (quiet < 300) { g->seeking = 0; return; }
+    /* one frame's time, from the clip's rate (30 fps when it does not say) */
+    frame_ms = g->fps > 0 ? (long long)(1000.0f / g->fps) : 33;
+    if (frame_ms < 10) frame_ms = 10;
+    if (quiet < 300 && !(g->dur_ns > 0 && !g->seeking && quiet >= frame_ms + frame_ms / 2)) {
+        if (quiet < frame_ms) g->seeking = 0;    /* frames again after a seek */
+        return;
+    }
     if (g->seeking && quiet < 3000) return;
     if (g->dur_ns > 0 && quiet < 1000
         && !(G.query_position(g->pipe, &fmt, &pos) && fmt == GST_FORMAT_TIME

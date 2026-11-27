@@ -208,7 +208,11 @@ def test_the_graphics_chip_converts_a_clip():
     assert "return st->t_gpu && st->t_vid && st->t_col < 0 && !st->t_err[0];" in s, \
         "a colour correction is the CPU's LUT: the CPU draws the clip then"
     assert "gfx_clear(e->g, (W - st->t_vw) / 2, (H - st->t_vh) / 2, st->t_vw, st->t_vh);" in s
-    assert "== st->t_ovl_shown) return;" in s, "the canvas changes only with the scene's picture"
+    assert "if (im == was) return;" in s, "the canvas changes only with the scene's picture"
+    # Simon (2026-11-27): "still had the frame rate problem" - only where the new picture differs is painted
+    assert "repaint_overlay(st, was, st->t_ovl_x, st->t_ovl_y, im, ox, oy, cw, ch);" in s
+    assert "picture_diff(was, im, &rx, &ry, &rw, &rh)" in s
+    assert "if (st->t_caption && y1 > H - (int)(96 * S(e))) draw_caption(st, 1);" in s
     c = _read(SEL, "codeselect.c")
     assert c.count("se.video = video_cb;") == 3 and 'getenv("CODESELECT_VIDEO_CPU")' in c
     gfx = _read(SEL, "gfx.c")

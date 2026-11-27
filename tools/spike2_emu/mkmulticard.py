@@ -303,7 +303,8 @@ WAV_RATE = 44100
 TEST_MAX = 64
 TEST_LABEL_MAX = 199
 #: THE TEST CARD's lists (PAD-1279): a test item with a kind is a test_<kind>= line
-TEST_KINDS = ("image", "video", "scene", "sound")
+#: "layered" (Simon, 2026-11-26): test_layered= - the TEST CARD menu's LAYERED SCENE TESTS list
+TEST_KINDS = ("image", "video", "scene", "sound", "layered")
 #: where a TEST CARD's own files go: its p3, mounted at /games before the menu runs
 TESTCARD_TEST_SUBDIR = "testcard"
 #: THE TEST CARD ENTRY on a game card (Simon, 2026-11-23: "a 1.16 vanilla plus the test card"):

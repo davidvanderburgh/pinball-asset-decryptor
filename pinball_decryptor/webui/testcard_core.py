@@ -118,22 +118,33 @@ class Item(object):
 
     THE LAYERED TEST (Simon, 2026-11-22/26): a video item with `layers` - the project's scenes drawn over the clip
     (plugins/stern/layered_test.py specs, ``HASH`` or ``HASH@FRAME``, the lowest first), made on the Scenes tab's
-    Layered test… button."""
-    __slots__ = ("kind", "label", "path", "project", "rel", "game", "layers")
+    Layered test… button.  `player` (Simon, 2026-11-26: the number "is in the wrong place"): the state of the game's
+    video player the clip is shown in (a label of layered_test.clip_states, e.g. ScoreFrame); empty = the default.
+    `plain` (Simon, 2026-11-26, an A/B test of the overlay's colour on the table): its scenes drawn from the pictures
+    as extracted, without each file's own colour profile."""
+    __slots__ = ("kind", "label", "path", "project", "rel", "game", "layers", "player", "plain")
 
-    def __init__(self, kind, label="", path="", project="", rel="", game="", layers=()):
+    def __init__(self, kind, label="", path="", project="", rel="", game="", layers=(), player="", plain=False):
         self.kind, self.label, self.path = kind, label, path
         self.project, self.rel, self.game = project, rel, game
         self.layers = tuple(str(x) for x in (layers or ()) if str(x).strip())
+        self.player = str(player or "").strip() if self.layers else ""
+        self.plain = bool(plain) and bool(self.layers)
 
     @property
     def from_project(self):
         return bool(self.project)
 
+    @property
+    def shown_kind(self):
+        """The list it is in on the card and the Test card tab: a layered test has its own (Simon, 2026-11-26)."""
+        return "layered" if self.layers else self.kind
+
     def key(self):
+        tail = self.layers + ((self.player,) if self.player else ()) + (("plain",) if self.plain else ())
         if self.project:
-            return (self.kind, norm_dir(self.project), self.rel.replace("\\", "/")) + self.layers
-        return (self.kind, "", norm_dir(self.path)) + self.layers
+            return (self.kind, norm_dir(self.project), self.rel.replace("\\", "/")) + tail
+        return (self.kind, "", norm_dir(self.path)) + tail
 
     def to_json(self):
         d = {k: getattr(self, k) for k in self.__slots__ if getattr(self, k)} | {"kind": self.kind}
@@ -146,7 +157,8 @@ class Item(object):
         if not isinstance(d, dict) or d.get("kind") not in KINDS:
             return None
         it = cls(d["kind"], *(str(d.get(k) or "") for k in ("label", "path", "project", "rel", "game")),
-                 layers=d.get("layers") if isinstance(d.get("layers"), list) and d["kind"] == "video" else ())
+                 layers=d.get("layers") if isinstance(d.get("layers"), list) and d["kind"] == "video" else (),
+                 player=str(d.get("player") or ""), plain=d.get("plain") is True)
         if not it.project and not it.path:
             return None
         return it
@@ -161,6 +173,7 @@ class TestCardList(object):
         self.source = ""          # the Spike 2 card image the boot and system come from
         self.out = ""             # where the last test card was written
         self.network = dict(NETWORK_DEFAULTS)   # space for network updates, remote access, Wi-Fi
+        self.built = {}           # the last card built: {out, sig, size, mtime} (built_card)
         self.load()
 
     # -- the file
@@ -179,11 +192,12 @@ class TestCardList(object):
             self.source = str(d.get("source") or "")
             self.out = str(d.get("out") or "")
             self.network = clean_network(d.get("network"))
+            self.built = d.get("built") if isinstance(d.get("built"), dict) else {}
 
     def save(self):
         with _LOCK:
             d = {"items": [it.to_json() for it in self.items], "source": self.source, "out": self.out,
-                 "network": self.network}
+                 "network": self.network, "built": self.built}
             os.makedirs(os.path.dirname(self.path) or ".", exist_ok=True)
             tmp = self.path + ".part"
             with open(tmp, "w", encoding="utf-8") as f:
@@ -242,13 +256,26 @@ class TestCardList(object):
             self.save()
         return added, refused
 
-    def add_layered(self, item):
-        """A layered test (Simon, 2026-11-26: the Scenes tab's Layered test… button) -> '' or why not."""
-        if len(self.items) >= MAX_ITEMS:
+    def layered(self):
+        """[(index, item)] of the layered tests, in the list's order."""
+        return [(i, it) for i, it in enumerate(self.items) if it.kind == "video" and it.layers]
+
+    def add_layered(self, item, replace=None):
+        """A layered test (Simon, 2026-11-26: the Scenes tab's Layered test… button) -> '' or why not.  *replace*:
+        the index of the layered test it takes the place of (Edit).  Simon: "lets max that at 5"."""
+        mine = [i for i, _it in self.layered()]
+        if replace is not None and replace not in mine:
+            return "that layered test is no longer on the list"
+        if replace is None and len(mine) >= MAX_LAYERED:
+            return "the test card takes at most %d layered tests: remove one first" % MAX_LAYERED
+        if replace is None and len(self.items) >= MAX_ITEMS:
             return "the test card takes at most %d items" % MAX_ITEMS
-        if any(it.key() == item.key() for it in self.items):
+        if any(it.key() == item.key() for i, it in enumerate(self.items) if i != replace):
             return "that layered test is already on the list"
-        self.items.append(item)
+        if replace is None:
+            self.items.append(item)
+        else:
+            self.items[replace] = item
         self.save()
         return ""
 
@@ -267,8 +294,8 @@ class TestCardList(object):
         """Move item i up (d=-1) or down (d=1) within its own list (kind)."""
         if not 0 <= i < len(self.items):
             return False
-        kind = self.items[i].kind
-        same = [k for k, it in enumerate(self.items) if it.kind == kind]
+        kind = self.items[i].shown_kind
+        same = [k for k, it in enumerate(self.items) if it.shown_kind == kind]
         at = same.index(i)
         if not 0 <= at + d < len(same):
             return False
@@ -285,7 +312,11 @@ class TestCardList(object):
         return False
 
     def counts(self):
-        return {k: sum(1 for it in self.items if it.kind == k) for k in KINDS}
+        out = {k: sum(1 for it in self.items if it.shown_kind == k) for k in KINDS}
+        n = sum(1 for it in self.items if it.layers)
+        if n:                                           # the layered tests' own list (Simon, 2026-11-26)
+            out["layered"] = n
+        return out
 
     def ordered(self):
         """The items as the card's menu lists them: by list, each in the user's order."""
@@ -332,6 +363,10 @@ S3_NO_NETWORK = ("remote access, Wi-Fi start-up and extra room are for a Spike 2
 
 
 _SHARED = []
+
+
+#: Simon (2026-11-26): "lets max that at 5 for the UI"
+MAX_LAYERED = 5
 
 
 def shared():
@@ -419,6 +454,32 @@ def as_clip(path, work, n, log=print, cancel=None):
     return dst
 
 
+def profile_switched_on(project, kind, rel):
+    """Whether a Write puts a colour profile on the project's file *rel* (*kind* image / video), so the test card
+    shows it as the card would.
+
+    Simon (2026-11-27): "The problem is the video colour NOT the overlay. The video is the right "0" ... So the video
+    is too dark, too red." - the test card baked the project's Recommended video profile into Godzilla's own Match
+    clip; a Write never touches a game's own clip unless the Video tab's Advanced box unlocks it and its own switch
+    is on (colour_profile.stock_video_rels, PAD-336).  The same rules as the Write's: a replaced file follows its
+    own switch, else its tab's box (colour_profile.asset_settings); a game's own file needs its kind unlocked and
+    its own switch on."""
+    from pinball_decryptor.core import colour_profile as cp
+    from pinball_decryptor.core import staged_changes
+    k = PROFILE_KIND.get(kind)
+    if not k or not project:
+        return False
+    data = staged_changes.peek(project) or {}
+    rel = str(rel or "").replace("\\", "/")
+    picks = data.get(kind) if isinstance(data.get(kind), dict) else {}
+    sw = cp.asset_settings(project)
+    own = sw[k].get(rel)
+    if picks.get(rel):
+        return bool(own) if own is not None else bool(sw["all_" + k])
+    unlocked = cp.stock_videos_unlocked(data) if kind == "video" else bool(data.get(cp.STOCK_IMAGES_KEY))
+    return unlocked and bool(own)
+
+
 def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None, clips=False):
     """Each item as a file selectmedia can take -> [(kind, path, label)].
 
@@ -456,7 +517,7 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None,
             if it.from_project and it.kind in PROFILE_KIND:
                 if resolver is not None:
                     prof = resolver(it)
-                else:
+                elif profile_switched_on(it.project, it.kind, it.rel):
                     if it.project not in resolvers:
                         resolvers[it.project] = cp.asset_resolver(it.project)
                     prof = resolvers[it.project](PROFILE_KIND[it.kind], it.rel)
@@ -492,7 +553,8 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None,
                     log("test card: layered test %r left out: its video cannot play as a clip" % label)
                     continue
                 try:
-                    made.append((kind, path, label, layer_overlay(src, path, work, n, log=log)))
+                    placed, ovl = layered_files(src, path, work, n, log=log, cancel=cancel)
+                    made.append((kind, placed, label, ovl))
                 except Exception as exc:                        # noqa: BLE001
                     log("test card: layered test %r left out: %s" % (label, exc))
                 continue
@@ -505,13 +567,175 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None,
     return out
 
 
+#: Simon (2026-11-26): "It takes a really long time to make the test card with no feedback that anything is going
+#: on. It should be a fast process?" - a layered test's placed clip and overlay are kept here, by what made them, and
+#: a build whose test, clip, project scenes and drawing code have not changed takes them as they are
+LAYERED_CACHE = "testcard_layered"
+#: the newest this many tests' files are kept
+LAYERED_KEEP = 12
+
+
+def _layered_key(item, clip):
+    """What a layered test's files are made from: the test, its clip, the project's scenes and edits, and the
+    code that draws them (a file's size and time)."""
+    import hashlib
+    from pinball_decryptor.plugins.stern import layered_test as LT
+    from pinball_decryptor.plugins.stern import scene_render as SR
+
+    def stamp(p):
+        try:
+            st = os.stat(p)
+            return [p, st.st_size, int(st.st_mtime)]
+        except OSError:
+            return [p, None]
+    def contents(p):
+        # the clip by what is in it: a build hands it over from a new temporary folder each time
+        h = hashlib.sha1()
+        try:
+            with open(p, "rb") as f:
+                for block in iter(lambda: f.read(1 << 20), b""):
+                    h.update(block)
+        except OSError:
+            return None
+        return h.hexdigest()
+    parts = [list(item.layers), getattr(item, "player", ""), bool(getattr(item, "plain", False)), contents(clip),
+             stamp(os.path.join(item.project, "images", "scene_textures", "scene_tree.json")),
+             stamp(os.path.join(item.project, ".staged_changes.json")),
+             stamp(LT.__file__), stamp(SR.__file__), stamp(__file__)]
+    return hashlib.sha1(json.dumps(parts, sort_keys=True, default=str).encode("utf-8")).hexdigest()[:20]
+
+
+def layered_files(item, clip, work, n, log=print, cancel=None):
+    """``(clip, overlay)`` for layered test *item* over *clip*: from the cache when nothing that makes them has
+    changed (:data:`LAYERED_CACHE`), else made (:func:`place_layered_clip`, :func:`layer_overlay`) and kept."""
+    home = os.path.join(os.path.dirname(store_path()), LAYERED_CACHE)
+    key = _layered_key(item, clip)
+    kept_clip, kept_ovl = (os.path.join(home, key + ext) for ext in (".mp4", ".pado"))
+    cached = os.path.isfile(kept_ovl) and (os.path.isfile(kept_clip) or os.path.isfile(kept_ovl + ".asis"))
+    if cached:
+        log("test card: layered test %r unchanged since it was last made: kept as it was" % item.label)
+        placed = kept_clip if os.path.isfile(kept_clip) else clip
+        got = (placed, kept_ovl)
+        try:
+            for p in got:
+                os.utime(p)
+        except OSError:
+            pass
+    else:
+        log("test card: making layered test %r" % item.label)
+        placed = place_layered_clip(item, clip, work, n, log=log, cancel=cancel)
+        ovl = layer_overlay(item, placed, work, n, log=log)
+        got = (placed, ovl)
+        try:
+            os.makedirs(home, exist_ok=True)
+            shutil.copyfile(ovl, kept_ovl)
+            if placed != clip:
+                shutil.copyfile(placed, kept_clip)
+            else:
+                open(kept_ovl + ".asis", "w").close()
+            _prune_layered(home)
+        except OSError as exc:
+            log("test card: layered test %r could not be kept for the next build: %s" % (item.label, exc))
+    return got
+
+
+def _prune_layered(home):
+    """Only the newest :data:`LAYERED_KEEP` tests' files stay in *home*."""
+    try:
+        names = [f for f in os.listdir(home) if f.endswith(".pado")]
+    except OSError:
+        return
+    names.sort(key=lambda f: os.path.getmtime(os.path.join(home, f)), reverse=True)
+    for f in names[LAYERED_KEEP:]:
+        stem = f[:-len(".pado")]
+        for g in (stem + ".pado", stem + ".mp4", stem + ".pado.asis"):
+            try:
+                os.remove(os.path.join(home, g))
+            except OSError:
+                pass
+
+
+def _stamp(path):
+    try:
+        st = os.stat(path)
+        return [path, st.st_size, int(st.st_mtime)]
+    except (OSError, TypeError, ValueError):
+        return [path, None]
+
+
+def build_signature(lst, items=None):
+    """What a test card is built from: the list, the card image, the network settings, each item's file and each
+    project's scenes and edits (a file's size and time).  Two builds with the same signature make the same card."""
+    import hashlib
+    items = list(lst.ordered() if items is None else items)
+    projects = sorted({it.project for it in items if it.project})
+    from pinball_decryptor.plugins.stern import layered_test as LT
+    from pinball_decryptor.plugins.stern import scene_render as SR
+    # PAD's own code that makes the files too: a fixed build never sends the card built before the fix
+    code = [_stamp(m) for m in (__file__, LT.__file__, SR.__file__)]
+    parts = [[it.to_json() for it in items], _stamp(lst.source), clean_network(lst.network), code,
+             [_stamp(it.path) for it in items],
+             [[_stamp(os.path.join(p, ".staged_changes.json")),
+               _stamp(os.path.join(p, "images", "scene_textures", "scene_tree.json"))] for p in projects]]
+    return hashlib.sha1(json.dumps(parts, sort_keys=True, default=str).encode("utf-8")).hexdigest()
+
+
+def note_built(lst, out, sig):
+    """Remember *out* as the card built from *sig* (:func:`build_signature` taken when the build started)."""
+    st = os.stat(out)
+    lst.built = {"out": out, "sig": sig, "size": st.st_size, "mtime": int(st.st_mtime)}
+    lst.save()
+
+
+def built_card(lst):
+    """Simon (2026-11-27): "if I "build" the card... it asks me to save it. If I send the card it also asks me to save
+    it.. Seems that Sending doesn't check to see if it is already built?" - the card last built, when it is still
+    on disk as it was written and nothing it was built from has changed since; else ''."""
+    b = lst.built or {}
+    out = b.get("out") or ""
+    if not out or not os.path.isfile(out) or os.path.exists(str(out) + ".ssh-pending"):
+        return ""
+    st = os.stat(out)
+    if st.st_size != b.get("size") or int(st.st_mtime) != b.get("mtime"):
+        return ""
+    return out if b.get("sig") == build_signature(lst) else ""
+
+
+def place_layered_clip(item, clip, work, n, log=print, cancel=None):
+    """Simon (2026-11-26): "the number overlay ... is in the wrong place" - a layered test's clip as the game's video
+    player shows it (plugins/stern/layered_test.clip_placement: Godzilla's draws a 1360x768 clip zoomed 1.32x about
+    the centre), so the clip's own pictures sit under the scenes where the game puts them; *clip* itself when no
+    scene of the project plays it or the player shows it 1:1."""
+    from pinball_decryptor.plugins.stern import layered_test as LT
+    name = os.path.splitext(os.path.basename(item.rel or item.path or ""))[0]
+    place = LT.clip_placement(item.project, name, getattr(item, "player", ""))
+    if place is None:
+        return clip
+    stage = (1360, 768)
+    try:
+        spec = LT.parse_scene(item.layers[0])[0]
+        stage = tuple(int(x) for x in LT.find_scene(LT.scene_tree(item.project), spec)[1]["stage"][:2])
+    except Exception:                                           # noqa: BLE001 - Spike 2's screen
+        pass
+    _frames, fps = LT.clip_frames(clip)
+    dst = os.path.join(work, "placed%02d.mp4" % n)
+    LT.place_clip(clip, dst, place, stage, fps=fps, cancel=cancel)
+    log("test card: %s placed as the game's player shows it (%.2fx, corner at %d,%d)"
+        % (name, place[0], round(place[2]), round(place[3])))
+    return dst
+
+
 def layer_overlay(item, clip, work, n, log=print):
     """The ``.pado`` for layered test *item* over *clip* (plugins/stern/layered_test.py): its scenes drawn one
     picture per clip frame, timed by the clip's own frames."""
     from pinball_decryptor.plugins.stern import layered_test as LT
     frames, fps = LT.clip_frames(clip)
     out = os.path.join(work, "clip%02d.pado" % n)
-    LT.make_overlay(item.project, list(item.layers), out, frames, fps, log=lambda m: log("test card: " + m.strip()))
+
+    def progress(done, total):
+        log("test card: layered test %r: drawing frame %d of %d" % (item.label, done, total))
+    LT.make_overlay(item.project, list(item.layers), out, frames, fps, log=lambda m: log("test card: " + m.strip()),
+                    profiles=not getattr(item, "plain", False), progress=progress)
     return out
 
 

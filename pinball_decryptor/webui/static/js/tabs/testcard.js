@@ -11,17 +11,25 @@ const LISTS = [
   { kind: "image", title: "Images", how: "Tick TEST on a picture in the Images tab, or add your own pictures." },
   { kind: "video", title: "Videos", how: "Tick TEST on a clip in the Video tab, or add your own videos. They play whole, at their own frame rate." },
   { kind: "scene", title: "Scenes", how: "Tick TEST on a scene in the Scenes tab: its resting frame goes on the card." },
+  // Simon (2026-11-26): "Layered tests have their own area rather than being grouped into videos" - the machine's
+  // TEST CARD menu has LAYERED SCENE TESTS too
+  { kind: "layered", title: "Layered scene tests", how: "Make them on the Scenes tab: Layered tests, New… (up to 5). Each is a video with scenes drawn over it, as the game shows them." },
   { kind: "sound", title: "Sounds", how: "Tick TEST on a sound in the Audio tab, or add your own sounds." },
 ];
 
+// Simon (2026-11-26): "the controls are FAR too far right" - on a wide window the row's spacer put the buttons a
+// screen away from the item; a grid keeps them beside it (name, where it came from - cut, whole on hover - buttons)
+const ITEM_GRID = "display:grid;grid-template-columns:minmax(140px,240px) minmax(0,360px) auto auto auto;" +
+  "gap:6px;align-items:center;justify-content:start;";
+
 function ItemRow({ r, first, last, busy }) {
   const from = r.from ? r.from : "Your file";
-  return html`<div class="row tc-item" key=${r.i}>
+  return html`<div class="tc-item" style=${ITEM_GRID} key=${r.i}>
     <${Field} sm cls="tc-label" value=${r.label} placeholder="its name on the machine" readOnly=${busy}
       onChange=${() => {}} onCommit=${(v) => call("testcard.rename", r.i, v)} />
-    <span class=${cx("small", r.problem ? "bad" : "muted")} ...${tip({ head: from, lines: [r.where, r.problem].filter(Boolean) })}>
+    <span class=${cx("small ellip", r.problem ? "bad" : "muted")} style="min-width:0"
+      ...${tip({ head: from, lines: [r.where, r.problem].filter(Boolean) })}>
       ${r.problem ? r.problem : from}</span>
-    <span class="grow"></span>
     <${Button} size="sm" disabled=${busy || first} onClick=${() => call("testcard.move", r.i, -1)} title="Earlier on the machine's list">↑<//>
     <${Button} size="sm" disabled=${busy || last} onClick=${() => call("testcard.move", r.i, 1)} title="Later on the machine's list">↓<//>
     <${Button} size="sm" disabled=${busy} onClick=${() => call("testcard.remove", r.i)} title="Take it off the test card">✕<//>
@@ -148,7 +156,7 @@ export default function TestCardTab() {
   const s = useNs(NS) || {};
   const c = s.counts || {};
   const sub = "A card that boots a Stern Spike 2 or Spike 3 machine straight into a TEST CARD menu, with no game: "
-    + "DEFAULT PAD TEST CARD, IMAGES, VIDEOS, SCENES and SOUNDS, and Color correction to tune the screen.";
+    + "DEFAULT PAD TEST CARD, IMAGES, VIDEOS, SCENES, LAYERED SCENE TESTS and SOUNDS, and Color correction to tune the screen.";
   const keys = s.s3
     ? { move: "On a Spike 3 machine the coin door's NEXT and PREVIOUS move between the entries, SELECT opens one, BACK goes back.",
         list: "In a list, SELECT shows the one picked full screen; NEXT and PREVIOUS then step to the next and previous, and SELECT switches the color correction on and off." }
@@ -156,7 +164,7 @@ export default function TestCardTab() {
         list: "In a list, START shows the one picked full screen; the flippers then step to the previous and next, and START switches the color correction on and off (on a sound: plays it again)." };
   return html`<div class="page">
     <${PageHead} title="Test card" sub=${sub} />
-    <${Card} style="flex:none" title="On the card" sub=${(c.image || 0) + " images, " + (c.video || 0) + " videos, " + (c.scene || 0) + " scenes, " + (c.sound || 0) + " sounds"}>
+    <${Card} style="flex:none" title="On the card" sub=${(c.image || 0) + " images, " + (c.video || 0) + " videos, " + (c.scene || 0) + " scenes, " + (c.layered || 0) + " layered scene tests, " + (c.sound || 0) + " sounds"}>
       <${List} s=${s} />
     <//>
     <${Card} style="flex:none" title="Build">

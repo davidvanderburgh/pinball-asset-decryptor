@@ -20,7 +20,7 @@ const LISTS = [
 // Simon (2026-11-26): "the controls are FAR too far right" - on a wide window the row's spacer put the buttons a
 // screen away from the item; a grid keeps them beside it (name, where it came from - cut, whole on hover - buttons)
 const ITEM_GRID = "display:grid;grid-template-columns:minmax(140px,240px) minmax(0,360px) auto auto auto;" +
-  "gap:6px;align-items:center;justify-content:start";
+  "gap:6px;align-items:center;justify-content:start;";
 
 function ItemRow({ r, first, last, busy }) {
   const from = r.from ? r.from : "Your file";

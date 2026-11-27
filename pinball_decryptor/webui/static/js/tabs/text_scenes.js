@@ -248,8 +248,8 @@ const SHOWN_TIP = { head: "Video shown as", lines: [
 
 // Simon (2026-11-26): the overlay "too dark / saturated" on the table - "It is possible you are carrying through
 // the emulation style profiling of the graphics to the actual machine": an A/B test, the same test both ways
-const COLOURS_TIP = { head: "Picture colours", lines: [
-  "With each file's colour profile: the scenes' pictures as a Write puts them on the card, each with the colour profile switched on for it.",
+const COLOURS_TIP = { head: "Picture colors", lines: [
+  "With each file's color profile: the scenes' pictures as a Write puts them on the card, each with the color profile switched on for it.",
   "As extracted: the pictures as they came off the card, without those profiles.",
   "Make the same test both ways to see on the machine which matches the game." ] };
 
@@ -343,10 +343,10 @@ function LayeredDialog({ index, onClose }) {
           </div>` : html`<div>No scene of the project plays it: it is shown full size.</div>`}` : clip ? "Reading the video…" : "Pick the video the scenes are drawn over."}
         preview=${info && info.path ? html`<video src=${mediaUrl(info.path)} muted loop autoplay playsinline></video>` : null} />
       <div class="row lt-shown" ...${tip(COLOURS_TIP)}>
-        <span class="small">Picture colours</span>
+        <span class="small">Picture colors</span>
         <${Select} sm width=${360} value=${plain ? "plain" : "profiled"} onChange=${(v) => setPlain(v === "plain")}
-          options=${[{ value: "profiled", label: "With each file's colour profile (as written)" },
-                     { value: "plain", label: "As extracted (no file colour profiles)" }]} />
+          options=${[{ value: "profiled", label: "With each file's color profile (as written)" },
+                     { value: "plain", label: "As extracted (no file color profiles)" }]} />
       </div>
       <div class="k">Name on the test card</div>
       <${Field} sm width="420px" value=${label} placeholder="the top scene over the video (left empty)" onChange=${setLabel} />

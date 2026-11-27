@@ -328,7 +328,7 @@ def test_a_layered_test_can_leave_the_files_colour_profiles_off(monkeypatch):
     assert tc.Item("video", "V", "p", plain=True).plain is False, "only a layered test has it"
     assert "profiles=not getattr(item, \"plain\", False)" in inspect.getsource(tc.layer_overlay)
     js = open(JS, encoding="utf-8").read()
-    assert '{ value: "plain", label: "As extracted (no file colour profiles)" }' in js
+    assert '{ value: "plain", label: "As extracted (no file color profiles)" }' in js
     assert "index == null ? null : index, plain);" in js
 
 

@@ -5,33 +5,201 @@ DAEMON=/usr/local/bin/dropbear
 KEYDIR=/data/dropbear
 PIDFILE=/var/run/pad-sshd.pid
 # PAD-1627: say on the home network that this is a PAD machine, so the app finds it wherever the router put it
-# (no address is remembered).  It uses the announce service the card's own system ships (avahi) and only where
-# there is one; everything it needs is made in RAM here, so nothing on the card changes.  The app asks for
-# _pad-machine._tcp and reads the game and this machine's SSH identity from the answer.
+# (no address is remembered).  Everything it needs is made in RAM here, so nothing on the card changes.  The app
+# asks for _pad-machine._tcp and reads the game and this machine's SSH identity from the answer.
+# PAD-1631, checked on the cards: a Spike 2 card ships avahi switched off (this starts one of its own); a JJP
+# install ships avahi switched ON (this hands the running one the service and has it read its services again,
+# and never stops it); a Spike 3 card ships no avahi but does ship python3 (this runs the small answerer below).
 ANNOUNCE=/var/run/pad-announce
 AVAHI=/usr/sbin/avahi-daemon
+system_avahi() {
+  # the system starts its own avahi (JJP: avahi-daemon.service is enabled)
+  [ -d /run/systemd/system ] && systemctl is-enabled avahi-daemon.service >/dev/null 2>&1
+}
 announce() {
-  [ -x "$AVAHI" ] && [ -d /etc/avahi/services ] || return 0
   mkdir -p "$ANNOUNCE/services"
   game=$(readlink /games/game 2>/dev/null || { [ -f /jjpe/gen1/setenv.sh ] && . /jjpe/gen1/setenv.sh >/dev/null 2>&1 && echo "/jjpe/$GAMENAME/game"; })
   game=$(echo "$game" | sed 's#/game$##; s#.*/##' | tr -cd 'A-Za-z0-9_.-')
   key=$(/usr/local/bin/dropbearkey -y -f "$KEYDIR/dropbear_ed25519_host_key" 2>/dev/null | grep '^ssh-' | awk '{print $1" "$2}' | tr -cd 'A-Za-z0-9+/= -')
-  printf '%s\n' '[server]' 'use-ipv4=yes' 'use-ipv6=no' 'enable-dbus=no' \
-    '[publish]' 'publish-workstation=no' 'publish-hinfo=no' '[rlimits]' > "$ANNOUNCE/avahi.conf"
-  printf '%s\n' '<?xml version="1.0" standalone="no"?>' \
-    '<!DOCTYPE service-group SYSTEM "avahi-service.dtd">' \
-    '<service-group>' \
-    '  <name replace-wildcards="yes">PAD %h</name>' \
-    '  <service>' \
-    '    <type>_pad-machine._tcp</type>' \
-    '    <port>22</port>' \
-    '    <txt-record>v=1</txt-record>' \
-    "    <txt-record>game=$game</txt-record>" \
-    "    <txt-record>key=$key</txt-record>" \
-    '  </service>' \
-    '</service-group>' > "$ANNOUNCE/services/pad-machine.service"
-  grep -q " /etc/avahi/services " /proc/mounts || mount -o bind "$ANNOUNCE/services" /etc/avahi/services
-  "$AVAHI" -c -f "$ANNOUNCE/avahi.conf" || "$AVAHI" -D -f "$ANNOUNCE/avahi.conf"
+  if [ -x "$AVAHI" ] && [ -d /etc/avahi/services ]; then
+    printf '%s\n' '[server]' 'use-ipv4=yes' 'use-ipv6=no' 'enable-dbus=no' \
+      '[publish]' 'publish-workstation=no' 'publish-hinfo=no' '[rlimits]' > "$ANNOUNCE/avahi.conf"
+    printf '%s\n' '<?xml version="1.0" standalone="no"?>' \
+      '<!DOCTYPE service-group SYSTEM "avahi-service.dtd">' \
+      '<service-group>' \
+      '  <name replace-wildcards="yes">PAD %h</name>' \
+      '  <service>' \
+      '    <type>_pad-machine._tcp</type>' \
+      '    <port>22</port>' \
+      '    <txt-record>v=1</txt-record>' \
+      "    <txt-record>game=$game</txt-record>" \
+      "    <txt-record>key=$key</txt-record>" \
+      '  </service>' \
+      '</service-group>' > "$ANNOUNCE/services/pad-machine.service"
+    grep -q " /etc/avahi/services " /proc/mounts || mount -o bind "$ANNOUNCE/services" /etc/avahi/services
+    if "$AVAHI" -c; then
+      # one is running (the system's own, or ours from before): it reads its services again
+      "$AVAHI" -r
+    elif system_avahi; then
+      # the system's own is still to start (it would refuse to while one of ours ran): have it read our
+      # service once it is up, and start ours only if it never comes
+      ( i=0; while [ $i -lt 120 ] && ! "$AVAHI" -c; do sleep 1; i=$((i + 1)); done
+        if "$AVAHI" -c; then "$AVAHI" -r; else : > "$ANNOUNCE/own"; "$AVAHI" -D -f "$ANNOUNCE/avahi.conf"; fi
+      ) </dev/null >/dev/null 2>&1 &
+    else
+      : > "$ANNOUNCE/own"
+      "$AVAHI" -D -f "$ANNOUNCE/avahi.conf"
+    fi
+    return 0
+  fi
+  py=$(command -v python3 2>/dev/null) || return 0
+  if [ -s "$ANNOUNCE/answer.pid" ] && kill -0 "$(cat "$ANNOUNCE/answer.pid")" 2>/dev/null; then
+    kill "$(cat "$ANNOUNCE/answer.pid")" 2>/dev/null || true
+  fi
+  cat > "$ANNOUNCE/answer.py" <<'PAD_ANSWER'
+# PAD-1631: answers "which PAD machines are here?" (multicast DNS, _pad-machine._tcp) on a card whose system
+# has no avahi.  It only ever answers that one question, straight back to whoever asked.
+import os, select, socket, struct, sys
+
+SERVICE = "_pad-machine._tcp.local"
+GROUP = "224.0.0.251"
+PORT = int(os.environ.get("PAD_ANSWER_PORT") or 5353)
+game, key = (sys.argv[1:] + ["", ""])[:2]
+host = "".join(c for c in socket.gethostname().split(".")[0] if c.isalnum() or c == "-") or "machine"
+
+
+def name(*labels):
+    out = b""
+    for part in labels:
+        for p in part.split("."):
+            if p:
+                p = p.encode("utf-8")[:63]
+                out += bytes([len(p)]) + p
+    return out + b"\0"
+
+
+def record(owner, rtype, body, flush=True):
+    return owner + struct.pack(">HHIH", rtype, 0x8001 if flush else 1, 120, len(body)) + body
+
+
+INSTANCE = bytes([len("PAD " + host)]) + ("PAD " + host).encode() + name(SERVICE)
+HOST = name(host, "local")
+TXT = b"".join(bytes([len(t)]) + t for t in (b"v=1", ("game=" + game).encode()[:250],
+                                              ("key=" + key).encode()[:250]))
+
+
+def asked(data):
+    """True when *data* is a question for the PAD service (PTR or ANY)."""
+    try:
+        _id, flags, qd = struct.unpack(">HHH", data[:6])
+        if flags & 0x8000:
+            return False
+        at = 12
+        for _ in range(qd):
+            parts = []
+            while data[at]:
+                n = data[at]
+                if n & 0xC0:
+                    parts = None
+                    at += 1
+                    break
+                parts.append(data[at + 1:at + 1 + n].decode("utf-8", "replace"))
+                at += 1 + n
+            at += 1
+            qtype = struct.unpack(">H", data[at:at + 2])[0]
+            at += 4
+            if parts is not None and ".".join(parts).lower() == SERVICE.lower() and qtype in (12, 255):
+                return True
+    except (IndexError, struct.error):
+        pass
+    return False
+
+
+def answer(qid, me):
+    return (struct.pack(">HHHHHH", qid, 0x8400, 0, 4, 0, 0)
+            + record(name(SERVICE), 12, INSTANCE, flush=False)
+            + record(INSTANCE, 33, struct.pack(">HHH", 0, 0, 22) + HOST)
+            + record(INSTANCE, 16, TXT)
+            + record(HOST, 1, socket.inet_aton(me)))
+
+
+def address_of(net):
+    """The IPv4 address of the network *net*, or None (SIOCGIFADDR)."""
+    try:
+        import fcntl
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        try:
+            got = fcntl.ioctl(u.fileno(), 0x8915, struct.pack("256s", net.encode()[:15]))
+        finally:
+            u.close()
+        return socket.inet_ntoa(got[20:24])
+    except (OSError, ImportError):
+        return None
+
+
+def join(s):
+    # every network the machine has, now and as they come up (Wi-Fi joins later than the game starts).  Joined
+    # by the network's address: the by-index form is not understood everywhere (qemu-user on aarch64).  Joining
+    # a group already joined fails, and is fine.
+    group = socket.inet_aton(GROUP)
+    try:
+        nets = socket.if_nameindex()
+    except OSError:
+        nets = []
+    ways = [struct.pack("4s4s", group, socket.inet_aton("0.0.0.0"))]
+    for index, net in nets:
+        if net == "lo":
+            continue
+        me = address_of(net)
+        if me:
+            ways.append(struct.pack("4s4s", group, socket.inet_aton(me)))
+        ways.append(struct.pack("4s4si", group, socket.inet_aton("0.0.0.0"), index))
+    for way in ways:
+        try:
+            s.setsockopt(socket.IPPROTO_IP, socket.IP_ADD_MEMBERSHIP, way)
+        except OSError:
+            pass
+
+
+def main():
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    if hasattr(socket, "SO_REUSEPORT"):
+        try:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
+        except OSError:
+            pass
+    s.bind(("", PORT))
+    while True:
+        join(s)
+        if not select.select([s], [], [], 15)[0]:
+            continue
+        try:
+            data, src = s.recvfrom(9000)
+            if not asked(data):
+                continue
+            u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            try:
+                u.connect(src)
+                me = u.getsockname()[0]
+            finally:
+                u.close()
+            s.sendto(answer(struct.unpack(">H", data[:2])[0], me), src)
+        except OSError:
+            continue
+
+
+if __name__ == "__main__":
+    main()
+PAD_ANSWER
+  # a session of its own, so the SSH session that started it (the app's "Find it by itself") can end
+  sid=$(command -v setsid 2>/dev/null) || sid=
+  $sid "$py" "$ANNOUNCE/answer.py" "$game" "$key" </dev/null >/dev/null 2>&1 &
+  echo $! > "$ANNOUNCE/answer.pid"
+}
+announcing() {
+  if [ -s "$ANNOUNCE/answer.pid" ]; then kill -0 "$(cat "$ANNOUNCE/answer.pid")" 2>/dev/null; return; fi
+  [ -f "$ANNOUNCE/services/pad-machine.service" ] && "$AVAHI" -c
 }
 case "$1" in
   start)
@@ -55,9 +223,19 @@ case "$1" in
     ( announce ) </dev/null >/dev/null 2>&1 || true
     ;;
   stop)
+    if [ -s "$ANNOUNCE/answer.pid" ]; then
+      kill "$(cat "$ANNOUNCE/answer.pid")" 2>/dev/null || true
+      rm -f "$ANNOUNCE/answer.pid"
+    fi
     if [ -f "$ANNOUNCE/avahi.conf" ]; then
-      "$AVAHI" -k -f "$ANNOUNCE/avahi.conf" >/dev/null 2>&1 || true
       umount /etc/avahi/services 2>/dev/null || true
+      # ours is stopped; the system's own only forgets our service
+      if [ -f "$ANNOUNCE/own" ]; then
+        "$AVAHI" -k >/dev/null 2>&1 || true
+        rm -f "$ANNOUNCE/own"
+      else
+        "$AVAHI" -r >/dev/null 2>&1 || true
+      fi
     fi
     if [ -s "$PIDFILE" ]; then
       kill "$(cat "$PIDFILE")" 2>/dev/null || true
@@ -68,7 +246,7 @@ case "$1" in
   # PAD-1627: only the announce, for a machine whose card got this script while it was running
   announce)
     ( announce ) </dev/null >/dev/null 2>&1 || true
-    if [ -f "$ANNOUNCE/avahi.conf" ] && "$AVAHI" -c -f "$ANNOUNCE/avahi.conf"; then echo PAD_ANNOUNCING; else echo PAD_NO_ANNOUNCE; fi
+    if announcing; then echo PAD_ANNOUNCING; else echo PAD_NO_ANNOUNCE; fi
     ;;
   *) echo "Usage: $0 {start|stop|restart|announce}" >&2; exit 1 ;;
 esac

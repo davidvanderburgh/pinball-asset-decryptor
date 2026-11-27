@@ -376,6 +376,15 @@ input[type=range] { accent-color: var(--accent); }
 .w-stack .mach-row { flex-wrap: wrap; }
 /* PAD-1585: the page's empty state - what a machine is and the ways to add one */
 .sx-mach-page .inner { gap: 22px; }
+/* PAD-1632: My machines and Getting started are sheets over the app - a panel with an edge on a dimmed backdrop,
+   closed by the X in its corner (or Escape, or its top-bar button) */
+.picker.sx-sheet-wrap { padding: 18px 24px 28px; background: color-mix(in srgb, var(--bg) 82%, #000); }
+.picker .inner.sx-sheet { position: relative; background: var(--bg); border: 1px solid var(--line); border-radius: 16px;
+  padding: 24px 28px 28px; box-shadow: 0 10px 34px rgba(0, 0, 0, .18); min-height: min(520px, 100%); }
+.sx-sheet-x { align-self: flex-start; }
+.sx-sheet-x .i { width: 18px; height: 18px; }
+html.bp-1100 .picker.sx-sheet-wrap { padding: 8px; }
+html.bp-1100 .picker .inner.sx-sheet { padding: 16px; border-radius: 12px; }
 .mach-empty { display: flex; gap: 18px; align-items: flex-start; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 22px 24px; }
 .mach-empty .mach-ic { width: 44px; height: 44px; flex: 0 0 auto; }
 .mach-empty .mach-ic .i { width: 24px; height: 24px; }
@@ -393,6 +402,46 @@ input[type=range] { accent-color: var(--accent); }
 .mach-name svg { width: 13px; height: 13px; opacity: .35; }
 .mach-name:hover svg, .mach-name:focus-visible svg { opacity: 1; color: var(--accent); }
 .mach-find { margin: 2px 0 0; }
+/* PAD-1632: a machine's Remote panel under its row (its screen, status, logs, settings, restart), and the
+   page's two switches under the list they are about */
+.mach-item { display: flex; flex-direction: column; }
+.mach-item.open > .mach-row { border-bottom-left-radius: 0; border-bottom-right-radius: 0; border-color: var(--accent-line); }
+.mach-remote-btn.on { border-color: var(--accent-line); background: var(--accent-soft); color: var(--accent); }
+.mach-remote { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 16px 22px; padding: 14px 16px 16px;
+  background: var(--panel-2); border: 1px solid var(--accent-line); border-top: 0; border-radius: 0 0 12px 12px; }
+.mach-remote.one { grid-template-columns: minmax(0, 1fr); }
+html.bp-1100 .mach-remote { grid-template-columns: minmax(0, 1fr); }
+.mach-remote-col { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.mach-remote-bar { gap: 6px; align-items: center; }
+.mach-h { font-size: 11.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-3, var(--ink-2)); }
+.mach-screen { display: block; width: 100%; height: auto; border: 1px solid var(--line); border-radius: 8px; background: #000; }
+.mach-screen-none { aspect-ratio: 16 / 9; max-height: 300px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px; color: #8b93a1; font-size: 13px; text-align: center; padding: 12px; }
+.mach-screen-none .i { width: 28px; height: 28px; opacity: .6; }
+.mach-remote-btns { gap: 6px; align-items: center; }
+.mach-remote-btns button { min-width: 64px; }
+.mach-status { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.mach-status th, .mach-status td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.mach-status th { width: 36%; color: var(--ink-3, var(--ink-2)); font-weight: 600; }
+.mach-remote-acts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; align-items: center; margin-top: 4px; }
+.mach-remote-acts .row { gap: 6px; }
+.mach-log { max-height: 220px; overflow: auto; font-size: 11.5px; line-height: 1.35; margin: 0; padding: 8px; background: var(--panel);
+  border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.mach-remote-foot { align-items: center; gap: 10px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); }
+/* PAD-1632: the row's picture - the game's splash; a multi-boot card's games fanned, with how many */
+.mach-art { position: relative; flex: 0 0 auto; width: 104px; height: 58px; display: block; }
+.mach-art.multi { width: 116px; height: 62px; }
+.mach-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 7px; border: 1px solid var(--line);
+  background: #000; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+.mach-art.multi img { width: 84px; height: 48px; inset: auto; }
+.mach-art.multi img:nth-child(1) { left: 0; top: 0; z-index: 3; }
+.mach-art.multi img:nth-child(2) { left: 16px; top: 7px; z-index: 2; filter: brightness(.85); }
+.mach-art.multi img:nth-child(3) { left: 32px; top: 14px; z-index: 1; filter: brightness(.7); }
+.mach-art.multi.n1 img { width: 100%; height: 100%; }
+.mach-art-n { position: absolute; right: 0; bottom: 0; z-index: 4; font-size: 10.5px; font-weight: 700; line-height: 1; padding: 3px 6px;
+  border-radius: 999px; background: var(--accent); color: var(--bg); box-shadow: 0 0 0 2px var(--panel); white-space: nowrap; }
+.mach-opts { gap: 8px 24px; align-items: center; padding: 2px 4px 0; }
+.mach-opts-note { text-align: right; min-width: 240px; }
 
 /* ------------------------------------------------------------- responsive */
 /* Breakpoints are classes the shell sets on <html> from the EFFECTIVE width

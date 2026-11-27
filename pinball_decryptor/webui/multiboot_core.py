@@ -1367,6 +1367,70 @@ def source_exists(path):
     return bool(p) and (os.path.isfile(p) or split_edits(p) is not None)
 
 
+#: PAD-1630: A PICTURE IN THE CARD'S PLACE.  Dustin's first image was
+#: images/<game>/assets/lcd/GameLogo.png - dropped on the Edit dialog, whose
+#: only drop target with the game's own logo showing is Replace image… - and
+#: every check here asked only whether the file was THERE.  So the size
+#: check, the preview and the selector handed a PNG to the tools as the
+#: card, the toolbox said "no MBR signature" and the menu could not be
+#: built, with nothing on the tab naming the file.  A card, ISO or update is
+#: never a picture, a clip or a sound, on any platform, so those are refused
+#: by name and by their first bytes (a logo saved without its extension).
+_MEDIA_EXTS = dict(
+    [(e, "picture") for e in (".png", ".jpg", ".jpeg", ".bmp", ".webp",
+                              ".tif", ".tiff", ".heic", ".svg", ".psd")]
+    + [(e, "video") for e in (".mp4", ".mov", ".m4v", ".mkv", ".avi",
+                              ".webm", ".flv", ".gif", ".wmv", ".mpg")]
+    + [(e, "sound") for e in (".wav", ".mp3", ".ogg", ".flac", ".m4a",
+                              ".aac", ".aif", ".aiff", ".opus")])
+_MEDIA_MAGIC = ((b"\x89PNG\r\n\x1a\n", "picture"), (b"\xff\xd8\xff", "picture"),
+                (b"GIF8", "video"), (b"\x1aE\xdf\xa3", "video"),
+                (b"OggS", "sound"), (b"fLaC", "sound"), (b"ID3", "sound"))
+
+
+def file_media_kind(path):
+    """'picture', 'video' or 'sound' when *path* is one - by its name, or by
+    its first bytes - else ''.  Never raises."""
+    p = (path or "").strip().strip('"')
+    kind = _MEDIA_EXTS.get(os.path.splitext(p)[1].lower())
+    if kind:
+        return kind
+    try:
+        with open(p, "rb") as f:
+            head = f.read(16)
+    except OSError:
+        return ""
+    for magic, k in _MEDIA_MAGIC:
+        if head.startswith(magic):
+            return k
+    if head[:4] == b"RIFF" and head[8:12] in (b"WAVE", b"AVI "):
+        return "sound" if head[8:12] == b"WAVE" else "video"
+    if head[4:8] == b"ftyp":
+        return "video"
+    return ""
+
+
+def not_card_reason(path, be=None):
+    """Why *path* cannot be an image of the card (a picture, a clip or a
+    sound), as a sentence, else ''.  A base card + edits pair is judged by
+    its base card."""
+    p = (path or "").strip().strip('"')
+    if not p:
+        return ""
+    pair = split_edits(p)
+    base = pair[0] if pair else p
+    kind = file_media_kind(base)
+    if not kind:
+        return ""
+    noun = getattr(be, "image_noun", "") or "card image"
+    tail = (" To show it on the menu, open Edit image… and set it as the "
+            "image's Picture." if kind == "picture" else
+            " To show it on the menu, open Edit image… and set it as the "
+            "image's video." if kind == "video" else "")
+    return ("%s is a %s, not a %s.%s"
+            % (os.path.basename(base), kind, noun, tail))
+
+
 def member_title(path):
     """A random card's game's name: its title - or, for a base card + edits,
     the edits folder's name, since every set over one card shares its title."""
@@ -1845,6 +1909,10 @@ def validate_form(form, sources=True):
                             "group needs at least 2." % (i, len(row.members)))
             for mi, m in enumerate(row.members):
                 mp = (m.path or "").strip().strip('"')
+                bad = not_card_reason(mp, be)
+                if bad:
+                    errs.append("Image %d, game %d: %s" % (i, mi + 1, bad))
+                    continue
                 if not sources:
                     continue
                 if not mp:
@@ -1894,7 +1962,10 @@ def validate_form(form, sources=True):
                                 % (i, what, val))
             continue
         p = (row.path or "").strip().strip('"')
-        if not sources:
+        bad = not_card_reason(p, be)
+        if bad:
+            errs.append("Image %d: %s" % (i, bad))     # PAD-1630
+        elif not sources:
             pass
         elif not p:
             errs.append("Image %d has no file." % i)
@@ -9361,6 +9432,10 @@ class MultibootPanel:
         if not path:
             return
         be = self._backend
+        bad = not_card_reason(path, be)             # PAD-1630
+        if bad:
+            self._error(bad)
+            return
         if be.max_games:
             # THE BUILDS are the limit, not the rows: a random card over them is
             # a row that adds none (backend.max_games)
@@ -9683,6 +9758,10 @@ class MultibootPanel:
         if row is None or row.keep:
             return 0
         paths = [(q or "").strip().strip('"') for q in (paths or [])]
+        bad = [r for r in (not_card_reason(q, self._backend) for q in paths) if r]
+        if bad:                                     # PAD-1630
+            self._error(bad[0])
+            return 0
         have = {_norm(m.path or "") for m in row.members}
         new, seen = [], set()
         for q in paths:
@@ -10410,6 +10489,10 @@ class MultibootPanel:
         if is_group(row):
             self._error("A random card has no image file of its own - change "
                         "its games in the list below.")
+            return False
+        bad = not_card_reason(path, self._backend)  # PAD-1630
+        if bad:
+            self._error(bad)
             return False
         old = (row.path or "").strip().strip('"')
         if old and _norm(old) == _norm(path):
@@ -11314,6 +11397,11 @@ class MultibootPanel:
         # every GAME the card will carry, a random card's members included
         # (PAD-189), not one path per row.
         if len(key[0]) < 1 or not all(source_exists(p) for p in key[0]):
+            return False
+        # PAD-1630: a picture where a card goes is here to read, and the tool
+        # would only say "no MBR signature" about it in the Log.  The tab's
+        # checks name it (validate_form); the size stays unknown meanwhile.
+        if any(not_card_reason(p, self._backend) for p in key[0]):
             return False
         form = self.form()
         # ...and, for a loaded card that carries a record, what an update

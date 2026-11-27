@@ -179,6 +179,12 @@ _PACKAGE_FILES = ("pinball_decryptor/plugins/bof/pck_directory.py",
                   "pinball_decryptor/plugins/stern/progreloc.py",
                   "pinball_decryptor/plugins/stern/shader_profile.py",
                   "pinball_decryptor/plugins/stern/sidx.py",
+                  # explorer.CardImage asks every card whether it is a Spike 3
+                  # one as it opens it (a function-level import): without
+                  # these two every Stern size check, preview and build on a
+                  # Mac died on "cannot import name 'spike3'" (PAD-1630)
+                  "pinball_decryptor/plugins/stern/spike3.py",
+                  "pinball_decryptor/plugins/stern/spike3_keys.py",
                   "pinball_decryptor/plugins/stern/valpatch.py",
                   # Spooky's mkspkmulti.py reads and packs the updates with the
                   # plugin's own detection and GPG layers (PAD-980)

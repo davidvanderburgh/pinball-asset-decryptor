@@ -1166,14 +1166,20 @@ def test_play_sequentially_on_replacement_falls_back_to_original(tmp_path):
         w.run(lambda: svc._assign.update({"video/attract.mp4": mine,
                                           "video/sub/boss.mp4": mine}))
         w.run(lambda: svc._load_track("video/attract.mp4", None))
+        seq = (w.state("video").get("play") or {}).get("seq") or 0
         assert _finish(w, "rep") is True
-        st = _wait(w, lambda s: s["preview"]["rel"] == "video/intro.mp4")
+        # the row loads its panes before it says which one plays: wait for
+        # the play step itself, not just the preview (macOS caught the gap)
+        st = _wait(w, lambda s: s["preview"]["rel"] == "video/intro.mp4"
+                   and ((s.get("play") or {}).get("seq") or 0) > seq)
         assert st["play"]["side"] == "orig"
         # a next row that has a replacement plays it there
         w.run(lambda: svc._assign.update({"video/intro.mp4": mine}))
         w.run(lambda: svc._load_track("video/intro.mp4", None))
+        seq = (w.state("video").get("play") or {}).get("seq") or 0
         assert _finish(w, "rep") is True
-        st = _wait(w, lambda s: s["preview"]["rel"] == "video/sub/boss.mp4")
+        st = _wait(w, lambda s: s["preview"]["rel"] == "video/sub/boss.mp4"
+                   and ((s.get("play") or {}).get("seq") or 0) > seq)
         assert st["play"]["side"] == "rep"
 
 

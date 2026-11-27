@@ -39,6 +39,45 @@ WHERE = ("For a multi-boot card (Multi-boot tab): the operator's switch for the 
          "120). It wins over the tab's own setting.")
 
 
+# ---- BOOT MENU and BOOT MENU TIMER --------------------------------------------------------------------------------
+# Simon (2026-11-27): "No boot menu with facility to enable/disable via service menu. Boot menu with ditto. Bootmenu - no
+# service menu option (always boots to menu). We should also be able to set boot menu timer OFF/15 seconds. 30 seconds".
+# Two more rows of the same kind, read by padmenu.so inside the game. The boot menu is the CARD's, not a game's, so the
+# value is one for the whole card: the last change made in any game's service menu. padmenu.so keeps it in
+# :data:`CARD_FILE` on the data partition (every game of a multi-boot card shares it) and, once the game has read its own
+# settings, puts the card's value into the rows, so every game's menu shows what the card does. codeselect reads the
+# file at power-up. Both only where the Multi-boot tab lets the service menu decide (images.conf ``menu_rows=on``); a
+# card built "Boot menu, always" ignores them.
+#: BOOT MENU: Off / On (stored 0 / 1). On to start with; padmenu.so puts the card's own value in before anyone looks
+SHOW_DEFAULT = 2                        # menu_settings counts an Off / On row's default from 1: 2 is On
+SHOW_HELP = "On: the boot menu at power-up. Off: the last game starts"
+#: BOOT MENU TIMER: seconds, 0 (Off: the menu waits for START), 15, 30 (menu_settings.STEPS)
+TIMER_MAX = 30
+TIMER_VALUES = TIMER_MAX // STEP_SECONDS + 1
+TIMER_DEFAULT = 1                       # 0 (Off) to start with; padmenu.so puts the card's own value in
+TIMER_HELP = "Seconds the boot menu waits, then starts the game. 0 Off"
+#: where padmenu.so keeps the card's value (codeselect reads it at power-up): "menu <0|1>" and "timer <seconds>" lines
+CARD_FILE = "/data/padmenu.boot"
+SHOW_WHERE = ("For a multi-boot card (Multi-boot tab, Boot menu: \"the service menu can turn it on/off\"): Off starts "
+              "the last game played at power-up (the right flipper on the start-up screen still opens the menu), On "
+              "shows the menu. One setting for the whole card: the last change in any game's service menu wins, and "
+              "every game's menu shows it.")
+TIMER_WHERE = ("For a multi-boot card (as Boot Menu): how long the boot menu counts down before it starts the game "
+               "highlighted, 0 (Off: it waits for START), 15 or 30 seconds. One setting for the whole card, as Boot "
+               "Menu.")
+
+
+def card_lines(show=None, timer=None):
+    """``padmenu.cfg`` lines for the BOOT MENU (*show*) and BOOT MENU TIMER (*timer*) rows: each ``(live, key,
+    default)`` as :func:`cfg_text`'s, the default as stored (0 / 1; seconds)."""
+    out = ""
+    if show is not None:
+        out += "boot_show\t0x%08x\t%s\t%d\n" % (int(show[0]) & 0xffffffff, show[1], int(show[2]))
+    if timer is not None:
+        out += "boot_timer\t0x%08x\t%s\t%d\n" % (int(timer[0]) & 0xffffffff, timer[1], int(timer[2]))
+    return out
+
+
 def cfg_text(live, key, default=DEFAULT_SECONDS):
     """``padmenu.cfg``: the row's value word *live* (a row of its own: the game's address of the value; on the MORE
     SETTINGS rows: the runtime's word, :data:`.menu_settings.SHARED_BASE` and up, whose value padmenu reads from

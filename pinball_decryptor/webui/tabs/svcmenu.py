@@ -14,6 +14,7 @@ import tempfile
 import threading
 
 from .base import TabService, rpc
+from ...plugins.stern import boot_flip as BF
 
 INTRO = ("The game's service menu as this card will show it at the machine: the rows the app adds, where the Write "
          "puts them, and what the operator sees. Click a row for its help.")
@@ -35,6 +36,8 @@ SETTINGS = (
     ("brightness", "Picture settings", "Brightness, Contrast and Saturation (Write tab)."),
     ("saved_progress", "Saved Progress", "On the card when the project keeps progress between games (a variable "
                                          "saved between games). Clear clears it; so does a factory reset."),
+    ("boot_show", "Boot Menu", BF.SHOW_WHERE),                      # Simon (2026-11-27)
+    ("boot_timer", "Boot Menu Timer", BF.TIMER_WHERE),
     ("boot_flip", "Boot Menu Flipper", "For a multi-boot card (Multi-boot tab): the operator's switch for the right "
                                        "flipper hold back to the boot menu. The hold is always 5 s; the value is "
                                        "how many seconds no game must have been running before that hold works, "
@@ -133,7 +136,7 @@ class ServiceMenuTab(TabService):
                 else:
                     note = OFF_NOTES[key] + ("" if key in has else " " + where)
                 row.update(can=True, on=on, note=note)
-            elif key == SM.FLIP_KEY:                    # Simon: needs nothing in the project; unticked to start with
+            elif key in SM.BOOT_KEYS:                   # Simon: needs nothing in the project; unticked to start with
                 on = key in ticked
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row. " + where)
             elif key == "handicap":

@@ -91,6 +91,12 @@ SPOKEN_SCORES = "spoken_scores"
 #: Simon (2026-11-25): BOOT MENU FLIPPER (:mod:`.boot_flip`): a multi-boot card's right flipper hold back to the boot menu,
 #: seconds with no game on before the hold counts, 0 Off (2026-11-26) - read by padmenu.so, not by the runtime
 BOOT_FLIP = "boot_flip"
+#: Simon (2026-11-27): 'No boot menu with facility to enable/disable via service menu. Boot menu with ditto. Bootmenu - no service menu option (always boots to menu). We should also be able to set boot menu timer OFF/15 seconds. 30 seconds'.
+#: BOOT MENU: whether a multi-boot card shows its boot menu at power-up (Off / On, stored 0 / 1); BOOT MENU TIMER: the
+#: menu's countdown, seconds (0 Off = wait for START, 15, 30). One value for the whole card, the last change in any
+#: game's menu (padmenu.so keeps /data/padmenu.boot, codeselect reads it at power-up) - :mod:`.boot_flip`
+BOOT_SHOW = "boot_show"
+BOOT_TIMER = "boot_timer"
 #: each setting of ours: the adjustment it takes over, its descriptor caption, its row caption and
 #: the menu category whose page lists it. EDITION sits on Attract Mode (16), beside the game's own
 #: BOOT SCREEN and 70TH BOOT SCREEN, which is where an operator already picks how the game looks.
@@ -109,6 +115,8 @@ SETTINGS = {
     COLOUR_BLIND: (None, "COLOR BLIND", "Color Blind", 16),
     SPOKEN_SCORES: (None, "SPOKEN SCORES", "Spoken Scores", 16),
     BOOT_FLIP: (None, "BOOT MENU FLIPPER", "Boot Menu Flipper", 16),
+    BOOT_SHOW: (None, "BOOT MENU", "Boot Menu", 16),
+    BOOT_TIMER: (None, "BOOT MENU TIMER", "Boot Menu Timer", 16),
 }
 
 
@@ -149,7 +157,7 @@ OWN_HELP = "Settings added by this card's custom code."
 #: settings a change of shows only from the next power-up: IMAGE SET (the auto_loaded scenes are read at boot, before
 #: the game reads its settings) and EDITION (read off the board's store before the game starts, NOT_SHARED). Their
 #: row caption gets " (*)" where it has room, and the page's help line says what the mark means (Simon's words)
-POWER_UP = frozenset({IMAGE_SET, EDITION})
+POWER_UP = frozenset({IMAGE_SET, EDITION, BOOT_SHOW, BOOT_TIMER})     # Simon: the boot menu's, read at power-up
 POWER_UP_MARK = " (*)"
 OWN_HELP_POWER_UP = ("Settings added by custom code. Items with (*) take effect on next power up",
                      "Items with (*) take effect on next power up.")
@@ -172,7 +180,7 @@ VALUES_CEILING = 9
 #: (the high scores step by a million) - 0 Off, 15, 30 ... 120. A setting here offers its values that far apart on a
 #: row of its own; on the shared MORE SETTINGS rows (the runtime's value row has no step) it is every value between,
 #: and its reader rounds (padmenu.so: 1 to 14 is 15).
-STEPS = {"boot_flip": 15}
+STEPS = {"boot_flip": 15, "boot_timer": 15}          # BOOT MENU TIMER: 0 Off, 15, 30 (Simon)
 #: a category table record: {category, kind, id}; kind 3 is an adjustment row
 REC = 12
 KIND_ADJUSTMENT = 3
@@ -1542,8 +1550,12 @@ def plan_shared(table, rows):
     first = share[0]
     picks = [SETTINGS[k][2] for k, *_ in share]
     on = {"category": first[3]["category"]} if "category" in first[3] else {}      # the page of our own
+    # the value row is planned as one of them, but the runtime gives it each pick's own range as it is picked: plan it
+    # as the one with the fewest values (Simon, 2026-11-27: BOOT MENU FLIPPER first, its 121 seconds, refused the lot)
+    tmpl = min(share, key=lambda e: e[1])
     settings, writes, cat, own_refused = _plan_rows(
-        table, own + [(MORE_SELECT, len(share), picks, on), (MORE_VALUE, first[1], first[2], dict(first[3]))])
+        table, own + [(MORE_SELECT, len(share), picks, on),
+                      (MORE_VALUE, tmpl[1], tmpl[2], dict(tmpl[3], **on))])
     refused.update({k: v for k, v in own_refused.items() if k not in (MORE_SELECT, MORE_VALUE)})
     by_key = {st.key: st for st in settings}
     pick, value = by_key.get(MORE_SELECT), by_key.get(MORE_VALUE)

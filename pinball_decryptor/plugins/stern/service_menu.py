@@ -76,6 +76,10 @@ def wanted(project, honour_off=True):
         jobs.append(E._SavedProgressMenu(log))
     if FLIP_KEY in on_keys(project):                    # Simon: BOOT MENU FLIPPER, when ticked on the Service menu tab
         jobs.append(E._BootFlipMenu(log))
+    if SHOW_KEY in on_keys(project):                    # Simon (2026-11-27): BOOT MENU and BOOT MENU TIMER
+        jobs.append(E._BootShowMenu(log))
+    if TIMER_KEY in on_keys(project):
+        jobs.append(E._BootTimerMenu(log))
     if honour_off:
         off = off_keys(project)
         jobs = [j for j in jobs if j.KEY not in off]
@@ -137,8 +141,14 @@ OFF_KEYS = ("music_mode", "edition", "image_set")
 #: Simon (2026-11-25): BOOT MENU FLIPPER (:mod:`.boot_flip`) is ticked here too, and only here: it needs nothing in the
 #: project, so a ticked row is the real setting (never a placeholder) and an unticked one is not on the card
 FLIP_KEY = "boot_flip"
+#: Simon (2026-11-27): BOOT MENU and BOOT MENU TIMER (:mod:`.boot_flip`), the same kind: ticked here only, never
+#: placeholders
+SHOW_KEY = "boot_show"
+TIMER_KEY = "boot_timer"
 #: every row the "on" list can hold
-TICK_KEYS = OFF_KEYS + (FLIP_KEY,)
+TICK_KEYS = OFF_KEYS + (FLIP_KEY, SHOW_KEY, TIMER_KEY)
+#: the rows that need nothing in the project (the boot menu's)
+BOOT_KEYS = (FLIP_KEY, SHOW_KEY, TIMER_KEY)
 
 
 def on_keys(project):

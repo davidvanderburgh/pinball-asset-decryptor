@@ -551,6 +551,8 @@ int conf_load(struct conf *c, const char *path, char *err, int errlen)
                 conf_warn(c, "%s:%d: boot_menu=%s is not 'menu', 'flipper' or 'hidden': read as 'menu'",
                           path, lineno, val);
             }
+        } else if (!strcmp(key, "menu_rows")) {
+            c->menu_rows = !strcmp(val, "on");     /* Simon (2026-11-27): the service menus' BOOT MENU rows */
         } else if (!strcmp(key, "flip_hold")) {
             int v = atoi(val);
             if (v >= 1 && v <= 30) c->flip_hold = v;

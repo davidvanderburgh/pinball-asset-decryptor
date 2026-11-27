@@ -58,7 +58,7 @@ def test_the_values_and_help():
     # Simon (2026-11-26): "we let the user set the values" - seconds, 0 Off, 15 to start with
     assert (BF.MAX_SECONDS, BF.MENU_VALUES, BF.DEFAULT_SECONDS, BF.MENU_DEFAULT) == (120, 9, 15, 2)
     # "I'd rather the row jump to off from 15": 0, 15, 30 ... 120 by the game's own step
-    assert MS.STEPS == {"boot_flip": 15} and BF.STEP_SECONDS == 15
+    assert MS.STEPS["boot_flip"] == 15 and BF.STEP_SECONDS == 15     # (and BOOT MENU TIMER's, Simon 2026-11-27)
     assert len(BF.MENU_HELP) <= 63                          # the spare help lines' room
     # Simon's facts (5 s hold, 0 Off, seconds idle, minimum 15), said plainly (PR #48 review, David: "more explicit")
     assert BF.MENU_HELP == "Hold R flipper 5s=boot menu if no game for N s. 0 Off, min 15"
@@ -81,7 +81,7 @@ def test_the_write_puts_the_row_and_its_file_on_the_card():
     from pinball_decryptor.plugins.stern import mode_write as MW
     src = inspect.getsource(E)
     assert "flip_menu = (_BootFlipMenu(log) if not _is_spike3(disk_f)" in src
-    assert "spk_menu, flip_menu], log)" in src            # after v1.615.0's COLOR BLIND / SPOKEN SCORES
+    assert "spk_menu, flip_menu,\n                                              show_menu, timer_menu], log)" in src
     assert "mode_plan.flip_file = flip_cfg" in src
     assert "settings_cfg or flip_cfg)):" in src                # the runtime's files go on for this row alone too
     assert "or flip_cfg):" in src
@@ -108,7 +108,7 @@ def test_the_service_menu_tab_offers_it(project, monkeypatch):
     assert "boot_flip" in keys
     assert dict((k, n) for k, n, _w in svcmenu.SETTINGS)["boot_flip"] == "Boot Menu Flipper"
     src = inspect.getsource(svcmenu.ServiceMenuTab)
-    assert "elif key in SM.TICK_KEYS:" in src and "elif key == SM.FLIP_KEY:" in src
+    assert "elif key in SM.TICK_KEYS:" in src and "elif key in SM.BOOT_KEYS:" in src
 
 
 def test_it_plans_on_godzilla_116_with_the_other_rows():

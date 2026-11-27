@@ -33010,6 +33010,68 @@ static void mset_line(char *s)
     mset_bad++;
 }
 
+/* THE BOOT MENU'S OWN (Simon, 2026-11-27: "No boot menu with facility to enable/disable via service menu. Boot menu
+ * with ditto ... boot menu timer OFF/15 seconds. 30 seconds").  BOOT MENU (boot_show, 0 Off / 1 On) and BOOT MENU
+ * TIMER (boot_timer, seconds) are a multi-boot card's, one value for the whole card: padmenu.so keeps it in
+ * MSET_BOOT_FILE (the last change in any game's menu), and before any change it is what the card's images.conf says
+ * (boot_menu=hidden is Off, timeout=).  Only on a card whose images.conf says menu_rows=on.  On the shared rows the
+ * value is ours, so the card's is loaded here and the menu shows it; a change there is written to MSET_STATE as any
+ * other, where padmenu.so sees it and makes it the card's. */
+static const char MSET_BOOT_FILE[] = "/data/padmenu.boot";
+static const char MSET_BOOT_CONF[] = "/usr/local/codeselect/images.conf";
+
+/* "<key>=<value>" or "<key> <value>" at a line's start in raw[0..n): the value's number, else -1 (a word: -2 for
+ * "hidden" / "on", -3 for anything else) */
+static long mset_boot_word(const char *raw, long n, const char *key, char sep)
+{
+    long i, found = -1;
+    unsigned len = 0;
+    while (key[len]) len++;
+    for (i = 0; i < n; i++) {
+        const char *s = raw + i;
+        unsigned j;
+        int ok;
+        if (i && raw[i - 1] != '\n') continue;
+        for (j = 0; j < len && i + (long)j < n && s[j] == key[j]; j++) {}
+        if (j != len || s[len] != sep) continue;
+        s += len + 1;
+        if (*s >= '0' && *s <= '9') { long v = mset_num(s, &ok); found = ok ? v : -1; }
+        else if (str_starts(s, "hidden") || str_starts(s, "on")) found = -2;
+        else found = -3;
+    }
+    return found;
+}
+
+static void mset_boot_card(void)
+{
+    static char conf[4096], card[128];
+    long n = pm_read_file(MSET_BOOT_CONF, conf, sizeof conf - 1), m, v;
+    int menu = 1;
+    long secs = -1;
+    unsigned k;
+    if (n <= 0) return;
+    conf[n] = 0;
+    if (mset_boot_word(conf, n, "menu_rows", '=') != -2) return;         /* the tab's "Boot menu, always" */
+    menu = mset_boot_word(conf, n, "boot_menu", '=') != -2;
+    secs = mset_boot_word(conf, n, "timeout", '=');
+    m = pm_read_file(MSET_BOOT_FILE, card, sizeof card - 1);
+    if (m > 0) {
+        card[m] = 0;
+        v = mset_boot_word(card, m, "menu", ' ');
+        if (v == 0 || v == 1) menu = (int)v;
+        v = mset_boot_word(card, m, "timer", ' ');
+        if (v >= 0) secs = v;
+    }
+    for (k = 1; k <= mset_n; k++) {
+        if (str_eq(mset_opt[k].key, "boot_show")) mset_word[k] = (unsigned)menu;
+        else if (str_eq(mset_opt[k].key, "boot_timer") && secs >= 0)
+            mset_word[k] = (unsigned)(secs > mset_opt[k].max ? mset_opt[k].max : secs);
+        else continue;
+        say("more settings: %s is the boot menu's, the card's value %u (%s)", mset_opt[k].key, mset_word[k],
+            m > 0 ? "a service menu set it" : "the card's images.conf");
+    }
+}
+
 /* the values the settings had when the machine last ran, by key ("music_mode 2"); a key not there takes its default */
 static void mset_state_read(void)
 {
@@ -33017,7 +33079,7 @@ static void mset_state_read(void)
     long n = pm_read_file(MSET_STATE, raw, sizeof raw - 1), i;
     unsigned k;
     for (k = 1; k <= mset_n; k++) mset_word[k] = (unsigned)mset_opt[k].def;
-    if (n <= 0) return;
+    if (n <= 0) { mset_boot_card(); return; }
     raw[n] = 0;
     for (i = 0; i < n; i++) {
         char *line = raw + i, *sp;
@@ -33039,6 +33101,7 @@ static void mset_state_read(void)
             if (ok && v >= mset_opt[k].min && v <= mset_opt[k].max) mset_word[k] = (unsigned)v;
         }
     }
+    mset_boot_card();                                    /* Simon: the boot menu's two are the card's */
 }
 
 extern int fsync(int);

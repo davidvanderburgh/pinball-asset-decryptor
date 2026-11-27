@@ -10244,6 +10244,11 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
         from . import service_menu as _SvM_f
         flip_menu = (_BootFlipMenu(log) if not _is_spike3(disk_f) and _SvM_f.FLIP_KEY in _SvM_f.on_keys(assets_dir)
                      else None)
+        # Simon (2026-11-27): BOOT MENU and BOOT MENU TIMER, the multi-boot card's power-up menu, when ticked
+        show_menu = (_BootShowMenu(log) if not _is_spike3(disk_f) and _SvM_f.SHOW_KEY in _SvM_f.on_keys(assets_dir)
+                     else None)
+        timer_menu = (_BootTimerMenu(log) if not _is_spike3(disk_f) and _SvM_f.TIMER_KEY in _SvM_f.on_keys(assets_dir)
+                      else None)
         # PAD-1382: the owner's own settings (Service menu tab) beside them, all in the owner's order
         from . import service_menu as _SvM
         if not _is_spike3(disk_f):
@@ -10257,7 +10262,8 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                 else:
                     image_menu = _ph
         _menu_list = _SvM.arrange(assets_dir, [music_menu, edition_menu, *picture_menus, coop_menu, hand_menu,
-                                              image_menu, saved_menu, cvd_menu, spk_menu, flip_menu], log)
+                                              image_menu, saved_menu, cvd_menu, spk_menu, flip_menu,
+                                              show_menu, timer_menu], log)
         menu_job = _MenuJobs(*_menu_list) if _menu_list else None
         picture_cfg = ""
         settings_cfg = ""
@@ -10297,9 +10303,10 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
             if hand_menu is not None and hand_menu.ok:
                 # PAD-1033: no HANDICAP row (no spare setting left): the handicaps are always on
                 hand_setting = hand_menu.setting.live
-            if flip_menu is not None and flip_menu.ok:
-                # the row's value word, for padmenu.so (a row of its own, or the runtime's word on MORE SETTINGS)
-                flip_cfg = _boot_flip_cfg(flip_menu, grow_work)
+            if any(m is not None and m.ok for m in (flip_menu, show_menu, timer_menu)):
+                # the rows' value words, for padmenu.so (a row of its own, or the runtime's word on MORE SETTINGS)
+                _ok = lambda m: m if m is not None and m.ok else None
+                flip_cfg = _boot_flip_cfg(_ok(flip_menu), grow_work, _ok(show_menu), _ok(timer_menu))
             if saved_menu is not None and saved_menu.ok:
                 # PAD-1402: no SAVED PROGRESS row (no spare setting left): the progress is kept, but nothing clears it
                 saved_setting = saved_menu.setting.live
@@ -12907,6 +12914,65 @@ class _BootFlipMenu(_MusicModeMenu):
                  "card keeps the Multi-boot tab's flipper setting." % self.why, "warning")
 
 
+class _BootShowMenu(_MusicModeMenu):
+    """Simon (2026-11-27: "No boot menu with facility to enable/disable via service menu. Boot menu with ditto"): BOOT
+    MENU in the game's own service menu (:mod:`.boot_flip`): Off / On, whether a multi-boot card shows its boot menu at
+    power-up. One value for the whole card (padmenu.so's /data/padmenu.boot); padmenu.so reads it (``padmenu.cfg``)."""
+
+    KEY = "boot_show"
+
+    def __init__(self, log):
+        super().__init__(2, (), log)
+
+    def wanted(self):
+        from . import boot_flip as _BF
+        return self.KEY, 2, (), {"default": _BF.SHOW_DEFAULT, "help_text": _BF.SHOW_HELP, "onoff": True}
+
+    def done(self):
+        self.ok = True
+        self.log("Boot menu: BOOT MENU is in the operator menu (%s). On a multi-boot card whose Multi-boot tab lets the "
+                 "service menu decide, Off starts the last game played at power-up and On shows the boot menu; the "
+                 "last change in any game's menu wins, and every game's menu shows the card's value."
+                 % self.setting.where, "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Boot menu: BOOT MENU could not be added to the operator menu (%s), so this game cannot change the "
+                 "boot menu; the Multi-boot tab's choice (or another game's row) decides." % self.why, "warning")
+
+
+class _BootTimerMenu(_MusicModeMenu):
+    """Simon (2026-11-27: "We should also be able to set boot menu timer OFF/15 seconds. 30 seconds"): BOOT MENU TIMER
+    (:mod:`.boot_flip`): the boot menu's countdown, 0 (Off: it waits for START), 15 or 30 seconds, the card's one value
+    as BOOT MENU's."""
+
+    KEY = "boot_timer"
+
+    def __init__(self, log):
+        from . import boot_flip as _BF
+        super().__init__(_BF.TIMER_VALUES, (), log)
+
+    def wanted(self):
+        from . import boot_flip as _BF
+        return self.KEY, self.count, self.names, {"default": _BF.TIMER_DEFAULT, "help_text": _BF.TIMER_HELP,
+                                                  "from_zero": True}
+
+    def done(self):
+        self.ok = True
+        self.log("Boot menu timer: BOOT MENU TIMER is in the operator menu (%s): the seconds a multi-boot card's boot "
+                 "menu counts down before it starts the game highlighted, 0 (Off: it waits for START), 15 or 30. One "
+                 "setting for the whole card, as BOOT MENU's." % self.setting.where, "info")
+
+    def fail(self, why):
+        if self.why or self.ok:
+            return
+        self.why = str(why).rstrip(".") or "unknown"
+        self.log("Boot menu timer: BOOT MENU TIMER could not be added to the operator menu (%s), so this game cannot "
+                 "change the boot menu's countdown." % self.why, "warning")
+
+
 class _ImageSetMenu(_MusicModeMenu):
     """PAD-1390: IMAGE SET in the game's own service menu (:mod:`.scene_variants`): which of the project's image sets
     the screens with variants show, 1 to n by the sets' names, 1 (the scenes as the project has them) to start with.
@@ -13055,13 +13121,19 @@ def _shared_settings_cfg(menu_job, work, log):
     return path
 
 
-def _boot_flip_cfg(flip_menu, work):
-    """BOOT MENU FLIPPER: ``padmenu.cfg`` in *work* (:func:`.boot_flip.cfg_text`), its path."""
+def _boot_flip_cfg(flip_menu, work, show_menu=None, timer_menu=None):
+    """BOOT MENU FLIPPER, BOOT MENU and BOOT MENU TIMER (Simon): ``padmenu.cfg`` in *work* (:func:`.boot_flip.cfg_text`,
+    :func:`.boot_flip.card_lines`) for the rows that went on (None: not on the card), its path."""
     from . import boot_flip as _BF
     os.makedirs(_lp(work), exist_ok=True)
     path = os.path.join(work, _BF.CFG_NAME)
+    text = (_BF.cfg_text(flip_menu.setting.live, flip_menu.KEY, flip_menu.setting.default)   # from_zero: seconds
+            if flip_menu is not None else "")
+    text += _BF.card_lines(
+        (show_menu.setting.live, show_menu.KEY, show_menu.setting.default) if show_menu is not None else None,
+        (timer_menu.setting.live, timer_menu.KEY, timer_menu.setting.default) if timer_menu is not None else None)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
-        f.write(_BF.cfg_text(flip_menu.setting.live, flip_menu.KEY, flip_menu.setting.default))   # from_zero: seconds
+        f.write(text)
     return path
 
 

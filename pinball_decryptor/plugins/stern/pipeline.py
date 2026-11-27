@@ -835,6 +835,15 @@ class SternRevertPipeline(BasePipeline):
         self._done(True, msg)
 
 
+#: PAD-1642: a whole card written without the card's own settings starts as a new machine, and the Wi-Fi network a
+#: Spike 2 machine joined is one of those settings (/data/nv/<game>/NVM): remote access is on the card, and the
+#: machine is on no network to be reached over until it joins the Wi-Fi again from its own menu.
+FORGETS_WIFI = ("The card was written without its own settings, so the machine starts as new: if it is on Wi-Fi, it "
+                "has forgotten your Wi-Fi network. Join it again from the machine's own menu, then Find my machine "
+                "on the Network tab finds it. A machine on a network cable needs nothing. (Keep the SD card's "
+                "settings, audits and high scores, in this dialog, keeps it next time.)")
+
+
 class SternFlashImagePipeline(BasePipeline):
     """Flash a pre-built SD-card image (.img/.raw) onto a physical card.
 
@@ -896,6 +905,15 @@ class SternFlashImagePipeline(BasePipeline):
         inner = self._inner
         if inner is not None:
             inner.cancel()
+
+    @staticmethod
+    def _reached_over_network(image_path):
+        """PAD-1642: whether the image just written is one PAD reaches over the network (remote access on it)."""
+        try:
+            from ...core import menu_network
+            return menu_network.has_remote_access(image_path)
+        except Exception:                                   # noqa: BLE001 - the card is written; a note never fails it
+            return False
 
     def _with_network(self):
         """PAD-1467: a copy of the image with the project's network options on it; its path, or None when the
@@ -972,6 +990,8 @@ class SternFlashImagePipeline(BasePipeline):
         self._check_cancel()
 
         self._set_phase(3)  # Flush
+        if not self.menu_only and not self.keep_data and self._reached_over_network(image_path):
+            self._log(FORGETS_WIFI, "warning")
         self._done(True, ("Wrote the boot menu (%s) onto the SD card (%s) - "
                           "the games and the machine's own settings and "
                           "scores were left alone."

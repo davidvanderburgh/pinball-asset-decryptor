@@ -143,6 +143,12 @@ class FlashDialog:
     NET_NOTE = ("This image is written with %s from this project put on it first: a copy is made, written and "
                 "removed, and the image file itself is not changed. A score feed is not carried: it needs a "
                 "build of the project.")
+    #: PAD-1642: what the tick does NOT keep.  The Wi-Fi network a Spike 2 machine joined is one of the game's own
+    #: settings (/data/nv/<game>/NVM, core/share_build.py), so a whole card written without the card's settings
+    #: comes up with none: remote access on, and nothing to reach it over.  Dustin's Iron Maiden vanished that way.
+    NET_WIFI_NOTE = ("Your machine's own Wi-Fi network is not one of them: the machine keeps it with its settings on "
+                     "the SD card. Tick Keep the SD card's settings, audits and high scores as well, or the machine "
+                     "has to join your Wi-Fi again from its own menu before it can be found.")
     MENU_NOTE_BUILD = ("A freshly built image has never been on this card, "
                        "so the whole of it has to be written.")
     MENU_NOTE_FRESH = ("This card was only just built or updated, so no SD "
@@ -617,7 +623,9 @@ class FlashDialog:
             "net_label": self.NET_LABEL,
             "net_keep": bool(self.net_keep and not self.menu),
             "net_enabled": bool(writing and not self.menu),
-            "net_note": (self.NET_NOTE % self.net_said) if self.keeping_network() else "",
+            "net_note": (((self.NET_NOTE % self.net_said)
+                          + ("" if self.keeping_data() or not self.keep_offered else " " + self.NET_WIFI_NOTE))
+                         if self.keeping_network() else ""),
             "verify_offered": bool(self.verify_offered
                                    and not self.to_disk()),
             "skip_verify": bool(self.skip_verify),

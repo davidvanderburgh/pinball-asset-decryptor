@@ -248,14 +248,16 @@ def test_the_pick_not_the_row_sizes_the_team_game():
 
 
 def test_the_app_says_off_classic_enhanced():
+    """The runtime still reads an older card's three-value row (above); the app's row is Off / On now (Simon,
+    2026-11-27, agreed with daveyvandy), On to start with."""
     from pinball_decryptor.plugins.stern import coop_play as CP
     from pinball_decryptor.plugins.stern import engine as E
     from pinball_decryptor.webui import help_content
     from pinball_decryptor.webui.tabs import modes as M
     key, values, names, opts = E._CoopMenu(lambda *a: None).wanted()
-    assert (values, names, opts) == (3, (), {"default": 1, "help_text": CP.MENU_HELP, "from_zero": True})
-    assert (CP.MENU_OFF, CP.MENU_CLASSIC, CP.MENU_ENHANCED) == (0, 1, 2)
-    assert len(CP.MENU_HELP) <= 63 and CP.MENU_HELP.startswith("0 Off. 1 Classic. 2 Enhanced.")
+    assert (values, names, opts) == (2, (), {"default": 1, "help_text": CP.MENU_HELP, "onoff": True})
+    assert (CP.MENU_OFF, CP.MENU_ON) == (0, 1)
+    assert len(CP.MENU_HELP) <= 63 and CP.MENU_HELP.startswith("On: co-op games on the start menu")
     text = str(help_content.__dict__)                  # PAD-1443: no row - the start menu's games, named
     for entry in ("CO-OP PLAY", "TEAM PLAY 2 VS 2", "TEAM PLAY 2 VS 1"):
         assert "- **%s:**" % entry in text

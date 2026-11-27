@@ -858,6 +858,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 note = ("On the card: " + _CP.HOW[0].upper() + _CP.HOW[1:] + ". " + _CP.INSIDER_HOW
                         + ("" if not getattr(self, "_slugs", ()) and not getattr(self, "_code_list", ())
                            else " This project's modes keep the card's scores off Insider Connected anyway."))
+            if _CP.menu_asked(project):                 # Simon: the Service menu tab's Off / On row
+                note += (" The operator switches it in the service menu: CO-OP PLAY, Off or On (On to start with; "
+                         "the Service menu tab's Co-op Play row).")
         self.set(coop_shown=bool(project), coop_on=on, coop_locked=locked, coop_note=note,
                  coop_note_kind=kind,
                  coop_awards_ok=on and kind != "err" and not a64,                               # PAD-1028/1326

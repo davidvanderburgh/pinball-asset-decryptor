@@ -13036,7 +13036,9 @@ class _SavedProgressMenu(_MusicModeMenu):
 class _CoopMenu(_MusicModeMenu):
     """PAD-1017 round 2 (DoomWalrus666): CO-OP PLAY in the game's own service menu, on a spare setting; co-op (and, on
     a card of nothing else, the Insider Connected gate) only while it says On. PAD-1042: 0 Off, 1 Co-op, 2 Team 2v2.
-    PAD-1073: 0 Off, 1 Classic, 2 Enhanced; the game is the start menu's pick."""
+    PAD-1073: 0 Off, 1 Classic, 2 Enhanced; the game is the start menu's pick. PAD-1443 took it away; Simon
+    (2026-11-27, agreed with daveyvandy) put it back as Off / On, ticked on the Service menu tab: On is the card
+    with no row (the start menu's games and its own style step), Off the stock game."""
 
     KEY = "coop_play"
 
@@ -13046,17 +13048,15 @@ class _CoopMenu(_MusicModeMenu):
 
     def wanted(self):
         from . import coop_play as _CP
-        return self.KEY, _CP.MENU_VALUES, (), {"default": 1, "help_text": _CP.MENU_HELP, "from_zero": True}
+        return self.KEY, _CP.MENU_VALUES, (), {"default": _CP.MENU_ON, "help_text": _CP.MENU_HELP, "onoff": True}
 
     def done(self):
         self.ok = True
-        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), 0 (Off) to start with: set it to 1 "
-                 "(Classic: a character each, no special abilities) or 2 (Enhanced: with the abilities) and the "
-                 "start menu offers CO-OP PLAY, TEAM PLAY 2 VS 2 (players 1 and 3 against 2 and 4), TEAM PLAY 2 "
-                 "VS 1 (players 1 and 3 against 2) and TEAM PLAY 3 VS 1 (players 1, 3 and 4 against 2); at 2 also "
-                 "ENHANCED STANDARD (competing players, a character each). While it is 1 or 2 most Insider "
-                 "Connected features are off; at 0 the card reports as it always has (with no modes on it)."
-                 % self.setting.where, "info")
+        self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), On to start with. On, the start menu (both "
+                 "flipper buttons in attract) offers the co-op and team games as it does on a card with no such row, "
+                 "and a game played as one of them stays off Insider Connected. Off, the game is the stock game: "
+                 "no co-op or team games, and it reports to Insider Connected as it always has (with no modes on "
+                 "the card)." % self.setting.where, "info")
 
     def fail(self, why):
         if self.why or self.ok:
@@ -14710,63 +14710,63 @@ def _coop_select_wav(assets_dir, log):
     return got
 
 
-def _coop_mode_wavs(assets_dir, log):
-    """PAD-1637: the co-op sounds' own files in music modes 2.. (coop_play.mode_sounds) as WAVs in the project's write
-    cache, ``[(role, music mode, WAV)]`` (role: the sound's pseudo mode in mode 1): [] when co-op is off or none has
-    one. Each named for its source as it is (as the intro's: the build reads the sound set several times), under a
-    prefix of its own, so making one never removes another's."""
-    from . import coop_play as _CP
-    from . import sound_modes as _SMo
-    try:
-        chars = _CP.load_characters(assets_dir) if _CP.load(assets_dir) else None
-        files = _CP.mode_sounds(assets_dir, chars) if chars else []
-    except Exception:  # noqa: BLE001 - an unreadable sidecar: none
-        files = []
-    if files and not chars["pick"]:
-        files = [f for f in files if not f[0].startswith("picked")]
-    if not files:
-        return []
-    from ...core.audio import find_ffmpeg
-    ff = find_ffmpeg()
-    if not ff:
-        log("Co-op sounds: their files for the other music modes are left out of this build: ffmpeg was not found.",
-            "warning")
-        return []
-    folder = os.path.join(assets_dir, _SMo.CACHE_DIR)
-    out, keep = [], set()
-    for kind, m, src in files:
-        if kind.startswith("picked"):
-            role = _SMo.INTRO_MODE + int(kind[6:])
-        else:
-            role = {"intro": _SMo.INTRO_MODE, "ceremony": _SMo.CEREMONY_MODE, "select": _SMo.SELECT_MODE}[kind]
-        what = _SMo._coop_what(_SMo.coop_mode(role, m))
-        try:
-            st = os.stat(src)
-            name = "coopmm_%s_m%d_%s.wav" % (kind, int(m), hashlib.md5(
-                ("%s|%d|%d" % (os.path.abspath(src), st.st_size, st.st_mtime_ns)).encode()).hexdigest()[:12])
-            path = os.path.join(folder, name)
-            keep.add(name)
-            os.makedirs(folder, exist_ok=True)
-            if not (os.path.isfile(path) and os.path.getsize(path) > 44):
-                got = _CP.mode_sound_audio(kind, src, path + ".part.wav", ff)
-                if not got:
-                    log("Co-op sounds: %s has no sound, so %s plays mode 1's." % (os.path.basename(src), what), "info")
-                    continue
-                os.replace(got, path)
-            out.append((role, int(m), path))
-        except (OSError, _CP.CoopError) as e:
-            log("Co-op sounds: %s is left out of this build: %s." % (what, e), "warning")
-    try:
-        for f in os.listdir(folder):                    # the files of sources there no longer
-            if f.startswith("coopmm_") and f.endswith(".wav") and f not in keep:
-                os.remove(os.path.join(folder, f))
-    except OSError:
-        pass
-    if out:
-        log("Co-op sounds: %d file(s) of their own for the other music modes." % len(out), "info")
-    return out
-
-
+def _coop_mode_wavs(assets_dir, log):
+    """PAD-1637: the co-op sounds' own files in music modes 2.. (coop_play.mode_sounds) as WAVs in the project's write
+    cache, ``[(role, music mode, WAV)]`` (role: the sound's pseudo mode in mode 1): [] when co-op is off or none has
+    one. Each named for its source as it is (as the intro's: the build reads the sound set several times), under a
+    prefix of its own, so making one never removes another's."""
+    from . import coop_play as _CP
+    from . import sound_modes as _SMo
+    try:
+        chars = _CP.load_characters(assets_dir) if _CP.load(assets_dir) else None
+        files = _CP.mode_sounds(assets_dir, chars) if chars else []
+    except Exception:  # noqa: BLE001 - an unreadable sidecar: none
+        files = []
+    if files and not chars["pick"]:
+        files = [f for f in files if not f[0].startswith("picked")]
+    if not files:
+        return []
+    from ...core.audio import find_ffmpeg
+    ff = find_ffmpeg()
+    if not ff:
+        log("Co-op sounds: their files for the other music modes are left out of this build: ffmpeg was not found.",
+            "warning")
+        return []
+    folder = os.path.join(assets_dir, _SMo.CACHE_DIR)
+    out, keep = [], set()
+    for kind, m, src in files:
+        if kind.startswith("picked"):
+            role = _SMo.INTRO_MODE + int(kind[6:])
+        else:
+            role = {"intro": _SMo.INTRO_MODE, "ceremony": _SMo.CEREMONY_MODE, "select": _SMo.SELECT_MODE}[kind]
+        what = _SMo._coop_what(_SMo.coop_mode(role, m))
+        try:
+            st = os.stat(src)
+            name = "coopmm_%s_m%d_%s.wav" % (kind, int(m), hashlib.md5(
+                ("%s|%d|%d" % (os.path.abspath(src), st.st_size, st.st_mtime_ns)).encode()).hexdigest()[:12])
+            path = os.path.join(folder, name)
+            keep.add(name)
+            os.makedirs(folder, exist_ok=True)
+            if not (os.path.isfile(path) and os.path.getsize(path) > 44):
+                got = _CP.mode_sound_audio(kind, src, path + ".part.wav", ff)
+                if not got:
+                    log("Co-op sounds: %s has no sound, so %s plays mode 1's." % (os.path.basename(src), what), "info")
+                    continue
+                os.replace(got, path)
+            out.append((role, int(m), path))
+        except (OSError, _CP.CoopError) as e:
+            log("Co-op sounds: %s is left out of this build: %s." % (what, e), "warning")
+    try:
+        for f in os.listdir(folder):                    # the files of sources there no longer
+            if f.startswith("coopmm_") and f.endswith(".wav") and f not in keep:
+                os.remove(os.path.join(folder, f))
+    except OSError:
+        pass
+    if out:
+        log("Co-op sounds: %d file(s) of their own for the other music modes." % len(out), "info")
+    return out
+
+
 def _coop_picked_wavs(assets_dir, log):
     """PAD-1123: each co-op character's sound once picked (its sound file, else its picked clip's own sound) as a WAV
     in the project's write cache, ``[(character number, WAV)]``: [] when co-op or the pick is off, or none has one.

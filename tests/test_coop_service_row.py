@@ -1,0 +1,121 @@
+"""CO-OP PLAY back in the service menu as Off / On.
+
+Simon (2026-11-27, agreed with daveyvandy): "PAD - Item for coop play in service menu OFF/ON. SERVICE MENU - if set to
+have the item on will be able to turn coop off/on.. thats it." PAD-1443 had taken the row away (co-op games always on
+the start menu). The row comes back unticked on the Service menu tab, so a project that does not tick it is exactly
+PAD-1443's card; ticked, the operator gets CO-OP PLAY Off / On, On being the card with no row.
+"""
+import json
+import os
+
+from pinball_decryptor.plugins.stern import coop_play as CP
+from pinball_decryptor.plugins.stern import engine as E
+
+REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+RUNTIME = os.path.join(REPO, "tools", "spike2_emu", "modes", "sdk", "pad_mode_runtime.c")
+
+
+def _src():
+    with open(RUNTIME, encoding="utf-8") as f:
+        return f.read()
+
+
+def _project(tmp_path, data):
+    p = str(tmp_path / "proj")
+    os.makedirs(p, exist_ok=True)
+    with open(os.path.join(p, ".staged_changes.json"), "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    return p
+
+
+def test_the_row_is_off_on_and_on_to_start_with():
+    key, values, names, opts = E._CoopMenu(lambda *a: None).wanted()
+    assert key == "coop_play" and values == 2 and names == ()
+    assert opts == {"default": CP.MENU_ON, "help_text": CP.MENU_HELP, "onoff": True}
+    assert len(CP.MENU_HELP) <= 63                                  # the spare help lines' room
+
+
+def test_the_card_says_switch_only_with_a_spike2_row():
+    """coop.cfg's `switch` tells the runtime the row is Off / On (coop_row_styles); no row, no line."""
+    import inspect
+    body = inspect.getsource(CP.cfg_text)
+    assert '("switch\\n" if setting and not wide else "")' in body
+    assert body.index('"switch') < body.index('"only')
+
+
+def test_the_runtime_reads_an_off_on_row_as_the_card_with_no_row():
+    from tests import test_spike2_mode_roster as R
+    src = _src()
+    assert "return coop.setting && !coop.onoff;" in R._lift(src, "static int coop_row_styles(void)\n{")
+    assert 'if (str_starts(s, "switch")) coop.onoff = 1;' in src
+    # On: the start menu's own style step and default style, CO-OP PLAY with no pick, no ENHANCED STANDARD entry
+    assert "!coop_row_styles()" in R._lift(src, "static int sty_wanted(void)\n{")
+    assert "if (!coop_row_styles()) return coop.style == 2u;" in R._lift(src, "static int coop_classic(void)\n{")
+    assert "if (!coop.style_default || coop_row_styles()) return;" in R._lift(src, "static void coop_style_held(void)\n{")
+    assert "coop.plain = kind == 1u && !coop_row_styles();" in src
+    assert "if (coop_row_styles() && !coop_classic()) kinds[n++] = 2u;" in src
+    # Off: the row's value still switches co-op off as it always did (no start menu games, Start a competing player)
+    assert "coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) != 0u" in R._lift(
+        src, "static int coop_switched_on(void)\n{")
+    # Insider Connected: an Off / On card keeps PAD-1443's per-game gate (Off: no game is one of ours, all report)
+    wanted = R._lift(src, "static pm_addr coop_setting_wanted(void)\n{")
+    assert "return only && v && !sw ? setting_addr(v) : 0;" in wanted
+
+
+def test_an_older_cards_three_value_row_keeps_its_meaning():
+    """A card written before PAD-1443 (no `switch` line) still reads 0 Off, 1 Classic, 2 Enhanced."""
+    from tests import test_spike2_mode_roster as R
+    src = _src()
+    assert "return v <= 2u ? v : v == 3u ? 2u : v <= 6u ? 1u : 0u;" in R._lift(
+        src, "static unsigned coop_row_mode(unsigned v)\n{")
+    assert "return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) == 1u;" in R._lift(
+        src, "static int coop_classic(void)\n{")
+
+
+def test_the_prebuilt_runtimes_are_built_from_these_sources():
+    import hashlib
+    sdk = os.path.dirname(RUNTIME)
+    for pin in ("SOURCES.sha256", "SOURCES64.sha256"):
+        with open(os.path.join(sdk, "prebuilt", pin), encoding="utf-8") as f:
+            lines = [l.split() for l in f if l.strip() and not l.startswith(("#", "compiler"))]
+        got = dict((name, digest) for digest, name in lines)
+        with open(RUNTIME, "rb") as f:
+            assert got["pad_mode_runtime.c"] == hashlib.sha256(f.read().replace(b"\r", b"")).hexdigest()
+
+
+def test_the_write_asks_for_the_row_only_when_ticked(tmp_path):
+    from pinball_decryptor.plugins.stern import service_menu as SM
+    p = _project(tmp_path, {"coop_play": {"on": True}})
+    assert "coop_play" not in [r[0] for r in SM.wanted(p)]           # unticked: PAD-1443's card, no row
+    CP.save(p, True, menu=True)
+    assert "coop_play" in [r[0] for r in SM.wanted(p)]
+    CP.save(p, True, menu=False)
+    assert "coop_play" not in [r[0] for r in SM.wanted(p)]
+
+
+def test_the_tab_ticks_co_op_on_and_off_again(tmp_path, monkeypatch):
+    """Ticked on a project with no co-op play, the row switches co-op play on too, and unticking it switches it off
+    again; co-op play switched on at the Modes tab stays on when the row is unticked."""
+    import pytest
+    from tests.webui_harness import web_app
+    from pinball_decryptor.webui.tabs import svcmenu
+    monkeypatch.setattr(svcmenu, "_coop_refusal", lambda _cp, _p: "")    # a blank project names no game
+    p = _project(tmp_path, {})
+    with web_app(tmp_path / "app") as w:
+        modes = w.window.service("modes")
+        var = modes._project_var() if modes is not None else None
+        if var is None:
+            pytest.skip("no project folder variable in this window")
+        w.run(lambda: var.set(p))
+        w.drain()
+        w.call("ui.select_tab", "svcmenu")
+        w.drain()
+        row = next(r for r in w.state("svcmenu")["settings"] if r["key"] == "coop_play")
+        assert row["can"] and not row["on"] and row["note"] == "Not on the card: tick to add its row (and co-op play)."
+        modes.set_coop = lambda on: CP.save(p, bool(on)) is not None    # the title check needs a real card
+        w.call("svcmenu.set_row", "coop_play", True)
+        w.drain()
+        assert CP.load(p) and CP.menu_asked(p)
+        w.call("svcmenu.set_row", "coop_play", False)
+        w.drain()
+        assert not CP.load(p) and not CP.menu_asked(p)

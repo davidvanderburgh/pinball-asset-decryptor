@@ -28,6 +28,11 @@ SETTINGS = (
     ("music_mode", "Music Mode", "Set on the Audio tab: give a sound more than one music choice."),
     ("edition", "Edition", "Only for a card that holds several editions of the game (Write tab, Editions...): a "
                            "card of one edition has none to pick."),
+    # Simon (2026-11-27, agreed with daveyvandy): "PAD - Item for coop play in service menu OFF/ON. SERVICE MENU - if
+    # set to have the item on will be able to turn coop off/on.. thats it." (PAD-1443 had taken the row away)
+    ("coop_play", "Co-op Play", "Modes tab: Co-op play. On the machine the row is Off / On: On, the start menu "
+                                "offers the co-op and team games (as with no row); Off, the stock game, reporting "
+                                "to Insider Connected as it always has."),
     ("handicap", "Handicap", ""),
     ("colour_blind", "Color Blind", "Play options tab: color-blind insert colors."),
     ("spoken_scores", "Spoken Scores", "Play options tab: the machine says each player's score."),
@@ -56,6 +61,14 @@ OFF_NOTES = {
     "edition": "Off the card: the card cannot be picked by edition. Tick to add its row.",
     "image_set": "Off the card: the screens show the scenes as the project has them. Tick to add its row.",
 }
+
+
+def _coop_refusal(CP, project):
+    """Why this project's title cannot take co-op play (its row cannot be ticked), or ``""``."""
+    try:
+        return CP.title_refusal(CP.project_title(project))
+    except Exception as e:                              # noqa: BLE001 - said on the row
+        return "Co-op play could not be checked for this game (%s)." % e
 
 
 def project_menu(project):
@@ -115,7 +128,7 @@ class ServiceMenuTab(TabService):
 
     def _settings(self, project):
         """The app's settings that can have a row, in the owner's order (:func:`.service_menu.arrange`'s)."""
-        from ...plugins.stern import handicap as HC, picture_settings as PS
+        from ...plugins.stern import coop_play as CP, handicap as HC, picture_settings as PS
         from ...plugins.stern import service_menu as SM
         out = []
         try:                                            # PAD-1393: the settings the project has, ticked or not
@@ -139,6 +152,13 @@ class ServiceMenuTab(TabService):
             elif key in SM.BOOT_KEYS:                   # Simon: needs nothing in the project; unticked to start with
                 on = key in ticked
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row. " + where)
+            elif key == "coop_play":                    # Simon: ticking it here switches co-op play on too
+                coop = CP.load(project)
+                why = "" if coop else _coop_refusal(CP, project)
+                on = CP.menu_asked(project)
+                row.update(can=not why, on=on, note=why or ("" if on else (
+                    "Not on the card: co-op play is always on. Tick to let the operator switch it." if coop else
+                    "Not on the card: tick to add its row (and co-op play).")))
             elif key == "handicap":
                 on = HC.load(project)
                 row.update(can=True, on=on, note="" if on else "Not on the card: tick to add its row.")
@@ -184,7 +204,9 @@ class ServiceMenuTab(TabService):
         modes = self._modes()
         if modes is None:
             return False
-        if key == "handicap":
+        if key == "coop_play":
+            ok = self._set_coop(modes, bool(on))
+        elif key == "handicap":
             ok = modes.set_handicap(bool(on))
         elif key == "colour_blind":                     # PAD-1589
             ok = modes.set_colour_blind(bool(on))
@@ -207,6 +229,39 @@ class ServiceMenuTab(TabService):
         else:
             return False
         self.publish()
+        return ok
+
+    def _set_coop(self, modes, on):
+        """CO-OP PLAY on or off the card (PAD-1393 round 3's, back for Simon). Ticked while the project has no co-op
+        play, it switches co-op play on (the Modes tab's own switch, which refuses a title that cannot take it) and
+        remembers that it did, so unticking it switches co-op play off again; co-op play switched on at the Modes tab
+        stays on (always on, PAD-1443) when unticked."""
+        from ...core import history_log
+        from ...plugins.stern import coop_play as CP
+        from ...plugins.stern import service_menu as SM
+        project = self._project()
+        if not project:
+            return False
+        data = SM.load(project)
+        if on and not CP.load(project):
+            if not modes.set_coop(True):
+                return False
+            data["coop"] = True
+            SM.save(project, data)
+        was = CP.menu_asked(project)
+        if CP.load(project):
+            CP.save(project, True, menu=on)
+        hist = history_log.diff_scalar("service menu  co-op play", "on the card" if was else "left off the card",
+                                       "on the card" if on else "left off the card")
+        history_log.record(project, [hist] if hist else [])
+        if was != on:
+            self.log("[service menu] Co-op Play %s - the card gets it at the next Write"
+                     % ("on the card" if on else "left off the card"))
+        ok = True
+        if not on and data["coop"]:
+            data["coop"] = False
+            SM.save(project, data)
+            ok = modes.set_coop(False)
         return ok
 
     # -- the owner's order of the app's rows (round 3) ----------------------------------------------------------------

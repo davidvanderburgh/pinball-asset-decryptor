@@ -63,11 +63,16 @@ NO_EDGE = ("The app cannot read %s's buttons as they are pressed yet, so a teamm
 #: PAD-1042: four, 0 Off, 1 Co-op, 2 Team 2v2, 3 Team 2v1 (daveyvandy: "a designated option for 2V1"; the row shows
 #: the number; Off/On had 0 and 1 and v1.360.0's row 0-2, so a pick is kept). PAD-1065: seven, 1-3 the Enhanced
 #: games (the characters' abilities hold) and 4-6 the same games Classic (a pick, no abilities). PAD-1073: three,
-#: 0 Off, 1 Classic, 2 Enhanced (DoomWalrus666); which game is the start menu's pick
-MENU_VALUES = 3
-MENU_OFF, MENU_CLASSIC, MENU_ENHANCED = 0, 1, 2
-#: the help names the values and says what they cost (63 characters: the spare help lines' room)
-MENU_HELP = "0 Off. 1 Classic. 2 Enhanced. Games on start menu. Insider off"
+#: 0 Off, 1 Classic, 2 Enhanced (DoomWalrus666); which game is the start menu's pick. PAD-1443 took the row away.
+#: Simon (2026-11-27, agreed with daveyvandy): "PAD - Item for coop play in service menu OFF/ON. SERVICE MENU - if
+#: set to have the item on will be able to turn coop off/on.. thats it."
+#: Back as Off / On, ticked on the Service menu tab: On plays exactly as a card with no row (the start menu's own
+#: games and style step); Off, the game is the stock game and reports to Insider Connected as it always has. coop.cfg
+#: says ``switch`` so the runtime reads it so (coop_row_styles); a card of the old three-value row keeps its meaning.
+MENU_VALUES = 2
+MENU_OFF, MENU_ON = 0, 1
+#: the help says what On does and costs (63 characters: the spare help lines' room)
+MENU_HELP = "On: co-op games on the start menu; they stay off Insider"
 #: how a teammate joins, for the tab and the log. PAD-1443: the games are always on the start menu, no service row
 HOW = ("hold both flipper buttons in attract for the start menu: CO-OP PLAY (each Start in the first ball adds a "
        "teammate, 2-4 players share one game) and TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1. With characters, a game "
@@ -126,11 +131,18 @@ def load(project):
 
 def menu_asked(project):
     """Round 2: whether co-op is switched in the service menu (CO-OP PLAY) rather than always on. PAD-1443
-    (daveyvandy: "I don't think we need to make it a setting in the service menu"): never now - the games are always
-    on the start menu, the co-op styles picked there, and a game played as one of them stays off Insider Connected
-    (the runtime's per-game gate, coop.cfg ``only``). A project that asked for the row (``menu``) gets none."""
-    del project
-    return False
+    (daveyvandy: "I don't think we need to make it a setting in the service menu") made it never; Simon (2026-11-27,
+    agreed with daveyvandy): "PAD - Item for coop play in service menu OFF/ON. SERVICE MENU - if set to have the item
+    on will be able to turn coop off/on.. thats it." - so it is the sidecar's ``menu`` again (the Service menu tab's Co-op Play tick), only while co-op play is on. Unticked,
+    PAD-1443's always-on start menu is unchanged."""
+    if not load(project):
+        return False
+    from ...core import staged_changes
+    try:
+        raw = staged_changes.load(project).get(STAGED_KEY)
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: no
+        return False
+    return bool(isinstance(raw, dict) and raw.get("menu"))
 
 
 def save(project, on, menu=None):
@@ -243,10 +255,13 @@ def cfg_text(game_elf, awards=None, characters=None, sites=(), values=None, sett
     buttons = _SMo.flipper_buttons(game_elf)
     if len(buttons) != 2:
         raise CoopError(NO_BUTTON)
+    wide = is_wide(bytes(game_elf[:0x40]))
     head = ("coop on\nbutton %d\n" % buttons[1] + ("setting 0x%08x\n" % setting if setting else "")
+            # Simon: the Spike 2 row is Off / On (MENU_VALUES): On plays as a card with no row, the gate per game
+            + ("switch\n" if setting and not wide else "")
             + ("only\n" if only else "")                 # PAD-1443: no setting - the gate holds per game
             + "".join(line + "\n" for line in insider_lines(game_elf)))
-    if is_wide(bytes(game_elf[:0x40])):
+    if wide:
         # PAD-1326: a Spike 3 program - co-op and the team games with the logins swapped; the awards and the
         # characters read 32-bit code, so they stay off (A64_LEFT_OUT says so on the Write). The setting is the
         # program's own address: the runtime adds the PIE's load address.

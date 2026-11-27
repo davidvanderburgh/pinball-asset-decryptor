@@ -20126,6 +20126,8 @@ static struct {
     unsigned n, turn;                    /* teammates (2-4) and the one up (1..n) */
     pm_addr setting;                     /* round 2: the CO-OP PLAY row's live value (0: none - always on; PAD-1326: a
                                           * PIE's moved by game_base) */
+    int onoff;                           /* coop.cfg `switch`: the row is Off / On only, and On plays as a card with
+                                          * no row does (the start menu's own style step) */
     unsigned teams_always;               /* PAD-1042: coop.cfg `teams on` (4: 2v2) or `teams 2v1` (3); `teams 3v1` (5) */
     unsigned teams;                      /* PAD-1042: this game is a team game (coop.n players, turn = the player up) */
     unsigned team_n[3];                  /* PAD-1042: players in team 1 and team 2 */
@@ -20380,10 +20382,19 @@ static int coop_switched_on(void)
     return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) != 0u;
 }
 
+/* The CO-OP PLAY row sets how co-op plays (round 2 / PAD-1073's 0 Off, 1 Classic, 2 Enhanced): a card with the row
+ * and no `switch` line. An Off / On row (Simon, 2026-11-27, agreed with daveyvandy: "PAD - Item for coop play in
+ * service menu OFF/ON. SERVICE MENU - if set to have the item on will be able to turn coop off/on.. thats it.") only
+ * switches co-op: On plays as a card with no row does - every use of "a card with the row" below asks this. */
+static int coop_row_styles(void)
+{
+    return coop.setting && !coop.onoff;
+}
+
 /* PAD-1065: CO-OP PLAY says Classic: the characters are picked but have no abilities */
 static int coop_classic(void)
 {
-    if (!coop.setting) return coop.style == 2u;              /* PAD-1449: the chooser's CHARACTERS */
+    if (!coop_row_styles()) return coop.style == 2u;         /* PAD-1449: the chooser's CHARACTERS */
     return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) == 1u;
 }
 
@@ -21709,7 +21720,7 @@ static void coop_turn_show(void);
  * style), no coop.cfg `teams` card */
 static int sty_wanted(void)
 {
-    return coop.on && !coop.setting && !coop.teams_always && coop_pick_on && coop_ch_n > 0;
+    return coop.on && !coop_row_styles() && !coop.teams_always && coop_pick_on && coop_ch_n > 0;
 }
 
 /* PAD-1449: the game the chooser is for, as the top line names it */
@@ -22141,7 +22152,7 @@ static int sty_default_for(unsigned kind, unsigned dflt)
  * has one, says how it plays - NORMAL no character pick, CHARACTERS a pick with no abilities, ENHANCED as before */
 static void coop_style_held(void)
 {
-    if (!coop.style_default || coop.setting) return;
+    if (!coop.style_default || coop_row_styles()) return;
     coop.style = coop.style_default <= 3u ? coop.style_default : 3u;
     coop.plain = coop.style == 1u;
     say("styles: the held button's game plays the card's default style - %s", STY_NAMES[coop.style - 1]);
@@ -25767,7 +25778,7 @@ static void on_team_dispatch(pm_reg *r)
         coop.game = chg_game_now() + 1;
         coop.teams = 0;
         coop.standard = 0;                                    /* PAD-1224 */
-        coop.plain = kind == 1u && !coop.setting;             /* PAD-1443: no row - CO-OP PLAY picks no character */
+        coop.plain = kind == 1u && !coop_row_styles();        /* PAD-1443: no row - CO-OP PLAY picks no character */
         coop.style = 0;                                       /* PAD-1449 */
         coop.n = 1;
         coop.turn = 1;
@@ -26459,6 +26470,7 @@ static void coop_line(const char *s)
         if (!ok) coop.setting = 0;
         coop.setting = setting_addr(coop.setting);       /* PAD-1326: a PIE's; PAD-1382: or a shared one */
     }
+    if (str_starts(s, "switch")) coop.onoff = 1;         /* Simon: an Off / On row (coop_row_styles) */
 }
 
 /* round 2: the CO-OP PLAY row's live value from coop.cfg when the card carries no modes ("only"), read before the gate
@@ -26471,7 +26483,7 @@ static pm_addr coop_setting_wanted(void)
     unsigned k;
     pm_addr v = 0;
     const char *p;
-    int ok, only = 0;
+    int ok, only = 0, sw = 0;
     for (k = 0; k < sizeof COOP_FILES / sizeof COOP_FILES[0] && n < 0; k++)
         n = pm_read_file(COOP_FILES[k], raw, sizeof raw - 1);
     if (n <= 0) return 0;
@@ -26479,6 +26491,7 @@ static pm_addr coop_setting_wanted(void)
     for (i = 0; i < n; i++) {
         if (i && raw[i - 1] != '\n') continue;
         if (str_starts(raw + i, "only")) only = 1;
+        if (str_starts(raw + i, "switch")) sw = 1;     /* Simon: an Off / On row - the gate holds per game */
         if (str_starts(raw + i, "setting ")) {
             p = raw + i + 8;
             v = (pm_addr)number(&p, &ok);
@@ -26486,7 +26499,8 @@ static pm_addr coop_setting_wanted(void)
         }
     }
     coop_cfg_only = only;
-    return only && v ? setting_addr(v) : 0;                 /* PAD-1326: a PIE's (0 on Spike 2); PAD-1382: or a shared one */
+    /* Simon: with an Off / On row the gate is PAD-1443's per game - Off, no game is one of ours, so all report */
+    return only && v && !sw ? setting_addr(v) : 0;                 /* PAD-1326: a PIE's (0 on Spike 2); PAD-1382: or a shared one */
 }
 
 /* coop.cfg asks for co-op: the card takes the runtime's whole gate, as attract items do */
@@ -26590,7 +26604,7 @@ static void coop_arm(void)
             "score goes on the game's boards");
     if (coop.setting)
         say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08" PMA ", now %s)", coop.setting,
-            !coop_switched_on() ? "Off" : coop_classic() ? "Classic" : "Enhanced");
+            !coop_switched_on() ? "Off" : coop.onoff ? "On" : coop_classic() ? "Classic" : "Enhanced");
     if (coop.teams_always)
         say("teams: team play is always on (coop.cfg `teams %s`): players 1+3 against %s",
             coop.teams_always == 3u ? "2v1" : coop.teams_always == 5u ? "3v1" : "on",
@@ -29252,7 +29266,7 @@ static unsigned team_menu_kinds(unsigned *kinds)
         return n;
     }
     /* PAD-1449: no row - one entry per game, the style chosen once it is picked (sty_wanted) */
-    if (coop.setting && !coop_classic()) kinds[n++] = 2u;    /* PAD-1224: ENHANCED STANDARD (Enhanced only) */
+    if (coop_row_styles() && !coop_classic()) kinds[n++] = 2u;   /* PAD-1224: ENHANCED STANDARD (Enhanced only) */
     kinds[n++] = 4u;
     kinds[n++] = 3u;
     kinds[n++] = 5u;                                         /* PAD-1224: TEAM PLAY 3 VS 1 */

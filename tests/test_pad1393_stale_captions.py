@@ -181,12 +181,13 @@ def test_round3_every_row_starts_unticked(tmp_path):
         assert r["music_mode"]["note"].startswith("Off the card")
 
 
-def test_round3_coop_row_is_gone_from_the_service_menu_tab():
-    """PAD-1443 (daveyvandy: "too confusing to have it buried in the service menu"): co-op play has no service menu
-    row; its games are always on the game's start menu, so the Service menu tab lists none to tick."""
+def test_round3_coop_row_is_back_on_the_service_menu_tab():
+    """PAD-1443 (daveyvandy: "too confusing to have it buried in the service menu") took the row away; Simon
+    (2026-11-27, agreed with daveyvandy: "PAD - Item for coop play in service menu OFF/ON") put it back, unticked to
+    start with, so an unticked project keeps PAD-1443's always-on start menu."""
     from pinball_decryptor.webui.tabs import svcmenu
-    assert "coop_play" not in [k for k, _n, _w in svcmenu.SETTINGS]
-    assert not hasattr(svcmenu.ServiceMenuTab, "_set_coop")
+    assert "coop_play" in [k for k, _n, _w in svcmenu.SETTINGS]
+    assert hasattr(svcmenu.ServiceMenuTab, "_set_coop")
 
 
 def test_an_unticked_music_mode_leaves_the_music_modes_and_keeps_the_other_sounds(tmp_path, monkeypatch):

@@ -52,7 +52,7 @@ def test_the_runtime_reads_an_off_on_row_as_the_card_with_no_row():
     # On: the start menu's own style step and default style, CO-OP PLAY with no pick, no ENHANCED STANDARD entry
     assert "!coop_row_styles()" in R._lift(src, "static int sty_wanted(void)\n{")
     assert "if (!coop_row_styles()) return coop.style == 2u;" in R._lift(src, "static int coop_classic(void)\n{")
-    assert "if (!coop.style_default || coop_row_styles()) return;" in R._lift(src, "static void coop_style_held(void)\n{")
+    assert "if (!d || coop_row_styles()) return;" in R._lift(src, "static void coop_style_held(void)\n{")
     assert "coop.plain = kind == 1u && !coop_row_styles();" in src
     assert "if (coop_row_styles() && !coop_classic()) kinds[n++] = 2u;" in src
     # Off: the row's value still switches co-op off as it always did (no start menu games, Start a competing player)
@@ -187,3 +187,86 @@ def test_each_owner_keeps_co_op_always_on_unless_they_tick_the_row(tmp_path):
     r = _project(tmp_path / "r", {})
     CP.import_settings(r, out)
     assert CP.load(r) and not CP.menu_asked(r)
+
+
+# ---- David (PR #53 review): "The user should have the option to place the co-op selection style in either place ...
+# Do we have options for either or both?" - the style picked on the start menu, in the service menu, or both -----------
+
+def test_where_the_style_is_picked_is_the_owners(tmp_path):
+    from pinball_decryptor.plugins.stern import service_menu as SM
+    p = _project(tmp_path, {"coop_play": {"on": True}})
+    assert CP.load_place(p) == "start" and not CP.menu_asked(p)                  # as every card has it
+    assert CP.menu_row(p) == (CP.MENU_VALUES, (), CP.MENU_DEFAULT, CP.MENU_HELP)  # a ticked row: Off / On
+    assert CP.place_line(p, _GZ_HEAD) == ""
+    CP.save_style(p, "characters")
+    for place in ("service", "both"):
+        CP.save_place(p, place)
+        assert CP.load_place(p) == place and CP.menu_asked(p)                    # the row goes on the card
+        assert "coop_play" in [r[0] for r in SM.wanted(p)]
+        values, names, default, help_text = CP.menu_row(p)
+        assert (values, names) == (4, ("Off", "Normal", "Characters", "Enhanced"))
+        assert names[default - 1] == "Characters" and len(help_text) <= 63       # starts on the default style
+        assert CP.place_line(p, _GZ_HEAD) == "styles %s\n" % place
+        assert CP.place_line(p, b"\x7fELF\x02\x01" + bytes(58)) == ""            # Spike 3 keeps its own row
+    CP.save(p, True)                                                             # a later save keeps the place
+    assert CP.load_place(p) == "both"
+    E_menu = E._CoopMenu(lambda *a, **k: None, p)
+    key, values, names, opts = E_menu.wanted()
+    assert (key, values, names) == ("coop_play", 4, CP.MENU_STYLE_NAMES) and opts["default"] == 3
+    assert "onoff" not in opts and "from_zero" not in opts                       # a named row: stored 1 to 4
+    CP.save_place(p, "start")
+    assert not CP.menu_asked(p) and CP.load_place(p) == "start"
+
+
+_GZ_HEAD = b"\x7fELF\x01\x01" + bytes(58)                                        # a 32-bit (Spike 2) program's head
+
+STYLE_MAIN = r"""
+@FNS@
+static unsigned coop_card_style(void)
+@CARD@
+int main(void)
+{
+    unsigned v;
+    coop.setting = (unsigned)(unsigned long)&row;       /* the row picks the style (coop.cfg `switch`, `styles`) */
+    coop.onoff = 1;
+    coop.rowsty = 1;
+    coop.style_default = 3;
+    for (v = 1; v <= 4; v++) {
+        row = v;
+        printf("%u:%d%u ", v, coop_switched_on(), coop_card_style());
+    }
+    row = 3;
+    {
+        unsigned k[6], n = team_menu_kinds(k), i;
+        for (i = 0; i < n; i++) printf("%u", k[i]);
+    }
+    coop.rowsty = 0;                                    /* an Off / On row: the card's own default style */
+    row = 1;
+    printf(" %d%u\n", coop_switched_on(), coop_card_style());
+    return 0;
+}
+"""
+
+
+def test_the_runtime_reads_a_style_row(tmp_path):
+    """Compiled from the runtime itself: the named row's 1 is Off, 2-4 play NORMAL, CHARACTERS, ENHANCED; the start
+    menu's entries are a card's with no row; an Off / On row keeps the card's own default style."""
+    from tests import test_pad1073_coop_row_three as T
+    from tests import test_spike2_mode_roster as R
+    R._cc()                                             # skips with no ELF toolchain (Windows, macOS)
+    src = _src()
+    card = R._lift(src, "static unsigned coop_card_style(void)\n{")
+    card = card[card.index("{"):]
+    main = T.PRELUDE + STYLE_MAIN.replace("@FNS@", T._fns(src, *T.ROW_FNS)).replace("@CARD@", card)
+    out = R._host_run(tmp_path, main, flags=("-no-pie",)).strip()
+    assert out == "1:01 2:11 3:12 4:13 1435 13"
+
+
+def test_the_service_menu_alone_takes_the_start_menus_step_away():
+    from tests import test_spike2_mode_roster as R
+    src = _src()
+    assert "&& coop.rowsty != 1u;" in R._lift(src, "static int sty_wanted(void)\n{")
+    assert 'if (str_starts(s, "styles service")) coop.rowsty = 1u;' in src
+    assert 'if (str_starts(s, "styles both")) coop.rowsty = 2u;' in src
+    assert "if (coop.rowsty == 1u) coop_style_held();" in src                    # CO-OP from the start menu
+    assert "else if (coop_teammates() && coop.rowsty == 1u) coop_style_held();" in src   # a team game

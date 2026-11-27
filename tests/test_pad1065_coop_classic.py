@@ -36,7 +36,7 @@ int main(void)
 CHAR_UP_MAIN = r"""
 #include <stdio.h>
 struct coop_char { const char *name; };
-static struct { unsigned setting, turn, teams_always, style; int onoff; } coop;   /* style: PAD-1449; onoff: Simon */
+static struct { unsigned setting, turn, teams_always, style; int onoff; unsigned rowsty; } coop;   /* style: PAD-1449; onoff: Simon */
 static unsigned row;
 static int coop_pick_of[5];
 static struct coop_char coop_ch[2] = { { "GODZILLA 1954" }, { "MECHAGODZILLA" } };

@@ -24,7 +24,7 @@ ROW_FNS = ("static unsigned coop_row_mode(unsigned v)", "static int coop_switche
 PRELUDE = r"""
 #include <stdio.h>
 #include <string.h>
-static struct { unsigned teams_always, setting, style; int onoff; } coop;
+static struct { unsigned teams_always, setting, style; int onoff; unsigned rowsty, style_default; } coop;
 static unsigned row;
 static int coop_ch_n, coop_pick_on;                   /* PAD-1443: characters to pick */
 static char team_name_2v2[] = "TEAM PLAY 2 VS 2", team_name_2v1[] = "TEAM PLAY 2 VS 1", team_name_coop[] = "CO-OP PLAY";

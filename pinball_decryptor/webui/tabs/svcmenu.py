@@ -32,7 +32,9 @@ SETTINGS = (
     # set to have the item on will be able to turn coop off/on.. thats it." (PAD-1443 had taken the row away)
     ("coop_play", "Co-op Play", "Ticking it switches co-op play on too. On the machine the row is Off / On: On, the "
                                 "start menu offers the co-op and team games (as with no row); Off, the stock game, "
-                                "reporting to Insider Connected as it always has."),
+                                "reporting to Insider Connected as it always has. Where the Modes tab's co-op "
+                                "\"Style picked\" says the service menu (or both), the row is Off, Normal, Characters "
+                                "or Enhanced instead and picks the style."),
     ("handicap", "Handicap", ""),
     ("colour_blind", "Color Blind", "Play options tab: color-blind insert colors."),
     ("spoken_scores", "Spoken Scores", "Play options tab: the machine says each player's score."),
@@ -257,6 +259,8 @@ class ServiceMenuTab(TabService):
         if was != on:
             self.log("[service menu] Co-op Play %s - the card gets it at the next Write"
                      % ("on the card" if on else "left off the card"))
+        if not on:                                      # no row: the style is the start menu's again
+            CP.save_place(project, "start")
         ok = True
         if not on and data["coop"]:
             data["coop"] = False

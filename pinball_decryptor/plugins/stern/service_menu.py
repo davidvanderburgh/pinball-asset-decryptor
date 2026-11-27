@@ -59,7 +59,7 @@ def wanted(project, honour_off=True):
     if PS.load(project):
         jobs += [E._PictureMenu(k, log) for k in PS.KEYS]
     if CP.menu_asked(project):
-        jobs.append(E._CoopMenu(log))
+        jobs.append(E._CoopMenu(log, project))
     if HC.load(project):
         jobs.append(E._HandicapMenu(log))
     from . import accessibility as AC                   # PAD-1589: COLOR BLIND and SPOKEN SCORES (Play options)

@@ -79,6 +79,18 @@ MENU_DEFAULT = MENU_ON + 1
 #: now (David, PR #53 review: "We need to maintain the existing option of just getting to coop in the menu. We need
 #: flexibility for each person since this is a modular setup"). Only a tick made since asks for the row.
 ROW_KEY = "row"
+#: WHERE THE STYLE IS PICKED (David, PR #53 review: "The user should have the option to place the co-op selection style
+#: in either place ... Do we have options for either or both?"), the sidecar's ``place``, Spike 2:
+#:   start    the start menu's own style step (PAD-1449), as every card has it; CO-OP PLAY, when ticked, is Off / On
+#:   service  CO-OP PLAY is Off / Normal / Characters / Enhanced and every co-op and team game plays that style; no step
+#:   both     the same row, and the start menu's step still asks, starting on the row's style
+#: service and both put the row on the card (menu_asked). coop.cfg ``styles service|both`` (place_line).
+PLACES = ("start", "service", "both")
+PLACE_LABELS = {"start": "On the start menu", "service": "In the service menu", "both": "Both"}
+#: the row's values where the service menu picks the style (stored 0-3: 0 Off, then STYLES_DEFAULT's 1-3)
+MENU_STYLE_NAMES = ("Off", "Normal", "Characters", "Enhanced")
+MENU_STYLE_HELP = {"service": "Off: no co-op. Else the style every co-op game plays",
+                   "both": "Off: no co-op. Else the style the start menu starts on"}
 #: the help says what On does and costs (63 characters: the spare help lines' room)
 MENU_HELP = "On: co-op games on the start menu; they stay off Insider"
 #: how a teammate joins, for the tab and the log. PAD-1443: the games are always on the start menu, no service row
@@ -150,7 +162,7 @@ def menu_asked(project):
         raw = staged_changes.load(project).get(STAGED_KEY)
     except Exception:                                   # noqa: BLE001 - an unreadable sidecar: no
         return False
-    return bool(isinstance(raw, dict) and raw.get(ROW_KEY))
+    return bool(isinstance(raw, dict) and (raw.get(ROW_KEY) or _place_of(raw.get("place")) != "start"))
 
 
 def save(project, on, menu=None):
@@ -161,7 +173,7 @@ def save(project, on, menu=None):
     data = staged_changes.load(project)
     raw = data.get(STAGED_KEY) if isinstance(data.get(STAGED_KEY), dict) else {}
     was = bool(raw.get("on"))
-    keep = {k: v for k, v in raw.items() if k in ("awards", "characters", "style")}   # PAD-1558: the style too
+    keep = {k: v for k, v in raw.items() if k in ("awards", "characters", "style", "place")}   # PAD-1558: the style too
     if on and (raw.get(ROW_KEY) if menu is None else menu):
         keep[ROW_KEY] = True                            # round 2's "menu" is not kept (ROW_KEY)
     if on or keep:
@@ -183,6 +195,61 @@ STYLE_LABELS = {"normal": "Normal", "characters": "Characters", "enhanced": "Enh
 def _style_of(v):
     v = str(v or "").strip().lower()
     return v if v in STYLES_DEFAULT else "normal"
+
+
+def _place_of(v):
+    v = str(v or "").strip().lower()
+    return v if v in PLACES else "start"
+
+
+def load_place(project):
+    """Where the project's co-op style is picked (:data:`PLACES`), "start" when none is kept."""
+    if not project:
+        return "start"
+    from ...core import staged_changes
+    try:
+        raw = staged_changes.load(project).get(STAGED_KEY)
+    except Exception:                                   # noqa: BLE001 - an unreadable sidecar: the start menu
+        return "start"
+    return _place_of(raw.get("place")) if isinstance(raw, dict) else "start"
+
+
+def save_place(project, place):
+    """Keep *place* (:data:`PLACES`; "start" keeps none); returns what it was."""
+    from ...core import staged_changes
+    data = staged_changes.load(project)
+    raw = dict(data.get(STAGED_KEY)) if isinstance(data.get(STAGED_KEY), dict) else {"on": False}
+    was = _place_of(raw.get("place"))
+    place = _place_of(place)
+    if place == "start":
+        raw.pop("place", None)
+    else:
+        raw["place"] = place
+    if raw == {"on": False}:
+        data.pop(STAGED_KEY, None)
+    else:
+        data[STAGED_KEY] = raw
+    staged_changes.save(project, data)
+    return was
+
+
+def menu_row(project):
+    """``(values, names, default, help)`` of the CO-OP PLAY row this project's card gets (Spike 2): Off / On, or, where
+    the service menu picks the style, Off / Normal / Characters / Enhanced starting on the project's default style."""
+    place = load_place(project)
+    if place == "start":
+        return MENU_VALUES, (), MENU_DEFAULT, MENU_HELP
+    return (len(MENU_STYLE_NAMES), MENU_STYLE_NAMES, STYLES_DEFAULT.index(load_style(project)) + 2,
+            MENU_STYLE_HELP[place])
+
+
+def place_line(project, game_elf):
+    """coop.cfg's ``styles service|both`` line for a Spike 2 card whose row picks the style, else ""."""
+    from .adjustments import is_wide
+    place = load_place(project)
+    if place == "start" or is_wide(bytes(game_elf[:0x40])):
+        return ""
+    return "styles %s\n" % place
 
 
 def load_style(project):

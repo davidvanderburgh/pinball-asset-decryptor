@@ -20128,6 +20128,9 @@ static struct {
                                           * PIE's moved by game_base) */
     int onoff;                           /* coop.cfg `switch`: the row is Off / On only, and On plays as a card with
                                           * no row does (the start menu's own style step) */
+    unsigned rowsty;                     /* coop.cfg `styles service` (1) / `styles both` (2), with `switch`: the row is
+                                          * 1 Off, 2 Normal, 3 Characters, 4 Enhanced (a named row, from 1) and picks the
+                                          * style - 1: no start menu step, 2: the step starts on it (PR #53 review) */
     unsigned teams_always;               /* PAD-1042: coop.cfg `teams on` (4: 2v2) or `teams 2v1` (3); `teams 3v1` (5) */
     unsigned teams;                      /* PAD-1042: this game is a team game (coop.n players, turn = the player up) */
     unsigned team_n[3];                  /* PAD-1042: players in team 1 and team 2 */
@@ -20379,6 +20382,10 @@ static int coop_switched_on(void)
 {
     if (coop.teams_always) return 0;
     if (!coop.setting) return 1;
+    if (coop.rowsty) {                                       /* PR #53 review: 1 Off, 2-4 a style */
+        unsigned v = *(volatile const unsigned *)(unsigned long)coop.setting;
+        return v >= 2u && v <= 4u;
+    }
     return coop_row_mode(*(volatile const unsigned *)(unsigned long)coop.setting) != 0u;
 }
 
@@ -20389,6 +20396,18 @@ static int coop_switched_on(void)
 static int coop_row_styles(void)
 {
     return coop.setting && !coop.onoff;
+}
+
+/* The style a co-op or team game plays when none was chosen on the start menu (1 NORMAL, 2 CHARACTERS, 3 ENHANCED; 0
+ * none): the CO-OP PLAY row's where it picks the style (coop.cfg `styles`; David, PR #53 review: "The user should have
+ * the option to place the co-op selection style in either place"), else the card's coop.cfg `style` (PAD-1558) */
+static unsigned coop_card_style(void)
+{
+    if (coop.rowsty && coop.setting) {
+        unsigned v = *(volatile const unsigned *)(unsigned long)coop.setting;
+        return v >= 2u && v <= 4u ? v - 1u : 1u;
+    }
+    return coop.style_default;
 }
 
 /* PAD-1065: CO-OP PLAY says Classic: the characters are picked but have no abilities */
@@ -21720,7 +21739,8 @@ static void coop_turn_show(void);
  * style), no coop.cfg `teams` card */
 static int sty_wanted(void)
 {
-    return coop.on && !coop_row_styles() && !coop.teams_always && coop_pick_on && coop_ch_n > 0;
+    return coop.on && !coop_row_styles() && !coop.teams_always && coop_pick_on && coop_ch_n > 0
+           && coop.rowsty != 1u;                              /* PR #53 review: the service menu alone picks it */
 }
 
 /* PAD-1449: the game the chooser is for, as the top line names it */
@@ -22152,10 +22172,12 @@ static int sty_default_for(unsigned kind, unsigned dflt)
  * has one, says how it plays - NORMAL no character pick, CHARACTERS a pick with no abilities, ENHANCED as before */
 static void coop_style_held(void)
 {
-    if (!coop.style_default || coop_row_styles()) return;
-    coop.style = coop.style_default <= 3u ? coop.style_default : 3u;
+    unsigned d = coop_card_style();
+    if (!d || coop_row_styles()) return;
+    coop.style = d <= 3u ? d : 3u;
     coop.plain = coop.style == 1u;
-    say("styles: the held button's game plays the card's default style - %s", STY_NAMES[coop.style - 1]);
+    say("styles: the game plays the %s style - %s", coop.rowsty ? "service menu's" : "card's default",
+        STY_NAMES[coop.style - 1]);
 }
 
 /* the menu's Start (the switch drain; the game begins its game on it): what the cursor's entry says is kept for it */
@@ -22172,13 +22194,13 @@ static void sty_menu_go(void)
         team = kind;
     smn.go_style = sty_menu_go_style(smn.open, smn.shaping, smn.at, smn.taken);
     if (!smn.taken && !(smn.open && !smn.shaping))            /* PAD-1558: none chosen - the card's default */
-        smn.go_style = sty_default_for(kind, coop.style_default);
+        smn.go_style = sty_default_for(kind, coop_card_style());
     smn.go_kind = kind;
     smn.go_team = team;
     smn.go_ms = pm_ms() | 1ul;
     say("styles: Start on the start menu's %s - %s %s goes in when the game begins%s", sty_label(kind), sty_label(kind),
         STY_NAMES[smn.go_style - 1], smn.taken || (smn.open && !smn.shaping) ? ""
-        : coop.style_default && kind != STY_STANDARD && kind != STY_CHALLENGE ? " (none chosen: the card's default)"
+        : coop_card_style() && kind != STY_STANDARD && kind != STY_CHALLENGE ? " (none chosen: the card's default)"
         : " (none chosen: NORMAL)");
 }
 
@@ -22484,7 +22506,7 @@ static void sty_begin(unsigned kind)
 {
     sty.preset = sty_menu_preset(kind);
     if (sty_default_normal(sty.preset, smn.frame_ms != 0)) {   /* PAD-1449 round 5 */
-        sty.preset = sty_default_for(kind, coop.style_default);   /* PAD-1558: the card's default, else NORMAL */
+        sty.preset = sty_default_for(kind, coop_card_style());   /* PAD-1558: the card's default, else NORMAL */
         say("styles: no version chosen on the start menu (its Action was the game's: the Home Team screen) - %s%s",
             STY_NAMES[sty.preset - 1], sty.preset != 1 ? " (the card's default style)" : "");
     }
@@ -25780,6 +25802,7 @@ static void on_team_dispatch(pm_reg *r)
         coop.standard = 0;                                    /* PAD-1224 */
         coop.plain = kind == 1u && !coop_row_styles();        /* PAD-1443: no row - CO-OP PLAY picks no character */
         coop.style = 0;                                       /* PAD-1449 */
+        if (coop.rowsty == 1u) coop_style_held();             /* PR #53 review: the service menu's style, no step */
         coop.n = 1;
         coop.turn = 1;
         coop.round = 1;
@@ -25822,6 +25845,7 @@ static void on_team_dispatch(pm_reg *r)
     tm.size = 0;
     if (!added) say("teams: TEAM PLAY - the game added no one (credits?) - a one-player game");
     else if (coop_teammates() && sty_wanted()) sty_begin(kind);  /* PAD-1449: its style first */
+    else if (coop_teammates() && coop.rowsty == 1u) coop_style_held();   /* PR #53 review: the service menu's */
 }
 
 /* PAD-1052: from the tick: the fill's lines on the top line, one at a time, then player 1's pick. While the game's own
@@ -26471,6 +26495,8 @@ static void coop_line(const char *s)
         coop.setting = setting_addr(coop.setting);       /* PAD-1326: a PIE's; PAD-1382: or a shared one */
     }
     if (str_starts(s, "switch")) coop.onoff = 1;         /* Simon: an Off / On row (coop_row_styles) */
+    if (str_starts(s, "styles service")) coop.rowsty = 1u;   /* PR #53 review: the row picks the style */
+    if (str_starts(s, "styles both")) coop.rowsty = 2u;
 }
 
 /* round 2: the CO-OP PLAY row's live value from coop.cfg when the card carries no modes ("only"), read before the gate
@@ -26604,7 +26630,8 @@ static void coop_arm(void)
             "score goes on the game's boards");
     if (coop.setting)
         say("co-op: switched in the service menu (CO-OP PLAY, value at 0x%08" PMA ", now %s)", coop.setting,
-            !coop_switched_on() ? "Off" : coop.onoff ? "On" : coop_classic() ? "Classic" : "Enhanced");
+            !coop_switched_on() ? "Off" : coop.rowsty ? STY_NAMES[coop_card_style() - 1] : coop.onoff ? "On"
+            : coop_classic() ? "Classic" : "Enhanced");
     if (coop.teams_always)
         say("teams: team play is always on (coop.cfg `teams %s`): players 1+3 against %s",
             coop.teams_always == 3u ? "2v1" : coop.teams_always == 5u ? "3v1" : "on",

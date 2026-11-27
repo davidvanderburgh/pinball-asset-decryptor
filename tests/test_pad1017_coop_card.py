@@ -257,7 +257,7 @@ def test_the_modes_tab_has_no_service_menu_sub_tick():
 
 def test_the_build_takes_the_row_and_leaves_co_op_out_without_it():
     src = _read(os.path.join(REPO, "pinball_decryptor", "plugins", "stern", "engine.py"))
-    assert "coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)" in src
+    assert "coop_menu = (_CoopMenu(log, assets_dir) if _coop_on and _CP_m.menu_asked(assets_dir) else None)" in src
     assert "_coop_on = False" in src and "coop_setting = coop_menu.setting.live" in src
     assert "coop_setting=coop_setting," in src
 

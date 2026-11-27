@@ -10224,7 +10224,7 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                          if picture_prof is not None else [])
         from . import coop_play as _CP_m
         # PAD-1017 round 2: CO-OP PLAY, when the service menu switches co-op
-        coop_menu = (_CoopMenu(log) if _coop_on and _CP_m.menu_asked(assets_dir) else None)
+        coop_menu = (_CoopMenu(log, assets_dir) if _coop_on and _CP_m.menu_asked(assets_dir) else None)
         # PAD-1033: HANDICAP, the row that switches the players' handicaps (the last spare setting it takes)
         hand_menu = _HandicapMenu(log) if _hand_on else None
         # PAD-1589: COLOR BLIND (the project's preset to start with) and SPOKEN SCORES (once the words are in sounds.cfg)
@@ -13042,13 +13042,18 @@ class _CoopMenu(_MusicModeMenu):
 
     KEY = "coop_play"
 
-    def __init__(self, log):
+    def __init__(self, log, project=None):
         from . import coop_play as _CP
-        super().__init__(_CP.MENU_VALUES, (), log)
+        # David (PR #53 review): where the style is picked is the owner's - Off / On, or Off and the three styles
+        self.row = (_CP.menu_row(project) if project else
+                    (_CP.MENU_VALUES, (), _CP.MENU_DEFAULT, _CP.MENU_HELP))
+        super().__init__(self.row[0], self.row[1], log)
 
     def wanted(self):
-        from . import coop_play as _CP
-        return self.KEY, _CP.MENU_VALUES, (), {"default": _CP.MENU_DEFAULT, "help_text": _CP.MENU_HELP, "onoff": True}
+        values, names, default, help_text = self.row
+        if names:
+            return self.KEY, values, names, {"default": default, "help_text": help_text}
+        return self.KEY, values, (), {"default": default, "help_text": help_text, "onoff": True}
 
     def done(self):
         self.ok = True

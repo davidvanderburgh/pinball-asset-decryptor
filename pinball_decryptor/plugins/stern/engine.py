@@ -13057,6 +13057,15 @@ class _CoopMenu(_MusicModeMenu):
 
     def done(self):
         self.ok = True
+        if self.row[1]:                                 # the row picks the style (the Modes tab's "Style picked")
+            self.log("Co-op play: CO-OP PLAY is in the operator menu (%s): Off, Normal, Characters or Enhanced, %s to "
+                     "start with. Off, the game is the stock game; otherwise the start menu (both flipper buttons in "
+                     "attract) offers the co-op and team games, and %s." % (
+                         self.setting.where, self.row[1][self.row[2] - 1],
+                         "every one of them plays the style this row says, with no style step on the start menu"
+                         if "every" in self.row[3] else "the start menu's style step starts on this row's style"),
+                     "info")
+            return
         self.log("Co-op play: CO-OP PLAY is in the operator menu (%s), On to start with. On, the start menu (both "
                  "flipper buttons in attract) offers the co-op and team games as it does on a card with no such row, "
                  "and a game played as one of them stays off Insider Connected. Off, the game is the stock game: "

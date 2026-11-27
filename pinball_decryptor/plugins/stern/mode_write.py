@@ -2065,7 +2065,14 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
         result.lines.append("co-op play: %s" % CP.A64_LEFT_OUT)
         return result
     result.lines.append("co-op play: %s" % CP.HOW)
-    if setting:
+    place = CP.load_place(project) if setting and not a64 else "start"
+    if place != "start":                                 # PR #53 review: the row picks the style
+        result.lines.append("co-op play: the style is picked in the service menu (CO-OP PLAY: Off, Normal, Characters "
+                            "or Enhanced, %s to start with); %s" % (
+                                CP.STYLE_LABELS[CP.load_style(project)],
+                                "the start menu has no style step" if place == "service"
+                                else "the start menu's style step starts on it"))
+    elif setting:
         # Simon (2026-11-27): the row is Off / On (coop.cfg `switch`); On is the card with no row, as HOW says
         result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: Off or On, On to start with); at "
                             "Off the game is the stock game, with no co-op or team games; %s" % (

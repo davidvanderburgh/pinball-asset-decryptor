@@ -43,6 +43,8 @@ from . import spike3_spk as _spike3_spk
 from . import spike3_extract as _spike3_extract
 from .spike3_extract import Spike3ExtractPipeline
 from .spike3_spk import Spike3SpkExtractPipeline
+from . import spike2_spk as _spike2_spk
+from .spike2_spk import Spike2SpkExtractPipeline
 from .spike3_games import SPIKE3_DB, spike3_key_for_path, spike3_display
 
 # Stern handles four hardware eras under one picker entry:
@@ -936,6 +938,13 @@ class SternManufacturer(Manufacturer):
         # Spike 3 .spk package (a .spk.zip Stern publishes) — checked before the
         # Whitestar .zip branch so it isn't mistaken for a MAME ROM zip.  A .spk
         # works for ANY title (fleet key), so it is always "supported".
+        # A Spike 2 update package has the same .spk.zip name; its content
+        # (an unencrypted SquashFS) says which it is (PAD-1641).
+        if _spike2_spk.is_spike2_spk(path):
+            key = _spike2_spk.game_key(path)
+            return Game(key=key, display=display_for_key(key, path),
+                        manufacturer_key="stern", era="spike2",
+                        notes="Spike 2 update package (.spk)")
         if _spike3_spk.is_spk_input(path):
             key = spike3_key_for_path(path)
             return Game(key=key, display=spike3_display(key, path),
@@ -1351,6 +1360,12 @@ class SternManufacturer(Manufacturer):
             return Spike3ExtractPipeline(
                 input_path, output_dir, log_cb, phase_cb, progress_cb,
                 done_cb, extract_categories=extract_categories)
+        if _spike2_spk.is_spike2_spk(input_path):
+            # Stern's own download: read as the card would be (PAD-1641)
+            return Spike2SpkExtractPipeline(
+                input_path, output_dir, log_cb, phase_cb, progress_cb,
+                done_cb, extract_categories=extract_categories,
+                duration_names=duration_names)
         return SternExtractPipeline(
             input_path, output_dir, log_cb, phase_cb, progress_cb, done_cb,
             extract_categories=extract_categories,

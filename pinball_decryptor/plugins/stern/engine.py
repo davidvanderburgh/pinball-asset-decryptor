@@ -434,6 +434,23 @@ def _is_spike3(disk_f):
     return bool(getattr(disk_f, "pad_spike3", False))
 
 
+def part_reader(disk_f, part):
+    """The reader for one entry of a card's partition list: an ``(offset,
+    size)`` pair is an ext partition of ``disk_f``; an entry that is already
+    a volume (a Spike 2 update package's section, :mod:`.spike2_spk`, PAD-1641)
+    is used as it is."""
+    if hasattr(part, "find_spike_assets"):
+        return part
+    from .ext4 import Ext4Reader
+    off, size = part
+    return Ext4Reader(disk_f, off, size)
+
+
+def _part_base(part):
+    """The byte offset (a volume's own tag) one partition-list entry starts at."""
+    return part.base if hasattr(part, "find_spike_assets") else part[0]
+
+
 def _locate(disk_f, partitions):
     """Find the Spike 2 game directory (the one holding ``image.bin``) and its
     firmware ELF across the card's ext partitions (largest first).  Returns
@@ -442,11 +459,10 @@ def _locate(disk_f, partitions):
     On the card the firmware binary is the ``game`` ELF sitting next to
     ``image.bin`` (with a top-level ``game`` *symlink* the locator skips by
     validating the ELF magic)."""
-    from .ext4 import Ext4Reader
     img_only = None
-    for off, size in partitions:
+    for part in partitions:
         try:
-            r = Ext4Reader(disk_f, off, size)
+            r = part_reader(disk_f, part)
         except Exception:
             continue
         img_ino, fw_ino = r.find_spike_assets()
@@ -493,10 +509,10 @@ def _extract_board_firmware(disk_f, partitions, work_dir, log):
     versioned name, for a game program that keys its sounds through the board
     (:mod:`.spike2.netbridge`).  Returns the copy's path, or None when the
     card has none (the codec emulator then says so)."""
-    from .ext4 import S_IFLNK, S_IFMT, Ext4Reader
-    for off, size in partitions:
+    from .ext4 import S_IFLNK, S_IFMT
+    for part in partitions:
         try:
-            r = Ext4Reader(disk_f, off, size)
+            r = part_reader(disk_f, part)
             ino = r.find_files(["netbridge.hex"]).get("netbridge.hex")
             if ino is None:
                 continue
@@ -1166,12 +1182,12 @@ def _boot_screen_dir(disk_f, partitions, games_base=None):
 
     Every ext partition but the games one (*games_base*, its byte offset) is
     tried in turn; on a Spike 2 card only the rootfs holds that folder."""
-    from .ext4 import S_IFDIR, S_IFMT, Ext4Reader
-    for off, size in partitions:
-        if games_base is not None and off == games_base:
+    from .ext4 import S_IFDIR, S_IFMT
+    for part in partitions:
+        if games_base is not None and _part_base(part) == games_base:
             continue
         try:
-            reader = Ext4Reader(disk_f, off, size)
+            reader = part_reader(disk_f, part)
             node = reader.read_inode(2)
             for name in _BOOT_IMAGE_DIR.split("/"):
                 child = next((c for n, c, _t in reader._iter_dir(node)

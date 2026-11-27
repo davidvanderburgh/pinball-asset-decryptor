@@ -354,7 +354,7 @@ def announce_to_machine(machine, log=None):
     sha1, moved into place) and the announce started.  The game is not stopped and the machine is not restarted.
 
     ``'on'`` (it announces now), ``'already'`` (its card had the script; the announce is running) or ``'none'``
-    (its system has no announce service: the card is as it was)."""
+    (its system has neither avahi nor python3 to answer with: the card is as it was)."""
     say = log or (lambda *_a: None)
     found = None
     for path, kind in ANNOUNCE_SCRIPTS:
@@ -366,7 +366,9 @@ def announce_to_machine(machine, log=None):
         raise ExtrasError("This machine's card has no remote access start script of PAD's: put remote access on "
                           "it again (Network tab).")
     path, kind, have = found
-    rc, out = _sh(machine, '[ -x /usr/sbin/avahi-daemon ] && [ -d /etc/avahi/services ] && echo PAD_HAS', 30)
+    # PAD-1631: avahi (Spike 2, JJP) or, where the system has none, python3 for the script's own answerer (Spike 3)
+    rc, out = _sh(machine, '{ [ -x /usr/sbin/avahi-daemon ] && [ -d /etc/avahi/services ]; } '
+                           '|| command -v python3 >/dev/null 2>&1 && echo PAD_HAS', 30)
     if 'PAD_HAS' not in out:
         return 'none'
     want = _start_script(kind)

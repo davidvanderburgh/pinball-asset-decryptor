@@ -114,7 +114,7 @@ SETTINGS = {
     SAVED_PROGRESS: (None, "SAVED PROGRESS", "Saved Progress", 16),
     COLOUR_BLIND: (None, "COLOR BLIND", "Color Blind", 16),
     SPOKEN_SCORES: (None, "SPOKEN SCORES", "Spoken Scores", 16),
-    BOOT_FLIP: (None, "BOOT MENU FLIPPER", "Boot Menu Flipper", 16),
+    BOOT_FLIP: (None, "BOOT MENU VIA FLIPPER", "Boot Menu Via Flipper", 16),   # Simon 2026-11-27: "Via"
     BOOT_SHOW: (None, "BOOT MENU", "Boot Menu", 16),
     BOOT_TIMER: (None, "BOOT MENU TIMER", "Boot Menu Timer", 16),
 }

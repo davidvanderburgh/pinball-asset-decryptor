@@ -33019,6 +33019,7 @@ static void mset_line(char *s)
  * other, where padmenu.so sees it and makes it the card's. */
 static const char MSET_BOOT_FILE[] = "/data/padmenu.boot";
 static const char MSET_BOOT_CONF[] = "/usr/local/codeselect/images.conf";
+static const char MSET_BOOT_RIG[] = "/dump/codeselect.conf";   /* the rig's copy of the card's (run_game.sh) */
 
 /* "<key>=<value>" or "<key> <value>" at a line's start in raw[0..n): the value's number, else -1 (a word: -2 for
  * "hidden" / "on", -3 for anything else) */
@@ -33046,6 +33047,7 @@ static void mset_boot_card(void)
 {
     static char conf[4096], card[128];
     long n = pm_read_file(MSET_BOOT_CONF, conf, sizeof conf - 1), m, v;
+    if (n <= 0) n = pm_read_file(MSET_BOOT_RIG, conf, sizeof conf - 1);
     int menu = 1;
     long secs = -1;
     unsigned k;

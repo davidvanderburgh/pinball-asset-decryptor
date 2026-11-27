@@ -62,7 +62,7 @@ def test_the_values_and_help():
     assert len(BF.MENU_HELP) <= 63                          # the spare help lines' room
     # Simon's facts (5 s hold, 0 Off, seconds idle, minimum 15), said plainly (PR #48 review, David: "more explicit")
     assert BF.MENU_HELP == "Hold R flipper 5s=boot menu if no game for N s. 0 Off, min 15"
-    assert MS.SETTINGS[MS.BOOT_FLIP][1:] == ("BOOT MENU FLIPPER", "Boot Menu Flipper", 16)
+    assert MS.SETTINGS[MS.BOOT_FLIP][1:] == ("BOOT MENU VIA FLIPPER", "Boot Menu Via Flipper", 16)
 
 
 def test_the_cfg_line_padmenu_reads():
@@ -106,7 +106,7 @@ def test_the_service_menu_tab_offers_it(project, monkeypatch):
     from pinball_decryptor.webui.tabs import svcmenu
     keys = [k for k, _n, _w in svcmenu.SETTINGS]
     assert "boot_flip" in keys
-    assert dict((k, n) for k, n, _w in svcmenu.SETTINGS)["boot_flip"] == "Boot Menu Flipper"
+    assert dict((k, n) for k, n, _w in svcmenu.SETTINGS)["boot_flip"] == "Boot Menu Via Flipper"
     src = inspect.getsource(svcmenu.ServiceMenuTab)
     assert "elif key in SM.TICK_KEYS:" in src and "elif key in SM.BOOT_KEYS:" in src
 

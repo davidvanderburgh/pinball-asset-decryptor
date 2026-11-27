@@ -117,7 +117,8 @@ def test_padmenu_keeps_the_cards_value_and_puts_it_in_the_rows():
     assert '#define CARD_FILE      "/data/padmenu.boot"' in src
     assert 'if (!conf_word(conf, "menu_rows", w, sizeof w) || strcmp(w, "on"))' in src   # the tab's "always": nothing
     assert "card_tick(t);" in src and "card_init(conf, line);" in src
-    assert "*(volatile uint32_t *)(uintptr_t)r->addr = (uint32_t)card_shown(r);" in src   # the menu shows the card's
+    assert "*(volatile uint32_t *)(uintptr_t)r->addr = v;" in src                        # the menu shows the card's:
+    assert "((volatile unsigned char *)(uintptr_t)r->addr)[4] = (unsigned char)~" in src  # with its check byte
     assert "card_mapped(r->addr, 1)" in src                                              # only a writable word
 
 

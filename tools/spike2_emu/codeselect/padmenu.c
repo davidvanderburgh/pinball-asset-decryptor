@@ -935,7 +935,12 @@ static void card_tick(long long t)
         if (!r->addr)
             continue;
         if (!card_put && r->addr < ROW_SHARED && card_mapped(r->addr, 1)) {
-            *(volatile uint32_t *)(uintptr_t)r->addr = (uint32_t)card_shown(r);   /* the menu shows the card's */
+            /* the menu shows the card's: the word and its check byte (the inverse of the word's byte sum, as the
+             * runtime's mset_put) - a word alone is a bad record to the game, which shows the row's default */
+            uint32_t v = (uint32_t)card_shown(r);
+            *(volatile uint32_t *)(uintptr_t)r->addr = v;
+            ((volatile unsigned char *)(uintptr_t)r->addr)[4] = (unsigned char)~(unsigned char)(v + (v >> 8) + (v >> 16)
+                                                                                             + (v >> 24));
             tr("%s: the card's value %d put in the row (0x%08lx)", r->key, card_shown(r), r->addr);
         }
         v = card_value(r);

@@ -38,7 +38,7 @@ SETTINGS = (
                                          "saved between games). Clear clears it; so does a factory reset."),
     ("boot_show", "Boot Menu", BF.SHOW_WHERE),                      # Simon (2026-11-27)
     ("boot_timer", "Boot Menu Timer", BF.TIMER_WHERE),
-    ("boot_flip", "Boot Menu Flipper", "For a multi-boot card (Multi-boot tab): the operator's switch for the right "
+    ("boot_flip", "Boot Menu Via Flipper", "For a multi-boot card (Multi-boot tab): the operator's switch for the right "
                                        "flipper hold back to the boot menu. The hold is always 5 s; the value is "
                                        "how many seconds no game must have been running before that hold works, "
                                        "so it never fires during play (0 Off, 15 to start with and the "

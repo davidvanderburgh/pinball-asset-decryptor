@@ -301,7 +301,7 @@ function LayeredDialog({ index, onClose }) {
   })(); }, [clip]);
   const add = async () => {
     const w = await call("text_scenes.add_layered", layers.map((l) => ({ d: l.d, pin: l.pin })), clip, label, player,
-      false, index == null ? null : index, plain);
+      index == null ? null : index, plain);
     if (w) setWhy(w); else onClose();
   };
   const move = (i, d) => { const n = layers.slice(); const [x] = n.splice(i, 1); n.splice(i + d, 0, x); setLayers(n); };

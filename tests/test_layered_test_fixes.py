@@ -203,7 +203,7 @@ def test_edit_opens_the_test_and_save_replaces_it(monkeypatch, tmp_path):
     o = t.layered_options(1)
     assert o["index"] == 1 and o["clip"] == "video/match.mp4" and o["player"] == "ScoreFrame" and o["label"] == "Mine"
     assert [(c["d"], c["pin"]) for c in o["start"]] == [("s/0335207fab", ""), ("s/9d578751cd", "MatchFrame")]
-    why = t.add_layered([{"d": "s/9d578751cd", "pin": "MatchFrame"}], "video/tilt.mov", "Changed", "Normal", False, 1)
+    why = t.add_layered([{"d": "s/9d578751cd", "pin": "MatchFrame"}], "video/tilt.mov", "Changed", "Normal", index=1)
     assert why == ""
     assert len(lst.layered()) == 1 and lst.items[1].label == "Changed" and lst.items[1].rel == "video/tilt.mov"
     assert lst.items[1].layers == ("9d578751cd@MatchFrame",) and lst.items[1].player == "Normal"

@@ -115,9 +115,10 @@ def test_the_scenes_tab_offers_it():
               encoding="utf-8").read()
     # Simon (2026-11-26): the Scenes tab's list of layered tests opens it (New… / Edit)
     assert "function LayeredDialog" in js and ">New…<//>" in js
-    # Simon (2026-11-26): with the video player's state and the ticked scenes' untick
+    # Simon (2026-11-26): with the video player's state, the layered test it replaces (Edit) and its colours
     assert ('call("text_scenes.add_layered", layers.map((l) => ({ d: l.d, pin: l.pin })), clip, label, player,'
             in js)
+    assert "index == null ? null : index, plain);" in js
 
 
 def test_both_builds_ask_for_clips():

@@ -1104,7 +1104,7 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
                 return {"why": "That layered test is from another project (%s): open it to edit the test."
                         % (got.game or got.project)}
             editing = got
-        start, ticked = [], []
+        start = []
         if editing is not None:
             for spec in editing.layers:
                 k = next((k for k in self._scenes if os.path.basename(k).lower().startswith(LT_KEY(spec))), None)
@@ -1132,7 +1132,7 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
                     clips.append({"rel": rel, "label": os.path.splitext(f)[0], "file": f, "own": rel in own})
         clips.sort(key=lambda c: (not c["own"], c["label"].lower()))
         out = {"why": "" if clips else "This project has no videos to put under the scenes (Extract its videos).",
-               "start": [dict(one(k), pin=pin) for k, pin in start], "ticked": ticked,
+               "start": [dict(one(k), pin=pin) for k, pin in start],
                "scenes": scenes, "clips": clips, "clip": "", "index": None}
         if editing is not None:
             out.update(index=int(index), clip=editing.rel, player=editing.player, label=editing.label,
@@ -1174,13 +1174,6 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
         if int(i) in dict(lst.layered()) and lst.remove(int(i)):
             tc.changed(self.window)
         self._tc_publish()
-
-    def _layered_order(self):
-        """The scenes in the list's own order (its sort), for the ticked ones to start the dialog in."""
-        try:
-            return list(self._sorted_dirs())
-        except Exception:                                       # noqa: BLE001
-            return sorted(self._scenes)
 
     @rpc(loop=False)
     def layered_thumb(self, d):
@@ -1244,12 +1237,11 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
         return out
 
     @rpc
-    def add_layered(self, layers, clip_rel, label="", player="", untick=False, index=None, plain=False):
+    def add_layered(self, layers, clip_rel, label="", player="", index=None, plain=False):
         """Put a layered test on the Test card tab's list: *layers* ``[{"d": scene dir, "pin": frame or label}]``,
         the lowest first, over the project's video *clip_rel*, shown in the player's state *player* (a label of
-        layered_test.clip_states).  *untick*: the scenes of it ticked TEST come off the list as still pictures.
-        *index*: the layered test it replaces (Edit).  *plain*: its pictures without each file's colour profile (an
-        A/B test of the overlay's colour, Simon 2026-11-26).  Returns '' or why not."""
+        layered_test.clip_states).  *index*: the layered test it replaces (Edit).  *plain*: its pictures without each
+        file's colour profile (an A/B test of the overlay's colour, Simon 2026-11-26).  Returns '' or why not."""
         from . import testcard_core as tc
         specs = []
         for ly in layers or []:
@@ -1272,11 +1264,6 @@ class TextScenesService(TestTagMixin, ModeLayoutMixin, TreeEditMixin):
                                               layers=specs, player=str(player or ""), plain=bool(plain)),
                                       replace=None if index is None else int(index))
         if not why:
-            if untick:
-                lst = tc.shared()
-                for ly in layers:
-                    lst.set_tag("scene", self.assets_dir, ly["d"], False)
-                self._tc_publish()
             tc.changed(self.window)
             self._tc_publish()
         return why

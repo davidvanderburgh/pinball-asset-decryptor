@@ -724,8 +724,8 @@ Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
                 register=True, setup_args=None, failed_note=None):
     """The PowerShell text of the swap (see module docstring)."""
-    from .updater import INSTALLER_ARGS
-    keys = ", ".join(_psq("HKLM:\\" + k) for k in (
+    from .updater import installer_args
+    keys =", ".join(_psq("HKLM:\\" + k) for k in (
         UNINSTALL_KEY,
         UNINSTALL_KEY.replace("SOFTWARE\\", "SOFTWARE\\WOW6432Node\\", 1)))
     import hashlib
@@ -738,7 +738,7 @@ def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
         "setup": _psq(setup_path or ""),
         "failed_note": _psq(failed_note or swap_failed_note_path()),
         "setup_args": _psq(setup_args if setup_args is not None
-                           else INSTALLER_ARGS),
+                           else installer_args()),
         "pid": int(pid), "marker": _psq(MARKER), "version": version,
         "version_q": _psq(version),
         "display_q": _psq("Pinball Asset Decryptor v%s" % version),

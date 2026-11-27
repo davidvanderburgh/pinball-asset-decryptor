@@ -1537,12 +1537,56 @@ def _norm(p):
     slashes, lower case; an output that does not exist yet has its parent
     resolved and the basename re-joined."""
     a = os.path.abspath(p)
-    if os.path.exists(a):
-        r = os.path.realpath(a)
-    else:
-        r = os.path.join(os.path.realpath(os.path.dirname(a)),
-                         os.path.basename(a))
+    try:
+        if os.path.exists(a):
+            r = os.path.realpath(a)
+        else:
+            r = os.path.join(os.path.realpath(os.path.dirname(a)),
+                             os.path.basename(a))
+    except OSError as e:
+        r = _resolve_by_hand(a, e)
     return os.path.normpath(r).replace("\\", "/").lower()
+
+
+_NORM_FALLBACK_SAID = []
+
+
+def _resolve_by_hand(a, err):
+    """:func:`_norm` when ``realpath`` cannot walk the path (PAD-1635).
+
+    WinError 448, "untrusted mount point": a process running with Windows'
+    RedirectionGuard mitigation refuses to traverse a junction a non-admin
+    user made - David's checkout reaches the card library through one
+    (``images`` -> ``D:\\Pinball\\images``).  Inno Setup 6.7.0-6.7.3 passed
+    that mitigation down to the app it relaunched after an in-app update,
+    and the multi-boot screen died on its first path.  Each link along the
+    path is read itself instead (reading a junction is not traversing it),
+    so a path through the library junction still comes out as the library
+    and :func:`under_library` still refuses it.  Said once per run in the
+    session log."""
+    cur = None
+    for part in a.split(os.sep):
+        cur = (part + os.sep) if cur is None else os.path.join(cur, part)
+        try:
+            target = os.readlink(cur)
+        except (OSError, ValueError, NotImplementedError):
+            continue
+        if target.startswith("\\\\?\\UNC\\"):
+            target = "\\\\" + target[8:]
+        elif target.startswith("\\\\?\\"):
+            target = target[4:]
+        cur = os.path.join(os.path.dirname(cur), target)
+    if not _NORM_FALLBACK_SAID:
+        _NORM_FALLBACK_SAID.append(True)
+        try:
+            from ..core import session_log
+            session_log.append(
+                "Windows would not follow a folder link in %s (%s); read the "
+                "links one by one instead. Restarting the app from its "
+                "shortcut clears this." % (a, err), "warning")
+        except Exception:                               # noqa: BLE001
+            pass
+    return cur or a
 
 
 def _plain(p):

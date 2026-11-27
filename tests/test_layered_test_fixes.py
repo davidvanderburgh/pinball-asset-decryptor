@@ -418,3 +418,25 @@ def test_the_build_says_each_step_under_the_progress_bar():
     from pinball_decryptor.webui.tabs import testcard as tab
     src = inspect.getsource(tab.TestCardTab._say)
     assert 'self._step = line[len("test card: "):]' in src
+
+
+def test_a_video_node_draws_no_stand_in_over_the_clip(monkeypatch):
+    """Simon (2026-11-27): the overlay "Too dark / saturated" - the player scene's Video node was drawn as the Scenes
+    preview's see-through stand-in box, over every scene under it and over the clip; the game's own Match frame then
+    matched the overlay once it went (MATCH 250, 166, 53 in both)."""
+    from PIL import Image
+    from pinball_decryptor.plugins.stern import scene_eval as ev
+    from pinball_decryptor.plugins.stern import scene_render as sr
+    from pinball_decryptor.plugins.stern import fontrender as fr
+    monkeypatch.setattr(fr, "load_fonts", lambda p: [])
+    monkeypatch.setattr(ev, "draw_list", lambda man, f: [{"kind": "bitmap"}, {"kind": "video", "name": "clip"},
+                                                         {"kind": "spine"}])
+    seen = []
+
+    def render(project, man, frame=None, draws=None, **kw):
+        seen.append([d["kind"] for d in draws])
+        return {"sel": Image.new("RGBA", (2, 2), (0, 0, 0, 0))}
+    monkeypatch.setattr(sr, "render_tree", render)
+    list(LT.render_frames("proj", [({"stage": [2, 2], "root": {"frames": 1}}, None)], 1))
+    assert seen == [["bitmap"]]
+    assert LT.without_stand_ins(["not a draw", {"kind": "text"}]) == ["not a draw", {"kind": "text"}]

@@ -101,6 +101,21 @@ def player_names(draws):
     return out
 
 
+#: draws scene_render shows as a stand-in outline (it has no picture of them)
+STAND_IN_KINDS = ("video", "spine")
+
+
+def without_stand_ins(draws):
+    """*draws* without the video and spine nodes.
+
+    Simon (2026-11-27): the overlay "Too dark / saturated" on the table, the video right - the game's own Match frame
+    (the emulator's framebuffer) against the overlay: MATCH [191, 92, 29] in the game, [156, 83, 42] in ours.  The
+    player scene's Video node has no picture in the project, so scene_render draws its stand-in there (a see-through
+    blue-grey box, 40, 40, 60 at 90/255, for the Scenes preview) - and in a layered test that box lay over every
+    scene under it and over the clip.  A layered test's clip IS the video: the box goes."""
+    return [d for d in draws if not (isinstance(d, dict) and d.get("kind") in STAND_IN_KINDS)]
+
+
 def scene_setup(project, card, man, profiles=True):
     """``(manifest, render_tree keywords)`` for scene *card* drawn as the machine shows it, as a ticked scene's
     picture is (webui/text_scenes.render_resting_frame): the project's Scenes edits (PAD-403: less what the scene
@@ -310,7 +325,7 @@ def render_frames(project, scenes, frames, progress=None):
             if pin is not None and i in still:
                 key, layer = still[i]
             else:
-                d = player_names(ev.draw_list(man, f))
+                d = without_stand_ins(player_names(ev.draw_list(man, f)))
                 key = repr(d)
                 if i in drawn and drawn[i][0] == key:
                     layer = drawn[i][1]

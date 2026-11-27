@@ -358,6 +358,9 @@ export function CoopCharsDialog({ s, onClose }) {
   const [open, setOpen] = useState(-1);
   const [looking, setLooking] = useState(false);
   const [picking, setPicking] = useState(-1);          // PAD-1123: the row whose When picked panel is open
+  const [byMode, setByMode] = useState(false);         // PAD-1637: the By music mode grid
+  const bm = ch.by_mode || { modes: [], rows: [] };
+  const bmSet = (bm.rows || []).reduce((n, r) => n + Object.keys(r.files || {}).length, 0);
   useEffect(() => { call("modes.coop_chars_refresh"); }, []);
   const opts = [{ value: "", label: "Start from..." }, { value: "-", label: "No powers" }].concat(abil.map((a) => (
     { value: a.key, label: a.ok ? a.words : `${a.words} (not on this game)`, disabled: !a.ok })));
@@ -509,6 +512,33 @@ export function CoopCharsDialog({ s, onClose }) {
         onClick=${() => call("modes.coop_ceremony_sound", true)} />` : null}
       <span class="small dim wrap">${ch.ceremony_sound ? `${ch.ceremony_sound} plays as the award cards come up at a co-op or team game's end, the game's own sounds faded under it, and fades out when the last card is done (up to ${ch.ceremony_max || 60} seconds of it).` : "Play a music track of your own while the award cards show at a co-op or team game's end."}</span>
     </div>
+    <div class="row" style="margin-top:8px; gap:8px">
+      <${Button} size="sm" kind=${byMode ? "" : "ghost"} icon="wave" disabled=${!(bm.rows || []).length}
+        title="Give the intro, the select music, the awards music and each character's sound once picked a file of their own for each MUSIC MODE the operator can pick."
+        onClick=${() => setByMode(!byMode)}>${bmSet ? `By music mode (${bmSet}) ✓` : "By music mode…"}<//>
+      <span class="small dim wrap">${bmSet
+        ? `${bmSet} co-op sound${bmSet === 1 ? "" : "s"} change${bmSet === 1 ? "s" : ""} with the MUSIC MODE the operator picks in the service menu. A mode with no file of its own plays the one above.`
+        : "Let these sounds change with the MUSIC MODE the operator picks in the service menu, as the game's own music does with music mode files on the Audio tab."}</span>
+    </div>
+    ${byMode ? html`<div class="modes-coop-ch-picked" style="margin-top:6px">
+      <table class="sg-table">
+        <thead><tr><th>Sound</th><th>Mode 1</th>${(bm.modes || []).map((c) => html`<th key=${c.m}>${c.m}: ${c.name}</th>`)}</tr></thead>
+        <tbody>${(bm.rows || []).map((r) => html`<tr key=${r.kind}>
+          <th>${r.label}</th>
+          <td class="small dim" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${r.plain || r.none || "the game's own"}</td>
+          ${(bm.modes || []).map((c) => {
+            const f = (r.files || {})[String(c.m)];
+            return html`<td key=${c.m}><div class="row" style="gap:2px; flex-wrap:nowrap">
+              <${Button} size="xs" kind=${f ? "" : "ghost"} onClick=${() => call("modes.coop_mode_sound", r.kind, c.m, false)}
+                title=${f ? `${r.label} in music mode ${c.m} (${c.name}): ${f}. Choose another.` : `A file of its own for ${r.label.toLowerCase()} while MUSIC MODE is ${c.m} (${c.name}). Without one it plays mode 1's.`}>${f ? "✓ Set" : "Choose…"}<//>
+              ${f ? html`<${Button} size="xs" kind="ghost" icon="x" title=${`Music mode ${c.m} plays mode 1's again.`}
+                onClick=${() => call("modes.coop_mode_sound", r.kind, c.m, true)} />` : null}
+            </div></td>`;
+          })}
+        </tr>`)}</tbody>
+      </table>
+      <span class="small dim wrap">${bm.off || "Each mode's file plays in place of mode 1's while the operator's MUSIC MODE is set to it. Name the modes, or add more, on the Audio tab."}</span>
+    </div>` : null}
     <div class="row" style="margin-top:8px; gap:8px">
       <${Check} checked=${!!ch.bonus} label="Show each teammate's character on their End of Ball Bonus" disabled=${!rows.length}
         title="Its picture (or video) in a big lit frame in the bottom-right corner, its name across the bottom of the picture, while that teammate's bonus counts."

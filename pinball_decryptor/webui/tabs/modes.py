@@ -1094,6 +1094,7 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                           # PAD-1611: the character select's own music
                           "select_sound": os.path.basename(_CP.select_sound_path(project, chars)) if project else "",
                           "select_max": _CP.SELECT_SOUND_MAX_SECONDS,
+                          "by_mode": self._coop_by_mode(project, chars),                        # PAD-1637
                           "bonus": bool(chars.get("bonus")),                                     # PAD-1123
                           "picked_max": _CP.PICKED_MAX_SECONDS, "still_s": _CP.PICKED_STILL_SECONDS,
                           "videos": "" if prof is None or _CP.can_video(prof) else (
@@ -1396,6 +1397,95 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 self._say(str(e))
                 return False
             self._say("co-op characters: %s loops while a teammate picks a character" % os.path.basename(path))
+        self._publish_coop_chars(project)
+        return True
+
+    def _coop_by_mode(self, project, chars):
+        """PAD-1637: the Characters dialog's By music mode grid: ``{"modes": [{"m", "name"}], "rows": [{"kind",
+        "label", "plain", "files": {"<m>": file name}}], "off"}`` - a row per co-op sound (the intro's, the select's,
+        the ceremony's, each character's once picked), a column per music mode 2.. (the Audio tab's names; at least
+        modes 2 to 4, as the Audio tab offers)."""
+        from ...plugins.stern import coop_play as _CP
+        from ...plugins.stern import service_menu as _SvM
+        from ...plugins.stern import sound_modes as _SMo
+        if not project:
+            return {"modes": [], "rows": [], "off": ""}
+        modes = _SMo.load(project)
+        top = min(_CP.MODE_SOUND_MAX, max(4, modes.count, len(modes.names)))
+        cols = [{"m": m, "name": modes.name(m)} for m in range(2, top + 1)]
+        have = {}
+        for kind, m, path in _CP.mode_sounds(project, chars):
+            have.setdefault(kind, {})[str(m)] = os.path.basename(path)
+        b = os.path.basename
+        rows = []
+        if _CP.intro_path(project, chars) or have.get("intro"):    # the intro's sound plays only over an intro video
+            rows.append({"kind": "intro", "label": "Intro sound", "plain": b(_CP.intro_path(project, chars)),
+                         "none": "no intro video", "files": have.get("intro", {})})
+        if chars["pick"]:
+            rows.append({"kind": "select", "label": "Select music", "plain": b(_CP.select_sound_path(project, chars)),
+                         "files": have.get("select", {})})
+            rows.append({"kind": "ceremony", "label": "Awards music",
+                         "plain": b(_CP.ceremony_sound_path(project, chars)), "files": have.get("ceremony", {})})
+            for i, c in enumerate(chars["list"]):
+                k = "picked%d" % (i + 1)
+                rows.append({"kind": k, "label": "%s once picked" % c["name"],
+                             "plain": b(_CP.picked_sound_source(project, c)), "none": "none",
+                             "files": have.get(k, {})})
+        off = ""
+        try:
+            if "music_mode" in _SvM.off_keys(project):
+                off = ("MUSIC MODE is not ticked on the Service menu tab, so a Write leaves these out and each sound "
+                       "plays its own. Tick its row there to put them on the card.")
+        except Exception:                               # noqa: BLE001 - unreadable: say nothing
+            pass
+        return {"modes": cols, "rows": rows, "off": off}
+
+    @rpc
+    def coop_mode_sound(self, kind, mode, clear=False):
+        """PAD-1637: a cell of the By music mode grid: co-op sound *kind* (intro, select, ceremony, picked<n>)'s own
+        file in music mode *mode* (2..); *clear* takes it off (that mode plays mode 1's)."""
+        from ...plugins.stern import coop_play as _CP
+        from ...plugins.stern import sound_modes as _SMo
+        project = self.project()
+        if not project:
+            return False
+        kind, mode = str(kind), int(mode)
+        chars = _CP.load_characters(project)
+        if kind.startswith("picked"):
+            try:
+                i = int(kind[6:]) - 1
+            except ValueError:
+                return False
+            if not 0 <= i < len(chars["list"]):
+                return False
+            what = "%s's sound once picked" % chars["list"][i]["name"]
+        elif kind in _CP.MODE_SOUND_KINDS:
+            i = -1
+            what = {"intro": "the intro's sound", "select": "the select music", "ceremony": "the awards music"}[kind]
+        else:
+            return False
+        name = _SMo.load(project).name(mode)
+        try:
+            if clear:
+                if i >= 0:
+                    _CP.save_picked_mode_sound(project, i, mode, None)
+                else:
+                    _CP.save_mode_sound(project, kind, mode, None)
+                self._say("co-op: in music mode %d (%s) %s is mode 1's again" % (mode, name, what))
+            else:
+                path = self.window.ask_open("modes_file", "Choose %s in music mode %d (%s)" % (what, mode, name),
+                                            [("Sounds", " ".join("*" + e for e in _CP.SOUND_EXTS)),
+                                             ("A video's sound", " ".join("*" + e for e in _CP.VIDEO_EXTS))])
+                if not path:
+                    return False
+                if i >= 0:
+                    _CP.save_picked_mode_sound(project, i, mode, path)
+                else:
+                    _CP.save_mode_sound(project, kind, mode, path)
+                self._say("co-op: in music mode %d (%s) %s is %s" % (mode, name, what, os.path.basename(path)))
+        except _CP.CoopError as e:
+            self._say(str(e))
+            return False
         self._publish_coop_chars(project)
         return True
 
@@ -2615,12 +2705,80 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 path = os.path.join(folder, name) if name else ""
                 files[key] = path if path and os.path.isfile(path) else ""
         self.set(status=status, labels=labels, files=files, folder=folder or "",
+                 own_modes=self._own_modes_state(spec, folder),                  # PAD-1637
                  ready=bool(self._ready and not self._no_port),
                  fix_pages=[] if self._no_port else problem_pages(problems))
         self._update_preview(spec, folder)
         self._note_no_port_in_status()
         self._note_retarget_in_status()
         self._publish_rows()
+
+    _OWN_MODE_WORDS = {"sound_start": "When it starts", "sound_shot": "On a scoring shot",
+                       "music": "Music underneath", "sound_end": "When time is up"}
+
+    def _own_modes_state(self, spec, folder):
+        """PAD-1637: the Sounds page's By music mode grid: ``{"modes": [{"m", "name"}], "rows": [{"key", "label",
+        "plain", "files": {"<m>": name}}], "off"}`` - a row per own sound the title carries (the end call only where
+        it rides a carrier), a column per music mode 2.. (the Audio tab's names; modes 2 to 4 at least)."""
+        from ...plugins.stern import mode_write as _MW
+        from ...plugins.stern import service_menu as _SvM
+        from ...plugins.stern import sound_modes as _SMo
+        project = self._open_project
+        if spec is None or not project:
+            return {"modes": [], "rows": [], "off": ""}
+        smodes = _SMo.load(project)
+        top = min(MP.OWN_MODE_MAX, max(4, smodes.count, len(smodes.names)))
+        prof = self._shown or self._profile
+        keys = list(_MW.carried_keys(prof)) if prof is not None else list(_MW.CARRIED_SOUNDS)
+        have = {}
+        for key, m, name in MP.own_mode_files(spec):
+            if folder and os.path.isfile(os.path.join(folder, name)):
+                have.setdefault(key, {})[str(m)] = name
+        rows = [{"key": k, "label": self._OWN_MODE_WORDS.get(k, k),
+                 "plain": getattr(spec, "end_sound" if k == "sound_end" else k, "") or "",
+                 "files": have.get(k, {})} for k in MP.OWN_MODE_KEYS if k in keys]
+        off = ""
+        try:
+            if "music_mode" in _SvM.off_keys(project):
+                off = ("MUSIC MODE is not ticked on the Service menu tab, so a Write leaves these out and each sound "
+                       "plays its own. Tick its row there to put them on the card.")
+        except Exception:                               # noqa: BLE001 - unreadable: say nothing
+            pass
+        return {"modes": [{"m": m, "name": smodes.name(m)} for m in range(2, top + 1)], "rows": rows, "off": off}
+
+    @rpc
+    def choose_own_mode(self, key, mode, clear=False):
+        """PAD-1637: a cell of the Sounds page's By music mode grid: the mode's own sound *key* (sound_start,
+        sound_shot, music, sound_end) for music mode *mode* (2..), a WAV copied into the mode's folder; *clear* takes
+        it off (that music mode plays the plain one)."""
+        if self._spec is None or not self.get("editor_on"):
+            return None
+        key, mode = str(key), int(mode)
+        if key not in MP.OWN_MODE_KEYS or not 2 <= mode <= MP.OWN_MODE_MAX:
+            return None
+        words = self._OWN_MODE_WORDS.get(key, key).lower()
+        folder = MP.mode_folder(self._open_project, self._slug) if self._open_project and self._slug else ""
+        old = ((self._spec.sound_modes or {}).get(key) or {}).get(str(mode), "")
+        if clear:
+            MP.set_own_mode_file(self._spec, key, mode, "")
+            if old and folder:
+                try:
+                    os.remove(os.path.join(folder, old))
+                except OSError:
+                    pass
+            self._say("%s: %s in music mode %d plays the plain sound again" % (self._spec.name, words, mode))
+        else:
+            path = self.window.ask_open("modes_file", "Choose the sound %s in music mode %d" % (words, mode),
+                                        [("WAV sounds", "*.wav")])
+            if not path:
+                return None
+            name = self._copy_in(path, MP.own_mode_file_name(key, mode, os.path.splitext(path)[1].lower()))
+            MP.set_own_mode_file(self._spec, key, mode, name)
+            self._say("%s: copied %s into the mode's folder for %s in music mode %d"
+                      % (self._spec.name, os.path.basename(path), words, mode))
+        self.save_now()
+        self._after_change()
+        return True
 
     def _end_sound_words(self, spec):
         if spec is None or not spec.end_sound:

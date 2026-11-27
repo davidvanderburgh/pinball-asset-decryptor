@@ -182,7 +182,7 @@ def test_the_runtime_wiring():
     assert close.index("pk.open = 0;") < close.index("cselm_end(!cselm_picked_follows(c)")
     assert close.index("cselm_end(") < close.index("coop_picked_begin(c);")   # off the carrier before its sound
     follows = R._lift(src, "static int cselm_picked_follows(int c)\n{")
-    assert "coop_done.on" in follows and "cpk_has(c, 0, cpk.have_sound, cpk.request) & 2" in follows
+    assert "coop_done.on" in follows and "cpk_has(c, 0, cpk_have_now(), cpk.request) & 2" in follows   # PAD-1637: by mode
     tick = R._lift(src, "static void cselm_tick(void)\n{")
     assert "pk.open" in tick and "cselm_begin();" in tick and "cselm_end(1," in tick and "cselm_play(now);" in tick
     assert "cselm_quiet();" in tick

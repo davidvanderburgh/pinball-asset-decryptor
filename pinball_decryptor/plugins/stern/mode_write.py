@@ -691,6 +691,9 @@ def carried_keys(prof):
 
 
 def _wav_name(spec, key):
+    base, m = MP.split_key(key)
+    if m > 1:                                           # PAD-1637: its file for a music mode
+        return ((getattr(spec, "sound_modes", None) or {}).get(base) or {}).get(str(m), "")
     return getattr(spec, _SPEC_FIELD.get(key, key), "")
 
 
@@ -746,6 +749,13 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
     prof = MP.profile(modes[0][1].title)
     wanted = [(slug, spec, key) for slug, spec in modes for key in carried_keys(prof)
               if _wav_name(spec, key)]
+    alts = [(slug, spec, MP.alt_key(key, m)) for slug, spec in modes for key, m, _f in MP.own_mode_files(spec)
+            if key in carried_keys(prof)]
+    if alts and _music_mode_off(project):              # PAD-1637: MUSIC MODE unticked: their files stay off
+        log("Modes: MUSIC MODE is not ticked on the Service menu tab, so the modes' sounds for the other music modes "
+            "are left out: each plays its own. Tick its row there to put them on the card.", "info")
+        alts = []
+    wanted += alts
     if not wanted:
         return []
     ok, why = sound_ok
@@ -765,24 +775,25 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
     taken_beds = []
     out = []
     for slug, spec, key in wanted:
-        if MS.swapped(c, key):
+        base = MP.split_key(key)[0]                     # PAD-1637: a music mode's file rides its sound's kind
+        if MS.swapped(c, base):
             # hud-layers: a carrier shared with the other modes; the engine picks which
             out.append({"slug": slug, "name": spec.name, "key": key, "request": 0,
                         "wav": os.path.join(MP.mode_folder(project, slug), _wav_name(spec, key)),
-                        "music": key == "music", "swap": True})
+                        "music": base == "music", "swap": True})
             continue
         try:
-            got = MS.assign(game, version, [(key,)], taken=taken, taken_beds=taken_beds)[0]
+            got = MS.assign(game, version, [(base,)], taken=taken, taken_beds=taken_beds)[0]
         except MS.ModeSoundError as e:
-            log("Modes: %s's %s is not put on this card: %s." % (spec.name, SOUND_WORDS[key], e),
+            log("Modes: %s's %s is not put on this card: %s." % (spec.name, sound_words(key), e),
                 "warning")
             continue
-        request = got[key]
+        request = got[base]
         taken.append(request)
         entry = {"slug": slug, "name": spec.name, "key": key, "request": int(request),
                  "wav": os.path.join(MP.mode_folder(project, slug), _wav_name(spec, key)),
-                 "music": key == "music"}
-        if key == "music" and got.get("music_sid"):
+                 "music": base == "music"}
+        if base == "music" and got.get("music_sid"):
             # item 150 follow-up: the mode's own bed, on the one music carrier, long enough that the
             # mode never reaches the record's own loop
             entry["sid"] = int(got["music_sid"])
@@ -794,8 +805,17 @@ def choose_own_sounds(project, modes, sound_ok, end_sound=None, log=None):
     out, dropped = _share_swapped(out, c, taken)
     for e in dropped:
         log("Modes: %s's %s is not put on this card: %s %s has no %s carrier." % (
-            e["name"], SOUND_WORDS[e["key"]], game, version, "music" if e["music"] else "call"), "warning")
+            e["name"], sound_words(e["key"]), game, version, "music" if e["music"] else "call"), "warning")
     return out
+
+
+def _music_mode_off(project):
+    """PAD-1637: whether MUSIC MODE is left off the card (unticked on the Service menu tab)."""
+    from . import service_menu as SvM
+    try:
+        return "music_mode" in SvM.off_keys(project)
+    except Exception:                                   # noqa: BLE001 - unreadable: as unticked
+        return True
 
 
 def _names(wanted):
@@ -815,18 +835,20 @@ def own_cfg_args(project, slug, spec, own_sounds):
         return None, None
     requests = {u["key"]: int(u["request"]) for u in mine}
     for u in mine:
-        if u["key"] == "music" and u.get("bank_sid"):
+        base = MP.split_key(u["key"])[0]                # PAD-1637: a music mode's own (music@2) as its sound's
+        sid_key = "music_sid" if u["key"] == "music" else u["key"] + "_sid"
+        if base == "music" and u.get("bank_sid"):
             # PAD-595: its bed in a sound bank of its own, played by that bank's sound id
-            requests["music_sid"] = int(u["bank_sid"])
-        elif u["key"] == "music" and u.get("sid"):
-            requests["music_sid"] = int(u["sid"])     # item 150 follow-up: the mode's own bed
-        if u.get("bank_sid") and u["key"] != "music":
+            requests[sid_key] = int(u["bank_sid"])
+        elif base == "music" and u.get("sid"):
+            requests[sid_key] = int(u["sid"])         # item 150 follow-up: the mode's own bed
+        if u.get("bank_sid") and base != "music":
             # PAD-595: a call in a sound bank: its carrier is pointed at the bank's sound id
             requests.setdefault("sids", []).append((int(u["request"]), int(u["bank_sid"])))
         elif u.get("stock_key") and u.get("our_key"):
             # item 163: the mode swaps its own record in on this carrier
             requests.setdefault("swaps", []).append((int(u["request"]), u["stock_key"], u["our_key"]))
-    ms = {u["key"]: int(u["ms"]) for u in mine if u.get("ms") and u["key"] != "music"}
+    ms = {u["key"]: int(u["ms"]) for u in mine if u.get("ms") and MP.split_key(u["key"])[0] != "music"}
     return requests, ms or None
 
 
@@ -2366,6 +2388,11 @@ def _own_sound_parts(slug, spec, result):
         else:
             parts.append("not its own %s (this card cannot carry it; the log says why)"
                          % SOUND_WORDS[key])
+    for key, m, name in MP.own_mode_files(spec):         # PAD-1637: its files for the other music modes
+        alt = carried.get(MP.alt_key(key, m))
+        if result is not None and key in CARRIED_SOUNDS:
+            parts.append("its own %s %s (request %d)" % (sound_words(MP.alt_key(key, m)), name, alt["request"])
+                         if alt else "not its own %s (the log says why)" % sound_words(MP.alt_key(key, m)))
     return parts
 
 
@@ -3423,6 +3450,9 @@ def sound_words(key):
         return "%s call" % str(key)[5:]
     if str(key).startswith("music:"):                   # PAD-658: a further music bed
         return "%s music bed" % str(key)[6:]
+    base, m = MP.split_key(key)
+    if m > 1:                                           # PAD-1637: a music mode's own
+        return "%s in music mode %d" % (SOUND_WORDS.get(base, base), m)
     return SOUND_WORDS.get(key, key)
 
 

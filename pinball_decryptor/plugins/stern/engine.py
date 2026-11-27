@@ -9912,7 +9912,9 @@ def _compute_patches_inner(disk_f, parts, assets_dir, log, progress, cancel,
                                     int(_u["host"])), "warning")
                         sound_mode_used = [u for u in sound_mode_used
                                            if int(u["host"]) not in _dead]
-                    if sound_mode_used:
+                    if sound_modes is not None:   # PAD-1637: the game modes' sounds for a music mode
+                        sound_modes.own_mm = any(_MW_split_key(u.get("key"))[1] > 1 for u in mode_own_used or ())
+                    if sound_mode_used or (sound_modes is not None and sound_modes.own_mm):
                         # PAD-494: every sound id that plays a slot with a
                         # mode file, that mode's descriptor, off the bank as
                         # it now stands
@@ -12031,7 +12033,14 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     from . import service_menu as _SvM
     from . import sound_modes as _SMo
     modes = _SMo.load(assets_dir)
-    if modes.count and "music_mode" in _SvM.off_keys(assets_dir):
+    mm_off = "music_mode" in _SvM.off_keys(assets_dir)
+    if modes.own_top and mm_off:                        # PAD-1637: nor the game modes' (mode_write says so)
+        modes.own_top = 0
+    if modes.coop_top and mm_off:                       # PAD-1637: nor co-op's own files in a music mode
+        log("Co-op sounds: MUSIC MODE is not ticked on the Service menu tab, so their files for the other music "
+            "modes are left out: each plays its own. Tick its row there to put them on the card.", "info")
+        modes.coop_top = 0
+    if modes.count and mm_off:
         log("Music modes: MUSIC MODE is not ticked on the Service menu tab, so this card carries no other music "
             "mode: every sound plays its own. Tick its row there to put it on the card.", "info")
         modes.slots, modes.levels = {}, {}
@@ -12043,6 +12052,8 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
     modes.picks = _coop_picked_wavs(assets_dir, log)  # PAD-1123: and the co-op characters' sounds once picked
     modes.ceremony = _coop_ceremony_wav(assets_dir, log)   # PAD-1317: and the co-op awards ceremony's music
     modes.select = _coop_select_wav(assets_dir, log)       # PAD-1611: and the co-op character select's music
+    if not mm_off:                                         # PAD-1637: and their own files in the music modes
+        modes.coop_modes = _coop_mode_wavs(assets_dir, log)
     modes.speak = _spoken_wavs(assets_dir, log)         # PAD-1589: and the spoken scores' number words
     if not modes.any:
         return None, None
@@ -12111,6 +12122,7 @@ def _sound_modes_for_build(assets_dir, dest_is_device, log, ext4_available=None)
                     % ("intro's sound" if modes.intro and not modes.picks and not modes.ceremony
                        and not modes.select else "sounds", i_why.rstrip(".")), "warning")
                 modes.intro, modes.picks, modes.ceremony, modes.select = "", [], "", ""
+                modes.coop_modes, modes.coop_top = [], 0                    # PAD-1637
                 if not modes.any:
                     return None, None
         if modes.speak:
@@ -14080,14 +14092,16 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     except (RuntimeError, ValueError, OSError, struct.error) as e:
         log("%s: not put on this card: %s. Every sound plays its own." % (who, e), "warning")
         return ""
-    if modes.count and not sounds and not bsids:
+    coop_mm = bool((intro or {}).get("by_mode")) or bool(getattr(modes, "own_mm", False))
+    # PAD-1637: co-op's own files in a music mode want it too, and the game modes' own sounds' (on carriers of theirs)
+    if modes.count and not sounds and not bsids and not coop_mm:
         log("Music modes: none of the files for the other modes can be played on this card, so "
             "MUSIC MODE is not added.", "warning")
         if not turns and not tsids and not jukebox and not attract and not shots and not intro and not speak:
             return ""
         modes.slots, modes.names = {}, []
     if not sounds and not turns and not bsids and not tsids and not attract and not jukebox and not shots \
-            and not intro and not speak:
+            and not intro and not speak and not coop_mm:
         log("%s: none of the files can be played on this card; every sound plays its "
             "own." % ("Sounds in turn" if modes.turns or not (modes.attract or modes.shots)
                       else "Attract flipper sounds" if modes.attract else "Sounds on shots"), "warning")
@@ -14114,7 +14128,7 @@ def _sound_modes_cfg(gr_path, staged, params, sites, used, modes, only, out_dir,
     os.makedirs(_lp(out_dir), exist_ok=True)
     path = os.path.join(out_dir, _SMo.CFG_NAME)
     with open(_lp(path), "w", encoding="utf-8", newline="\n") as f:
-        f.write(_SMo.cfg_text(live, modes.count if sounds or bsids else 0, sounds, only,
+        f.write(_SMo.cfg_text(live, modes.count if sounds or bsids or coop_mm else 0, sounds, only,
                               turns=turns, bsids=bsids, tsids=tsids, randoms=randoms, attract=attract,
                               jukebox=jukebox, shots=shots, intro=intro, speak=speak,
                               record=_SMo.card_record(modes, used + banked)))
@@ -14379,6 +14393,7 @@ def _intro_carrier(gr_path, img_path, params, sites, assets_dir, audio_edits, mo
             "warning")
         modes.intro, modes.intro_rel, modes.intro_plan, modes.picks, modes.ceremony = "", "", {}, [], ""
         modes.select = ""
+        modes.coop_modes, modes.coop_top = [], 0                            # PAD-1637
         return None
     modes.intro_rel = rel
     modes.intro_plan = {"request": request, "slot": slot}
@@ -14400,7 +14415,7 @@ def _intro_lines(params, used, modes, log):
         return None
     byidx = {p["idx"]: p for p in params}
     out = {"request": int(plan["request"]), "key": None, "host": None, "ms": 0, "picks": [], "ceremony": None,
-           "select": None}
+           "select": None, "by_mode": []}
     for u in used:
         sp, hp = byidx.get(int(u["slot"])), byidx.get(int(u["host"]))
         n = _SMo_picked_of(u["mode"])
@@ -14409,12 +14424,17 @@ def _intro_lines(params, used, modes, log):
         if not sp or not hp or not hp.get("grown") or not sp.get("findkey") or not hp.get("findkey"):
             log("Co-op %s: left out: its record did not come out of the grown bank." % (
                 "awards ceremony's music" if cer else "character select's music" if sel else
-                "character %d's sound once picked" % n if n else "intro's sound"), "warning")
+                "character %d's sound once picked" % n if n else "intro's sound")
+                + (" in music mode %d" % _SMo_coop_music_mode(u["mode"]) if _SMo_coop_music_mode(u["mode"]) > 1
+                   else ""), "warning")
             continue
         u["lines"] = 1
         out["key"] = bytes(sp["findkey"])
         ms = int(-(-int(u["frames"]) * 1000 // 44100))
-        if cer:
+        mm = _SMo_coop_music_mode(u["mode"])
+        if mm > 1:                                      # PAD-1637: a co-op sound's own file in music mode mm
+            out["by_mode"].append((_SMo_coop_role(u["mode"]), mm, bytes(hp["findkey"]), ms))
+        elif cer:
             out["ceremony"] = (bytes(hp["findkey"]), ms)
         elif sel:
             out["select"] = (bytes(hp["findkey"]), ms)
@@ -14618,6 +14638,63 @@ def _coop_select_wav(assets_dir, log):
     return got
 
 
+def _coop_mode_wavs(assets_dir, log):
+    """PAD-1637: the co-op sounds' own files in music modes 2.. (coop_play.mode_sounds) as WAVs in the project's write
+    cache, ``[(role, music mode, WAV)]`` (role: the sound's pseudo mode in mode 1): [] when co-op is off or none has
+    one. Each named for its source as it is (as the intro's: the build reads the sound set several times), under a
+    prefix of its own, so making one never removes another's."""
+    from . import coop_play as _CP
+    from . import sound_modes as _SMo
+    try:
+        chars = _CP.load_characters(assets_dir) if _CP.load(assets_dir) else None
+        files = _CP.mode_sounds(assets_dir, chars) if chars else []
+    except Exception:  # noqa: BLE001 - an unreadable sidecar: none
+        files = []
+    if files and not chars["pick"]:
+        files = [f for f in files if not f[0].startswith("picked")]
+    if not files:
+        return []
+    from ...core.audio import find_ffmpeg
+    ff = find_ffmpeg()
+    if not ff:
+        log("Co-op sounds: their files for the other music modes are left out of this build: ffmpeg was not found.",
+            "warning")
+        return []
+    folder = os.path.join(assets_dir, _SMo.CACHE_DIR)
+    out, keep = [], set()
+    for kind, m, src in files:
+        if kind.startswith("picked"):
+            role = _SMo.INTRO_MODE + int(kind[6:])
+        else:
+            role = {"intro": _SMo.INTRO_MODE, "ceremony": _SMo.CEREMONY_MODE, "select": _SMo.SELECT_MODE}[kind]
+        what = _SMo._coop_what(_SMo.coop_mode(role, m))
+        try:
+            st = os.stat(src)
+            name = "coopmm_%s_m%d_%s.wav" % (kind, int(m), hashlib.md5(
+                ("%s|%d|%d" % (os.path.abspath(src), st.st_size, st.st_mtime_ns)).encode()).hexdigest()[:12])
+            path = os.path.join(folder, name)
+            keep.add(name)
+            os.makedirs(folder, exist_ok=True)
+            if not (os.path.isfile(path) and os.path.getsize(path) > 44):
+                got = _CP.mode_sound_audio(kind, src, path + ".part.wav", ff)
+                if not got:
+                    log("Co-op sounds: %s has no sound, so %s plays mode 1's." % (os.path.basename(src), what), "info")
+                    continue
+                os.replace(got, path)
+            out.append((role, int(m), path))
+        except (OSError, _CP.CoopError) as e:
+            log("Co-op sounds: %s is left out of this build: %s." % (what, e), "warning")
+    try:
+        for f in os.listdir(folder):                    # the files of sources there no longer
+            if f.startswith("coopmm_") and f.endswith(".wav") and f not in keep:
+                os.remove(os.path.join(folder, f))
+    except OSError:
+        pass
+    if out:
+        log("Co-op sounds: %d file(s) of their own for the other music modes." % len(out), "info")
+    return out
+
+
 def _coop_picked_wavs(assets_dir, log):
     """PAD-1123: each co-op character's sound once picked (its sound file, else its picked clip's own sound) as a WAV
     in the project's write cache, ``[(character number, WAV)]``: [] when co-op or the pick is off, or none has one.
@@ -23231,6 +23308,16 @@ def _SMo_picked_of(mode):
     return _SMo.picked_of(mode)
 
 
+def _SMo_coop_music_mode(mode):
+    from . import sound_modes as _SMo
+    return _SMo.coop_music_mode(mode)
+
+
+def _SMo_coop_role(mode):
+    from . import sound_modes as _SMo
+    return _SMo.coop_role(mode)
+
+
 def _SMo_is_juke(mode):
     """PAD-685: a jukebox song stays in image.bin: the runtime swaps its record's key in."""
     from . import sound_modes as _SMo
@@ -25767,3 +25854,9 @@ def _safe_remove(path):
         os.remove(_lp(path))
     except OSError:
         pass
+
+
+def _MW_split_key(key):
+    """PAD-1637: ``(sound key, music mode)`` of a mode's own-sound key (``music@2`` -> ``("music", 2)``)."""
+    from . import mode_project as _MP
+    return _MP.split_key(key or "")

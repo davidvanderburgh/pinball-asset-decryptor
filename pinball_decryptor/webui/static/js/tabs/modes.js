@@ -919,6 +919,35 @@ function LightsPage({ s, f, off, dis, rs }) {
   </div>`;
 }
 
+// PAD-1637: each of the mode's own sounds can have a file of its own for each MUSIC MODE the operator picks
+function OwnByMode({ om, off }) {
+  const [open, setOpen] = useState(false);
+  const rows = (om && om.rows) || [], cols = (om && om.modes) || [];
+  if (!rows.length) return null;
+  const n = rows.reduce((k, r) => k + Object.keys(r.files || {}).length, 0);
+  return html`<${Sec} title="By music mode">
+    <div class="row wrap" style="gap:8px">
+      <${Button} size="sm" kind=${open ? "" : "ghost"} icon="wave" disabled=${off} onClick=${() => setOpen(!open)}
+        title="Give the mode's own sounds a file of their own for each MUSIC MODE the operator can pick in the service menu.">${n ? `By music mode (${n}) ✓` : "By music mode…"}<//>
+      <span class="small dim wrap">${n ? `${n} of its sounds change with the MUSIC MODE. A music mode with no file of its own plays the sound above.` : "Let its sounds change with the MUSIC MODE the operator picks, as the game's own music does with music mode files on the Audio tab."}</span>
+    </div>
+    ${open ? html`<table class="sg-table" style="margin-top:6px">
+      <thead><tr><th>Sound</th><th>Mode 1</th>${cols.map((c) => html`<th key=${c.m}>${c.m}: ${c.name}</th>`)}</tr></thead>
+      <tbody>${rows.map((r) => html`<tr key=${r.key}>
+        <th>${r.label}</th>
+        <td class="small dim" style="overflow:hidden; text-overflow:ellipsis; white-space:nowrap">${r.plain || "nothing"}</td>
+        ${cols.map((c) => { const fl = (r.files || {})[String(c.m)]; return html`<td key=${c.m}><div class="row" style="gap:2px; flex-wrap:nowrap">
+          <${Button} size="xs" kind=${fl ? "" : "ghost"} disabled=${off} onClick=${() => call("modes.choose_own_mode", r.key, c.m, false)}
+            title=${fl ? `${r.label} in music mode ${c.m} (${c.name}): ${fl}. Choose another.` : `A sound of its own for "${r.label}" while MUSIC MODE is ${c.m} (${c.name}). Without one it plays mode 1's.`}>${fl ? "✓ Set" : "Choose…"}<//>
+          ${fl ? html`<${Button} size="xs" kind="ghost" icon="x" disabled=${off} title=${`Music mode ${c.m} plays mode 1's again.`}
+            onClick=${() => call("modes.choose_own_mode", r.key, c.m, true)} />` : null}
+        </div></td>`; })}
+      </tr>`)}</tbody>
+    </table>` : null}
+    ${open ? html`<div class="small muted wrap">${(om && om.off) || "Each music mode's file plays in place of mode 1's while the operator's MUSIC MODE is set to it, each on a stock call of its own. Name the modes, or add more, on the Audio tab."}</div>` : null}
+  <//>`;
+}
+
 function SoundsPage({ s, f, off, dis, rs, lim, labels, files }) {
   const prof = s.profile || {};
   const choices = prof.callouts || [];
@@ -957,6 +986,7 @@ function SoundsPage({ s, f, off, dis, rs, lim, labels, files }) {
         </div>
         ${dis.own_extra ? null : html`<div class="small muted wrap">Each plays in place of a stock call the game never makes. Write puts them on the card, and names any it cannot carry.</div>`}
       <//>
+      <${OwnByMode} om=${s.own_modes} off=${off || dis.own_extra} />
     </div>
     <div class="stack" style="gap:14px">
       <${Sec} title="Callouts" tipText=${T.callouts}>

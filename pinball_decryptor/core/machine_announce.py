@@ -20,10 +20,15 @@ import time
 
 SERVICE = "_pad-machine._tcp.local"
 GROUP, PORT = "224.0.0.251", 5353
-#: how long the answers are waited for (David's Godzilla answered in 0.02 s; a sleeping Wi-Fi radio takes longer)
-WAIT = 1.2
-#: the question is put twice, this far apart: one multicast packet lost on Wi-Fi is not a machine missed
-AGAIN = 0.35
+#: PAD-1627, measured on David's mesh: one multicast question reached his Godzilla about half the time (the
+#: machine's Wi-Fi radio sleeps, and a mesh drops multicast to a sleeping device), asked every quarter second it
+#: always got through but took up to 2.7 s; a question sent straight to the machine's address always got through
+#: in under 0.3 s.  So the question is repeated every :data:`AGAIN` seconds for up to :data:`WAIT`, sent straight
+#: to the addresses the machines were last at as well, and the asking ends early once all of those have answered.
+WAIT = 3.5
+AGAIN = 0.25
+#: never sooner than this, so a machine nobody knew of yet has its chance too
+AT_LEAST = 0.6
 PTR, TXT, SRV, ANY_IN_UNICAST = 12, 16, 33, 0x8001
 
 
@@ -99,15 +104,19 @@ def parse(data, service=SERVICE):
         return None
 
 
-def ask(wait=WAIT, addresses=None, service=SERVICE):
+def ask(wait=WAIT, addresses=None, service=SERVICE, also=()):
     """Every PAD machine that answers on the home networks right now: ``[{'address', 'game', 'host_key', 'port',
-    'name'}]``, in address order.  ``[]`` when none does (or this computer has no network): never raises."""
+    'name'}]``, in address order.  ``[]`` when none does (or this computer has no network): never raises.
+
+    *also*: addresses machines were last at; each is asked directly too, and once all of them have answered (and
+    :data:`AT_LEAST` has passed) the asking is over."""
     if addresses is None:
         try:
             from . import machine_scan
             addresses = [str(a) for a in machine_scan.local_addresses()]
         except Exception:                               # noqa: BLE001 - no network to ask
             addresses = []
+    also = [a.split(":")[0] for a in also or () if a]
     socks = []
     packet = question(service)
     for a in addresses:
@@ -117,22 +126,41 @@ def ask(wait=WAIT, addresses=None, service=SERVICE):
             s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_IF, socket.inet_aton(a))
             s.setsockopt(socket.IPPROTO_IP, socket.IP_MULTICAST_TTL, 1)
             s.setblocking(False)
-            s.sendto(packet, (GROUP, PORT))
             socks.append(s)
         except OSError:
             continue
+    # the direct questions go from a socket of their own: one sent to an address nothing is at any more comes
+    # back as an error on its socket (Windows), which must not cost the multicast socket its answers
+    direct = None
+    if also and socks:
+        try:
+            direct = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            direct.setblocking(False)
+            socks.append(direct)
+        except OSError:
+            direct = None
+
+    def put():
+        for s in socks:
+            try:
+                if s is direct:
+                    for dest in also:
+                        s.sendto(packet, (dest, PORT))
+                else:
+                    s.sendto(packet, (GROUP, PORT))
+            except OSError:
+                pass
     found = {}
     start = time.monotonic()
-    again = bool(socks)
+    again = 0.0
     try:
         while socks and time.monotonic() - start < wait:
-            if again and time.monotonic() - start >= AGAIN:
-                again = False
-                for s in socks:
-                    try:
-                        s.sendto(packet, (GROUP, PORT))
-                    except OSError:
-                        pass
+            spent = time.monotonic() - start
+            if spent >= again:
+                put()
+                again += AGAIN
+            if also and spent >= AT_LEAST and all(a in found and found[a]["host_key"] for a in also):
+                break
             idle = True
             for s in socks:
                 try:

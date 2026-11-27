@@ -317,9 +317,12 @@ def test_only_a_machine_not_where_it_is_remembered_is_news(tmp_path, monkeypatch
     # found again by its identity at once
     monkeypatch.setattr(machine_scan, "ANNOUNCE", True)
     from pinball_decryptor.core import machine_announce
-    monkeypatch.setattr(machine_announce, "ask", lambda: [dict(moved, address="10.0.0.33")])
+    asked = []
+    monkeypatch.setattr(machine_announce, "ask", lambda also=(): asked.append(list(also)) or [
+        dict(moved, address="10.0.0.33")])
     monkeypatch.setattr(machine_scan, "scan", lambda *a, **k: (_ for _ in ()).throw(AssertionError("swept")))
     assert machine_scan.find_moved(("ssh-ed25519", "AAAAnewcard")) == "10.0.0.33"
+    assert asked == [["10.0.0.12"]]                     # the address it was last at is asked directly too
 
 
 def test_the_page_follows_a_machine_that_says_where_it_is_with_no_sweep(tmp_path, monkeypatch):

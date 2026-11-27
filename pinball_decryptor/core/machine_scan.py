@@ -259,12 +259,13 @@ ANNOUNCE = True
 
 def announced():
     """PAD-1627: the PAD machines that say where they are right now (:mod:`machine_announce`), each ``{'address',
-    'game', 'host_key', 'port', 'name'}``; [] when none answers.  About a second, and never raises."""
+    'game', 'host_key', 'port', 'name'}``; [] when none answers.  Under a second when the machines are where they
+    were, a few seconds otherwise; never raises."""
     if not ANNOUNCE:
         return []
     try:
-        from . import machine_announce
-        return machine_announce.ask()
+        from . import machine_announce, pad_ssh_key
+        return machine_announce.ask(also=[m["address"] for m in pad_ssh_key.machines() if m.get("announces")])
     except Exception:                                   # noqa: BLE001 - the scan still finds them
         return []
 

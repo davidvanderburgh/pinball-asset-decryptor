@@ -1067,6 +1067,23 @@ function MachineRemote({ address, name, mfr, on, buttons }) {
   </div>`;
 }
 
+// PAD-1632 (David: "I want this icon to be more informative. like if it's a multi-boot show it as such, or if
+// it's a single game, show its splash screen"): the row's picture - the game's loading splash, or for a multi-boot
+// card its games' splashes fanned like a hand of cards with how many there are; the plain card icon when the card
+// has no picture to read (a JJP ISO, a BoF update, a card that is not there).
+function MachineArt({ r }) {
+  const art = (r.art || []).filter(Boolean);
+  const games = r.games || [];
+  if (!art.length) return html`<span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="sd" /></span>`;
+  const many = games.length > 1;
+  const what = many ? { head: "Multi-boot card: " + games.length + " games", lines: games.map((g, i) => (i + 1) + ". " + g) }
+    : { head: games[0] || r.title, lines: ["The picture this game shows while it starts."] };
+  return html`<span class=${cx("mach-art", many && "multi", many && "n" + Math.min(art.length, 3))} ...${tip(what)}>
+    ${art.slice(0, 3).map((src, i) => html`<img key=${i} src=${mediaUrl(src)} alt="" loading="lazy" />`)}
+    ${many ? html`<span class="mach-art-n">×${games.length}</span>` : null}
+  </span>`;
+}
+
 // The Remote button of a row or of a machine found on the network: opens and closes its panel.
 function RemoteButton({ address, name, on, open }) {
   return html`<${Button} size="sm" kind=${on === true && !open ? "primary" : ""} icon="eye" cls=${cx("mach-remote-btn", open && "on")}
@@ -1104,12 +1121,13 @@ function MachineRow({ r, on, remote, buttons }) {
   ]);
   return html`<div class=${cx("mach-item", open && "open")}>
   <div class="mach-row">
-    <span class="sx-logo mach-ic" aria-hidden="true"><${Icon} name="sd" /></span>
+    <${MachineArt} r=${r} />
     <div class="stack grow" style="gap:3px;min-width:0">
       <div class="row wrap" style="gap:4px 10px;align-items:baseline">
         <span class="t">${r.name}</span>
         <span class="notr">${r.title}${r.edition ? html` <span class="muted">${r.edition}</span>` : null}</span>
         ${r.build ? html`<${Chip} kind="info" sm>${r.build}<//>` : null}
+        ${(r.games || []).length > 1 ? html`<${Chip} sm kind="info" title=${{ head: "Multi-boot card", lines: r.games.map((g, i) => (i + 1) + ". " + g) }}>Multi-boot · ${r.games.length} games<//>` : null}
         <${Chip} sm kind=${r.lineage === "Stock" ? "" : "warn"}>${r.lineage}<//>
         ${r.address ? html`<${Chip} sm kind=${on === true ? "ok" : ""} title=${MACH.address(r, on)}><${Light} on=${on} />${on === true ? "On · " : on === false ? "Off · " : ""}${r.address}<//>`
           : html`<span class="muted small" ...${tip(MACH.noAddress)}>not on your network yet</span>`}

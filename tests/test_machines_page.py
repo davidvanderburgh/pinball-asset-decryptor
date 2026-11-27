@@ -486,3 +486,27 @@ def test_the_row_has_remote_and_the_project_picker():
                    'call("shellx.machines_link_project", r.id, p.folder, true)',
                    'call("shellx.machines_go_network", address)'):
         assert needle in js
+
+
+def test_the_row_shows_the_cards_games(tmp_path, monkeypatch):
+    """David: "I want this icon to be more informative. like if it's a multi-boot show it as such, or if it's a
+    single game, show its splash screen": a multi-boot card's games are named as its own boot menu names them."""
+    from pinball_decryptor.plugins.stern import multiimage
+    from pinball_decryptor.webui import card_preview
+    imgs = [multiimage.CardImage(3, "", "godzilla_le"), multiimage.CardImage(3, "img1", "godzilla_le")]
+    monkeypatch.setattr(multiimage, "images_for_path", lambda p: imgs)
+    monkeypatch.setattr(card_preview, "menu_titles", lambda p: ["Godzilla", "Heisei"])
+    assert SM._games("card.raw") == ["Godzilla", "Heisei"]
+    monkeypatch.setattr(card_preview, "menu_titles", lambda p: ["one too few"])
+    assert SM._games("card.raw") == ["Godzilla LE", "Godzilla LE"]
+    monkeypatch.setattr(multiimage, "images_for_path", lambda p: imgs[:1])
+    assert SM._games("card.raw") == ["Godzilla LE"]             # one game: its menu is never asked
+    # a file that is no card has no games, no titles and no pictures, and none of them raises
+    junk = tmp_path / "junk.raw"
+    junk.write_bytes(b"x" * 4096)
+    monkeypatch.undo()
+    assert SM._games(str(junk)) == [] and card_preview.menu_titles(str(junk)) == []
+    assert card_preview.thumbs(str(junk), str(tmp_path / "out")) == []
+    assert card_preview.thumbs(str(tmp_path / "gone.raw")) == []
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "shell.js").read_text(encoding="utf-8")
+    assert "function MachineArt(" in js and "<${MachineArt} r=${r} />" in js

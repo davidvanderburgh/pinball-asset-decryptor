@@ -547,6 +547,10 @@ class MachinesMixin:
                "game": (info or {}).get("key") or "", "address": m.get("address") or "",
                # PAD-1585: Update on a multi-boot card updates every image of the game on it
                "multi": mfr == "stern" and os.path.isfile(card) and _multi(card)}
+        # PAD-1632 (David: "I want this icon to be more informative ... if it's a multi-boot show it as such, or
+        # if it's a single game, show its splash screen"): the games on the card, and a small picture of each
+        row["games"] = _games(card) if mfr == "stern" and not row["card_missing"] else []
+        row["art"] = _art(card) if row["games"] else []
         row.update(self._backup_fields(m))
         if info and code_watch.has_source(mfr):
             newest = code_watch.newest(mfr, info["key"])
@@ -1263,6 +1267,31 @@ def link_network(rows, network):
             r["address"] = same[0]["address"]
             taken.add(r["address"])
     return rows, [n for n in network if n["address"] not in taken]
+
+
+def _games(card):
+    """PAD-1632: the name of every game image on the card *card*, boot-menu order ([] when it cannot be read)."""
+    try:
+        from ..plugins.stern import multiimage
+        names = [multiimage.pretty(img) for img in multiimage.images_for_path(card)]
+    except Exception:                                   # noqa: BLE001
+        return []
+    if len(names) > 1:
+        # a multi-boot card: as its own boot menu names them (three builds of one game are all "Godzilla LE")
+        from . import card_preview
+        titles = card_preview.menu_titles(card)
+        if len(titles) == len(names):
+            names = [t or n for t, n in zip(titles, names)]
+    return names
+
+
+def _art(card):
+    """PAD-1632: small pictures of the card's game splashes (webui/card_preview.thumbs); [] in a test run, which
+    has no card worth reading."""
+    if os.environ.get("PAD_UI_NO_ART"):
+        return []
+    from . import card_preview
+    return card_preview.thumbs(card)
 
 
 def _multi(card):

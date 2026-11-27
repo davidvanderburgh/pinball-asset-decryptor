@@ -419,6 +419,18 @@ html.bp-1100 .mach-remote { grid-template-columns: minmax(0, 1fr); }
 .mach-log { max-height: 220px; overflow: auto; font-size: 11.5px; line-height: 1.35; margin: 0; padding: 8px; background: var(--panel);
   border: 1px solid var(--line); border-radius: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .mach-remote-foot { align-items: center; gap: 10px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--line); }
+/* PAD-1632: the row's picture - the game's splash; a multi-boot card's games fanned, with how many */
+.mach-art { position: relative; flex: 0 0 auto; width: 104px; height: 58px; display: block; }
+.mach-art.multi { width: 116px; height: 62px; }
+.mach-art img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 7px; border: 1px solid var(--line);
+  background: #000; box-shadow: 0 1px 3px rgba(0, 0, 0, .25); }
+.mach-art.multi img { width: 84px; height: 48px; inset: auto; }
+.mach-art.multi img:nth-child(1) { left: 0; top: 0; z-index: 3; }
+.mach-art.multi img:nth-child(2) { left: 16px; top: 7px; z-index: 2; filter: brightness(.85); }
+.mach-art.multi img:nth-child(3) { left: 32px; top: 14px; z-index: 1; filter: brightness(.7); }
+.mach-art.multi.n1 img { width: 100%; height: 100%; }
+.mach-art-n { position: absolute; right: 0; bottom: 0; z-index: 4; font-size: 10.5px; font-weight: 700; line-height: 1; padding: 3px 6px;
+  border-radius: 999px; background: var(--accent); color: var(--bg); box-shadow: 0 0 0 2px var(--panel); white-space: nowrap; }
 .mach-opts { gap: 8px 24px; align-items: center; padding: 2px 4px 0; }
 .mach-opts-note { text-align: right; min-width: 240px; }
 

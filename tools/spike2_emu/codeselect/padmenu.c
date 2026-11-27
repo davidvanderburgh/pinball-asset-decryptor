@@ -823,6 +823,7 @@ static int card_on;                             /* images.conf menu_rows=on, and
 static int card_menu = 1, card_secs = -1;       /* the card's value: menu shown, the countdown (-1: codeselect's own) */
 static char card_path[160] = CARD_FILE;
 static long long card_first = -1, card_due;
+static long card_settle = CARD_SETTLE_MS;          /* PADMENU_CARD_SETTLE_MS: the tests' */
 static int card_put;                            /* the card's value is in the rows (or there was nothing to put) */
 
 static int card_mapped(unsigned long a, int write)
@@ -926,7 +927,7 @@ static void card_tick(long long t)
         return;
     if (card_first < 0)
         card_first = t;
-    if (t - card_first < CARD_SETTLE_MS || t < card_due)
+    if (t - card_first < card_settle || t < card_due)
         return;
     card_due = t + CARD_POLL_MS;
     for (i = 0; i < 2; i++) {
@@ -990,6 +991,12 @@ static void card_init(const char *conf, const char *line)
         return;
     }
     card_on = 1;
+    {
+        const char *s = getenv("PADMENU_CARD_SETTLE_MS");                /* the tests' */
+        if (s && *s)
+            card_settle = atol(s);
+        unsetenv("PADMENU_CARD_SETTLE_MS");
+    }
     if (conf_word(conf, "boot_menu", w, sizeof w))
         card_menu = strcmp(w, "hidden") != 0;
     if (conf_word(conf, "timeout", w, sizeof w) && w[0] >= '0' && w[0] <= '9')

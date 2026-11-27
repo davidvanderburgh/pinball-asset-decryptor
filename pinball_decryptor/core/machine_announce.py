@@ -142,7 +142,10 @@ def ask(wait=WAIT, addresses=None, service=SERVICE):
                 idle = False
                 got = parse(data, service)
                 if got is not None and src[0] not in addresses:
-                    found.setdefault(src[0], dict(got, address=src[0]))
+                    # a machine whose service has only just started answers with its name alone at first:
+                    # the answer that carries its identity is the one kept
+                    if src[0] not in found or (got["host_key"] and not found[src[0]]["host_key"]):
+                        found[src[0]] = dict(got, address=src[0])
             if idle:
                 time.sleep(0.02)
     finally:

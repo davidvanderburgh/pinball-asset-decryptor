@@ -57,7 +57,10 @@ jobs:
     # old 15-minute cap at 98% with nothing failing (PAD-550).  By
     # 2026-11 the macOS test step alone took 18-25 minutes, and a slow
     # runner passed the 30-minute cap at 98% the same way (PAD-1368).
-    timeout-minutes: 45
+    # By late 2026-11 healthy macOS legs took 33-44 minutes and a slow
+    # runner passed the 45-minute cap at 98%, on code that had just passed
+    # in 23 minutes with only the version string changed (PAD-1638).
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:

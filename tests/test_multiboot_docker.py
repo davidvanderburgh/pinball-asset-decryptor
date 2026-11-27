@@ -348,8 +348,8 @@ def test_the_image_carries_the_arm_toolchain_and_qemu_for_stern_spike2():
 #: package list under an unchanged tag reaches nobody who needs it - which is
 #: the mistake PAD-194's fix would have made.  Change one, change both.
 _IMAGE_AS_AGREED = (
-    "pad-multiboot:5",
-    "68307675b7e90eba9c7e3c40e0430119caf79233cb698ff5a86917963164e79e",
+    "pad-multiboot:6",
+    "0a968514322035e99c52f5e3417f23aeefbfb1acf0e39aba58da96cd454ddd82",
 )
 
 

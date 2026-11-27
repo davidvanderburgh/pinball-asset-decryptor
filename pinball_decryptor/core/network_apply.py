@@ -332,3 +332,68 @@ def to_machine(machine, *, wifi=None, buttons=None, stern_module=None, log=None,
         say('Restarting the machine: it reads these files only when it starts.', 'info')
         machine.reboot()
     return 'done'
+
+
+# ---- PAD-1627: a machine that says where it is ------------------------------------------------------------------
+#: where remote access's start script sits on a machine, and the card platform each place means
+ANNOUNCE_SCRIPTS = (('/etc/init.d/sshd', 'stern'), ('/usr/local/sbin/pad-sshd', 'jjp'))
+
+
+def _start_script(kind):
+    """The start script a build puts on a card of *kind* today (the one that announces the machine)."""
+    if kind == 'jjp':
+        from . import ssh_jjp
+        return ssh_jjp.start_script()
+    from . import ssh_card
+    return ssh_card.payload_bytes('sshd', {}, ssh_card.layout('stern-spike2'))
+
+
+def announce_to_machine(machine, log=None):
+    """Make *machine* (a connected ``remote_send`` machine whose card was set up before PAD-1627) say where it is
+    from now on: today's remote access start script is put on its card (written beside its place, checked by its
+    sha1, moved into place) and the announce started.  The game is not stopped and the machine is not restarted.
+
+    ``'on'`` (it announces now), ``'already'`` (its card had the script; the announce is running) or ``'none'``
+    (its system has no announce service: the card is as it was)."""
+    say = log or (lambda *_a: None)
+    found = None
+    for path, kind in ANNOUNCE_SCRIPTS:
+        have = _read(machine, path)
+        if have is not None:
+            found = (path, kind, have)
+            break
+    if found is None:
+        raise ExtrasError("This machine's card has no remote access start script of PAD's: put remote access on "
+                          "it again (Network tab).")
+    path, kind, have = found
+    rc, out = _sh(machine, '[ -x /usr/sbin/avahi-daemon ] && [ -d /etc/avahi/services ] && echo PAD_HAS', 30)
+    if 'PAD_HAS' not in out:
+        return 'none'
+    want = _start_script(kind)
+    wrote = False
+    if have != want:
+        say('Putting the newer remote access start script on the machine...', 'info')
+        rc, out = _sh(machine, 'mount -o remount,rw / 2>&1 && echo PAD_RW', 60)
+        if 'PAD_RW' not in out:
+            raise ExtrasError("The machine's system partition could not be opened for writing: %s"
+                              % out.strip()[-160:])
+        try:
+            tmp = path + '.pad-new'
+            with machine.sftp.open(tmp, 'wb') as f:
+                f.write(want)
+            rc, out = _sh(machine, 'sha1sum %s' % _q(tmp), 60)
+            if (out.split() or [''])[0] != hashlib.sha1(want).hexdigest():
+                _sh(machine, 'rm -f %s' % _q(tmp), 30)
+                raise ExtrasError('The start script did not arrive on the machine as sent; nothing was changed.')
+            rc, out = _sh(machine, 'chmod 755 %s && chown 0:0 %s && mv -f %s %s && sync && echo PAD_PUT'
+                          % (_q(tmp), _q(tmp), _q(tmp), _q(path)), 60)
+            if 'PAD_PUT' not in out:
+                raise ExtrasError('The machine did not take the change: %s' % out.strip()[-200:])
+            wrote = True
+        finally:
+            _sh(machine, 'sync; mount -o remount,ro / 2>/dev/null; true', 60)
+    rc, out = _sh(machine, '%s announce' % _q(path), 60)
+    if 'PAD_ANNOUNCING' not in out:
+        raise ExtrasError("The machine has the start script now, but its announce service did not start; it "
+                          "is tried again each time the machine starts.")
+    return 'on' if wrote else 'already'

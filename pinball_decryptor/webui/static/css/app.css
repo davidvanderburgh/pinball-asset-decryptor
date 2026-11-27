@@ -388,6 +388,11 @@ input[type=range] { accent-color: var(--accent); }
 .mach-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 5px; vertical-align: middle; background: var(--line); }
 .mach-dot.on { background: var(--ok); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 25%, transparent); }
 .mach-dot.off { background: var(--ink-3, var(--line)); opacity: .6; }
+/* PAD-1627: a found machine's name is a button (click to name it); the page's Find my machines line */
+.mach-name { background: none; border: 0; padding: 0; margin: 0; font: inherit; color: inherit; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; text-align: left; }
+.mach-name svg { width: 13px; height: 13px; opacity: .35; }
+.mach-name:hover svg, .mach-name:focus-visible svg { opacity: 1; color: var(--accent); }
+.mach-find { margin: 2px 0 0; }
 
 /* ------------------------------------------------------------- responsive */
 /* Breakpoints are classes the shell sets on <html> from the EFFECTIVE width

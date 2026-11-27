@@ -4,6 +4,35 @@ set -e
 DAEMON=/usr/local/bin/dropbear
 KEYDIR=/data/dropbear
 PIDFILE=/var/run/pad-sshd.pid
+# PAD-1627: say on the home network that this is a PAD machine, so the app finds it wherever the router put it
+# (no address is remembered).  It uses the announce service the card's own system ships (avahi) and only where
+# there is one; everything it needs is made in RAM here, so nothing on the card changes.  The app asks for
+# _pad-machine._tcp and reads the game and this machine's SSH identity from the answer.
+ANNOUNCE=/var/run/pad-announce
+AVAHI=/usr/sbin/avahi-daemon
+announce() {
+  [ -x "$AVAHI" ] && [ -d /etc/avahi/services ] || return 0
+  mkdir -p "$ANNOUNCE/services"
+  game=$(readlink /games/game 2>/dev/null || { [ -f /jjpe/gen1/setenv.sh ] && . /jjpe/gen1/setenv.sh >/dev/null 2>&1 && echo "/jjpe/$GAMENAME/game"; })
+  game=$(echo "$game" | sed 's#/game$##; s#.*/##' | tr -cd 'A-Za-z0-9_.-')
+  key=$(/usr/local/bin/dropbearkey -y -f "$KEYDIR/dropbear_ed25519_host_key" 2>/dev/null | grep '^ssh-' | awk '{print $1" "$2}' | tr -cd 'A-Za-z0-9+/= -')
+  printf '%s\n' '[server]' 'use-ipv4=yes' 'use-ipv6=no' 'enable-dbus=no' \
+    '[publish]' 'publish-workstation=no' 'publish-hinfo=no' '[rlimits]' > "$ANNOUNCE/avahi.conf"
+  printf '%s\n' '<?xml version="1.0" standalone="no"?>' \
+    '<!DOCTYPE service-group SYSTEM "avahi-service.dtd">' \
+    '<service-group>' \
+    '  <name replace-wildcards="yes">PAD %h</name>' \
+    '  <service>' \
+    '    <type>_pad-machine._tcp</type>' \
+    '    <port>22</port>' \
+    '    <txt-record>v=1</txt-record>' \
+    "    <txt-record>game=$game</txt-record>" \
+    "    <txt-record>key=$key</txt-record>" \
+    '  </service>' \
+    '</service-group>' > "$ANNOUNCE/services/pad-machine.service"
+  grep -q " /etc/avahi/services " /proc/mounts || mount -o bind "$ANNOUNCE/services" /etc/avahi/services
+  "$AVAHI" -c -f "$ANNOUNCE/avahi.conf" || "$AVAHI" -D -f "$ANNOUNCE/avahi.conf"
+}
 case "$1" in
   start)
     if [ -s "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then exit 0; fi
@@ -22,13 +51,24 @@ case "$1" in
       -r "$KEYDIR/dropbear_rsa_host_key" \
       -r "$KEYDIR/dropbear_ecdsa_host_key" \
       -r "$KEYDIR/dropbear_ed25519_host_key"
+    # never in the way of the login above, whatever it does
+    ( announce ) </dev/null >/dev/null 2>&1 || true
     ;;
   stop)
+    if [ -f "$ANNOUNCE/avahi.conf" ]; then
+      "$AVAHI" -k -f "$ANNOUNCE/avahi.conf" >/dev/null 2>&1 || true
+      umount /etc/avahi/services 2>/dev/null || true
+    fi
     if [ -s "$PIDFILE" ]; then
       kill "$(cat "$PIDFILE")" 2>/dev/null || true
       rm -f "$PIDFILE"
     fi
     ;;
   restart) "$0" stop; "$0" start ;;
-  *) echo "Usage: $0 {start|stop|restart}" >&2; exit 1 ;;
+  # PAD-1627: only the announce, for a machine whose card got this script while it was running
+  announce)
+    ( announce ) </dev/null >/dev/null 2>&1 || true
+    if [ -f "$ANNOUNCE/avahi.conf" ] && "$AVAHI" -c -f "$ANNOUNCE/avahi.conf"; then echo PAD_ANNOUNCING; else echo PAD_NO_ANNOUNCE; fi
+    ;;
+  *) echo "Usage: $0 {start|stop|restart|announce}" >&2; exit 1 ;;
 esac

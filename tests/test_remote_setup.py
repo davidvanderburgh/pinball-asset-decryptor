@@ -238,7 +238,7 @@ def test_every_machine_found_is_remembered_and_one_is_picked():
 def test_a_typed_address_becomes_the_machine_used():
     pad_ssh_key.remember_machine('192.168.1.57', ('ssh-ed25519', 'AAAA'), 'deadpool_le')
     pad_ssh_key.remember_address('192.168.1.80')
-    assert pad_ssh_key.machine() == {'address': '192.168.1.80', 'host_key': None, 'game': ''}
+    assert pad_ssh_key.machine() == {'address': '192.168.1.80', 'host_key': None, 'game': '', 'name': '', 'announces': False}
     pad_ssh_key.remember_address('192.168.1.57')
     assert pad_ssh_key.machine()['host_key'] == ('ssh-ed25519', 'AAAA')
     assert len(pad_ssh_key.machines()) == 2
@@ -249,7 +249,7 @@ def test_the_one_address_file_of_before_reads_as_one_machine():
     with open(os.path.join(pad_ssh_key.KEY_DIR, 'machines.json'), 'w') as fh:
         json.dump({'address': '192.168.1.40'}, fh)
     assert pad_ssh_key.last_address() == '192.168.1.40'
-    assert pad_ssh_key.machines() == [{'address': '192.168.1.40', 'host_key': None, 'game': ''}]
+    assert pad_ssh_key.machines() == [{'address': '192.168.1.40', 'host_key': None, 'game': '', 'name': '', 'announces': False}]
 
 
 def test_write_tab_send_goes_to_the_machine_that_runs_the_card(tmp_path, monkeypatch):

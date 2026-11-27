@@ -253,6 +253,64 @@ def probe(host, port=PORT, timeout=8):
     return res
 
 
+#: PAD-1627: False where the network must not be asked (the test suite, a screen capture)
+ANNOUNCE = True
+
+
+def announced():
+    """PAD-1627: the PAD machines that say where they are right now (:mod:`machine_announce`), each ``{'address',
+    'game', 'host_key', 'port', 'name'}``; [] when none answers.  Under a second when the machines are where they
+    were, a few seconds otherwise; never raises."""
+    if not ANNOUNCE:
+        return []
+    try:
+        from . import machine_announce, pad_ssh_key
+        return machine_announce.ask(also=[m["address"] for m in pad_ssh_key.machines() if m.get("announces")])
+    except Exception:                                   # noqa: BLE001 - the scan still finds them
+        return []
+
+
+#: PAD-1627: announcing machines that did not let this computer in, and when they were last tried (not again
+#: for :data:`REFUSED_AGAIN` seconds: the page asks every half minute)
+_refused = {}
+REFUSED_AGAIN = 600
+
+
+def _is_news(said, known):
+    """Whether the announcing machine *said* is not where this computer remembers it.  Its identity is compared
+    only against one of the same kind (the announce names the ed25519 key; a login may have met another)."""
+    at = next((m for m in known if m["address"] == said["address"]), None)
+    if at is None or not at["host_key"]:
+        return True
+    theirs = said.get("host_key")
+    return bool(theirs) and theirs[0] == at["host_key"][0] and tuple(theirs) != tuple(at["host_key"])
+
+
+def news(said=None, port=PORT, now=None):
+    """PAD-1627: the machines that announce themselves and are NOT where this computer remembers them (a new
+    address, a new identity, a machine never met), each logged in to as a scan does: records for
+    :func:`remember`.  [] when every announcing machine is already known at its address."""
+    import time
+    from . import pad_ssh_key
+    said = announced() if said is None else said
+    known = pad_ssh_key.machines()
+    now = time.time() if now is None else now
+    recs = []
+    for a in said:
+        if a.get("port", PORT) != port or not _is_news(a, known):
+            continue
+        if now - _refused.get(a["address"], -REFUSED_AGAIN) < REFUSED_AGAIN:
+            continue
+        rec = dict(address=a["address"], banner="", lets_in=False, game="", host_key=None, note="", announces=True)
+        rec.update(probe(a["address"], port))
+        if rec["lets_in"]:
+            _refused.pop(a["address"], None)
+        else:
+            _refused[a["address"]] = now
+        recs.append(rec)
+    return recs
+
+
 def careful_seconds(count):
     """About how long the careful pass over *count* addresses takes when nothing answers."""
     return -(-count // CAREFUL_WORKERS) * CAREFUL_TIMEOUT
@@ -300,6 +358,9 @@ def scan(nets=None, *, port=PORT, timeout=CONNECT_TIMEOUT, progress=None, cancel
     # remembers) are asked first, alone and unhurried: a sweep of a /22 sends a thousand ARP broadcasts at once,
     # and on a mesh's Wi-Fi the machine's answer can queue behind them past the sweep's timeout
     near = set(neighbours()) | set(remembered or ())
+    # PAD-1627: the machines that say where they are, asked first too (and marked: such a machine needs no sweep)
+    says = {a["address"] for a in announced()} if port == PORT else set()
+    near |= says
     first = [h for h in hosts if str(h) in near] if near_first else []
     rest = [h for h in hosts if str(h) not in near] if near_first else hosts
     if report is not None:
@@ -385,8 +446,54 @@ def scan(nets=None, *, port=PORT, timeout=CONNECT_TIMEOUT, progress=None, cancel
                         progress(total, total)
                     break
         found += more
+    for r in found:
+        if r["address"] in says:
+            r["announces"] = True
     found.sort(key=lambda r: (not r["lets_in"], ipaddress.IPv4Address(r["address"])))
     return found
+
+
+def remember(found, port=PORT):
+    """Remember every machine of a :func:`scan` that let this computer in, each by its identity (one found at a
+    new address is the same machine, moved), and make sure Send to machine has one to use.
+    -> ``(ours, moved)``: the records that let in, and ``{old address: new address}`` of those that moved.
+
+    PAD-1627: a card written again has a new identity, so David's Godzilla, moved by the router AND on a new card,
+    came back as a second Godzilla beside the one that no longer answered.  So a machine found with an identity
+    this computer doesn't know takes the place of the remembered machine of its game that this scan did not see,
+    when there is exactly one of each (several of one game: none is guessed)."""
+    from . import pad_ssh_key
+    ours = [r for r in found if r.get("lets_in")]
+    known = pad_ssh_key.machines()
+    was = {m["host_key"]: m["address"] for m in known if m["host_key"]}
+    seen = {tuple(r["host_key"]) for r in found if r.get("host_key")}
+    here = {r["address"] for r in ours}
+    gone = [m for m in known if m["game"] and (m["host_key"] not in seen if m["host_key"]
+                                               else m["address"] not in here)]
+    fresh = [r for r in ours if r.get("host_key") and tuple(r["host_key"]) not in was
+             and r["address"] not in {m["address"] for m in known}]
+    moved = {}
+    for r in ours:
+        hk = tuple(r["host_key"]) if r.get("host_key") else None
+        replaces = ""
+        if hk:
+            pad_ssh_key.forget_host(r["address"], port)
+            pad_ssh_key.remember_host(r["address"], port, *hk)
+            if was.get(hk) and was[hk] != r["address"]:
+                moved[was[hk]] = r["address"]
+            elif r in fresh and r.get("game"):
+                same = [m for m in gone if m["game"] == r["game"]]
+                if len(same) == 1 and sum(1 for f in fresh if f.get("game") == r["game"]) == 1:
+                    replaces = same[0]["address"]
+                    moved[replaces] = r["address"]
+        pad_ssh_key.remember_machine(r["address"], r.get("host_key"), r.get("game") or "", make_current=False,
+                                     replaces=replaces, announces=True if r.get("announces") else None)
+    current = pad_ssh_key.last_address()
+    if ours and current not in {m["address"] for m in pad_ssh_key.machines()} | {r["address"] for r in ours}:
+        current = ""
+    if ours and not current:
+        pad_ssh_key.select_machine(ours[0]["address"])
+    return ours, moved
 
 
 def address_of(rec, port=PORT):
@@ -418,6 +525,11 @@ def find_moved(host_key, port=PORT, nets=None):
         return keys[address]
 
     want = tuple(host_key)
+    # PAD-1627: a machine that says where it is answers at once, with its identity
+    if int(port) == PORT:
+        for a in announced():
+            if a["host_key"] == want:
+                return a["address"]
     # PAD-1456: the careful pass too when the quick one didn't find it (a machine just switched on is missed)
     for rec in scan(nets, port=port, log_in=False,
                     careful=lambda recs: not any(key_at(r["address"]) == want for r in recs)):

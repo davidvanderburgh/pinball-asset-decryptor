@@ -440,3 +440,36 @@ def test_a_video_node_draws_no_stand_in_over_the_clip(monkeypatch):
     list(LT.render_frames("proj", [({"stage": [2, 2], "root": {"frames": 1}}, None)], 1))
     assert seen == [["bitmap"]]
     assert LT.without_stand_ins(["not a draw", {"kind": "text"}]) == ["not a draw", {"kind": "text"}]
+
+
+def test_a_games_own_clip_goes_without_the_projects_video_profile(tmp_path, monkeypatch):
+    """Simon (2026-11-27): "The problem is the video colour NOT the overlay ... the video is too dark, too red" - the
+    test card baked the project's Recommended video profile into Godzilla's own Match clip, which no Write does."""
+    import json
+    from pinball_decryptor.core import colour_profile as cp
+    proj = tmp_path / "proj"
+    proj.mkdir()
+
+    def sidecar(d):
+        (proj / ".staged_changes.json").write_text(json.dumps(d), encoding="utf-8")
+    sidecar({})
+    assert tc.profile_switched_on(str(proj), "video", "video/match.mp4") is False
+    # its own switch alone is not enough: the Video tab's Advanced box must unlock the game's own clips
+    sidecar({cp.VIDEO_SLOTS_KEY: {"video/match.mp4": True}})
+    assert tc.profile_switched_on(str(proj), "video", "video/match.mp4") is False
+    sidecar({cp.VIDEO_SLOTS_KEY: {"video/match.mp4": True}, cp.STOCK_VIDEOS_KEY: True})
+    assert tc.profile_switched_on(str(proj), "video", "video/match.mp4") is True
+    # a replaced clip follows its own switch, else the tab's box
+    sidecar({"video": {"video/match.mp4": "C:/new.mp4"}, cp.ALL_VIDEOS_KEY: True})
+    assert tc.profile_switched_on(str(proj), "video", "video/match.mp4") is True
+    sidecar({"video": {"video/match.mp4": "C:/new.mp4"}, cp.ALL_VIDEOS_KEY: True,
+             cp.VIDEO_SLOTS_KEY: {"video/match.mp4": False}})
+    assert tc.profile_switched_on(str(proj), "video", "video/match.mp4") is False
+    # and the build leaves a switched-off clip as it is (no colour-profiled copy)
+    sidecar({})
+    clip = proj / "video"
+    clip.mkdir()
+    (clip / "match.mp4").write_bytes(b"x")
+    it = tc.Item("video", "M", str(clip / "match.mp4"), str(proj), "video/match.mp4")
+    monkeypatch.setattr(cp, "asset_resolver", lambda p: pytest.fail("no profile looked up for a switched-off clip"))
+    assert tc.stage([it], str(tmp_path / "w"))[0][1] == str(clip / "match.mp4")

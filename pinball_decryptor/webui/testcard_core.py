@@ -454,6 +454,32 @@ def as_clip(path, work, n, log=print, cancel=None):
     return dst
 
 
+def profile_switched_on(project, kind, rel):
+    """Whether a Write puts a colour profile on the project's file *rel* (*kind* image / video), so the test card
+    shows it as the card would.
+
+    Simon (2026-11-27): "The problem is the video colour NOT the overlay. The video is the right "0" ... So the video
+    is too dark, too red." - the test card baked the project's Recommended video profile into Godzilla's own Match
+    clip; a Write never touches a game's own clip unless the Video tab's Advanced box unlocks it and its own switch
+    is on (colour_profile.stock_video_rels, PAD-336).  The same rules as the Write's: a replaced file follows its
+    own switch, else its tab's box (colour_profile.asset_settings); a game's own file needs its kind unlocked and
+    its own switch on."""
+    from pinball_decryptor.core import colour_profile as cp
+    from pinball_decryptor.core import staged_changes
+    k = PROFILE_KIND.get(kind)
+    if not k or not project:
+        return False
+    data = staged_changes.peek(project) or {}
+    rel = str(rel or "").replace("\\", "/")
+    picks = data.get(kind) if isinstance(data.get(kind), dict) else {}
+    sw = cp.asset_settings(project)
+    own = sw[k].get(rel)
+    if picks.get(rel):
+        return bool(own) if own is not None else bool(sw["all_" + k])
+    unlocked = cp.stock_videos_unlocked(data) if kind == "video" else bool(data.get(cp.STOCK_IMAGES_KEY))
+    return unlocked and bool(own)
+
+
 def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None, clips=False):
     """Each item as a file selectmedia can take -> [(kind, path, label)].
 
@@ -491,7 +517,7 @@ def stage(items, work, render_scene=None, log=print, cancel=None, resolver=None,
             if it.from_project and it.kind in PROFILE_KIND:
                 if resolver is not None:
                     prof = resolver(it)
-                else:
+                elif profile_switched_on(it.project, it.kind, it.rel):
                     if it.project not in resolvers:
                         resolvers[it.project] = cp.asset_resolver(it.project)
                     prof = resolvers[it.project](PROFILE_KIND[it.kind], it.rel)
@@ -643,7 +669,11 @@ def build_signature(lst, items=None):
     import hashlib
     items = list(lst.ordered() if items is None else items)
     projects = sorted({it.project for it in items if it.project})
-    parts = [[it.to_json() for it in items], _stamp(lst.source), clean_network(lst.network),
+    from pinball_decryptor.plugins.stern import layered_test as LT
+    from pinball_decryptor.plugins.stern import scene_render as SR
+    # PAD's own code that makes the files too: a fixed build never sends the card built before the fix
+    code = [_stamp(m) for m in (__file__, LT.__file__, SR.__file__)]
+    parts = [[it.to_json() for it in items], _stamp(lst.source), clean_network(lst.network), code,
              [_stamp(it.path) for it in items],
              [[_stamp(os.path.join(p, ".staged_changes.json")),
                _stamp(os.path.join(p, "images", "scene_textures", "scene_tree.json"))] for p in projects]]

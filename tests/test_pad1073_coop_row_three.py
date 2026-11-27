@@ -256,7 +256,7 @@ def test_the_app_says_off_classic_enhanced():
     from pinball_decryptor.webui import help_content
     from pinball_decryptor.webui.tabs import modes as M
     key, values, names, opts = E._CoopMenu(lambda *a: None).wanted()
-    assert (values, names, opts) == (2, (), {"default": 1, "help_text": CP.MENU_HELP, "onoff": True})
+    assert (values, names, opts) == (2, (), {"default": 2, "help_text": CP.MENU_HELP, "onoff": True})      # 2: On (counted from 1)
     assert (CP.MENU_OFF, CP.MENU_ON) == (0, 1)
     assert len(CP.MENU_HELP) <= 63 and CP.MENU_HELP.startswith("On: co-op games on the start menu")
     text = str(help_content.__dict__)                  # PAD-1443: no row - the start menu's games, named

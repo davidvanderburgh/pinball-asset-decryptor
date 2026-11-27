@@ -179,7 +179,7 @@ def test_the_service_menu_row_has_team_2v2_and_the_tab_says_how_to_play_it(tmp_p
     from pinball_decryptor.webui import help_content
     key, values, names, opts = E._CoopMenu(lambda *a: None).wanted()
     # PAD-1073's 0/1/2 row is Off / On now (Simon, 2026-11-27); the team games are the start menu's either way
-    assert (values, names, opts) == (2, (), {"default": 1, "help_text": CP.MENU_HELP, "onoff": True})
+    assert (values, names, opts) == (2, (), {"default": 2, "help_text": CP.MENU_HELP, "onoff": True})      # 2: On (counted from 1)
     assert (CP.MENU_OFF, CP.MENU_ON) == (0, 1)
     assert len(CP.MENU_HELP) <= 63 and "on the start menu" in CP.MENU_HELP
     text = str(help_content.__dict__)

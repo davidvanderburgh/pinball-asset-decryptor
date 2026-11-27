@@ -71,6 +71,9 @@ NO_EDGE = ("The app cannot read %s's buttons as they are pressed yet, so a teamm
 #: says ``switch`` so the runtime reads it so (coop_row_styles); a card of the old three-value row keeps its meaning.
 MENU_VALUES = 2
 MENU_OFF, MENU_ON = 0, 1
+#: On to start with, so a fresh card plays as one with no row until the operator says Off. menu_settings.plan counts an
+#: Off / On row's default from 1 (1 Off, 2 On): seen in the emulator as "Default Value = Off" with 1
+MENU_DEFAULT = MENU_ON + 1
 #: the help says what On does and costs (63 characters: the spare help lines' room)
 MENU_HELP = "On: co-op games on the start menu; they stay off Insider"
 #: how a teammate joins, for the tab and the log. PAD-1443: the games are always on the start menu, no service row

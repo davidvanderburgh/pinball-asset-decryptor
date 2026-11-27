@@ -23,7 +23,7 @@ def _wanted(music=False, edition=False):
     rows = [("music_mode", 3, ["Standard", "Orchestral", "Heisei"])] if music else []
     rows += [("edition", 2, ["One", "Two"])] if edition else []
     rows += [(k, PS.VALUES, (), {"default": PS.NORMAL, "help_text": PS.HELP[k]}) for k in PS.KEYS]
-    rows += [("coop_play", CP.MENU_VALUES, (), {"default": 1, "help_text": CP.MENU_HELP, "onoff": True}),  # Simon
+    rows += [("coop_play", CP.MENU_VALUES, (), {"default": CP.MENU_DEFAULT, "help_text": CP.MENU_HELP, "onoff": True}),  # Simon
              ("handicap", HC.MENU_VALUES, (), {"default": 1, "help_text": HC.MENU_HELP, "onoff": True})]
     return rows
 

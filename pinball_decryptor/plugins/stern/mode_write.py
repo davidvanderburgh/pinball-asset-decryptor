@@ -2064,14 +2064,11 @@ def coop_into(result, game_elf, scratch, setting=0, only=False, stock_hud=b"", s
         return result
     result.lines.append("co-op play: %s" % CP.HOW)
     if setting:
-        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: 0 Off, 1 Classic, 2 Enhanced; "
-                            "CO-OP PLAY, TEAM PLAY 2 VS 2, 2 VS 1 and 3 VS 1 on the start menu at 1 or 2, "
-                            "ENHANCED STANDARD at 2); %s" % (
-            "Insider Connected is off only while it is 1 or 2" if only
+        # Simon (2026-11-27): the row is Off / On (coop.cfg `switch`); On is the card with no row, as HOW says
+        result.lines.append("co-op play: switched in the service menu (CO-OP PLAY: Off or On, On to start with); at "
+                            "Off the game is the stock game, with no co-op or team games; %s" % (
+            "at Off every game reports to Insider Connected as it always has" if only
             else "the card's modes keep its scores off Insider Connected either way"))
-        result.lines.append("co-op play: Team 2v2, 2v1 and 3v1: %s" % CP.TEAMS_HOW)    # PAD-1042
-        result.lines.append("co-op play: %s" % CP.STANDARD_HOW)                   # PAD-1224
-        result.lines.append("co-op play: %s" % CP.CLASSIC_HOW)                     # PAD-1065
     got = [line.split(" ", 3)[3] for line in text.splitlines() if line.startswith("award ")]
     result.lines.append("co-op awards after each co-op game: %s" % (", ".join(got) if got else "none"))
     got = [line.split(" ", 2)[2].split("|")[0] for line in text.splitlines() if line.startswith("character ")]

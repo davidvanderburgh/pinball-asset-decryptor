@@ -31,7 +31,8 @@ def _project(tmp_path, data):
 def test_the_row_is_off_on_and_on_to_start_with():
     key, values, names, opts = E._CoopMenu(lambda *a: None).wanted()
     assert key == "coop_play" and values == 2 and names == ()
-    assert opts == {"default": CP.MENU_ON, "help_text": CP.MENU_HELP, "onoff": True}
+    assert opts == {"default": CP.MENU_DEFAULT, "help_text": CP.MENU_HELP, "onoff": True}
+    assert CP.MENU_DEFAULT == 2                                     # an Off / On row counts from 1: 2 is On
     assert len(CP.MENU_HELP) <= 63                                  # the spare help lines' room
 
 

@@ -134,7 +134,7 @@ def test_it_plans_on_godzilla_116_with_the_other_rows():
     from pinball_decryptor.plugins.stern import service_menu as SM
     names = list(SM.PLACEHOLDER_NAMES)
     rows = [(k, len(names), names) for k in SM.OFF_KEYS]
-    rows += [("coop_play", CP.MENU_VALUES, (), {"default": 1, "help_text": CP.MENU_HELP, "from_zero": True}),
+    rows += [("coop_play", CP.MENU_VALUES, (), {"default": CP.MENU_DEFAULT, "help_text": CP.MENU_HELP, "onoff": True}),
              ("handicap", HC.MENU_VALUES, (), {"default": 1, "help_text": HC.MENU_HELP, "onoff": True}), row]
     settings, _w, _c, refused = MS.plan_many(AdjustmentTable(_program(LE116)), rows)
     assert not refused, refused

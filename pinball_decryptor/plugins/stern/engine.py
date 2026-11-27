@@ -13048,7 +13048,7 @@ class _CoopMenu(_MusicModeMenu):
 
     def wanted(self):
         from . import coop_play as _CP
-        return self.KEY, _CP.MENU_VALUES, (), {"default": _CP.MENU_ON, "help_text": _CP.MENU_HELP, "onoff": True}
+        return self.KEY, _CP.MENU_VALUES, (), {"default": _CP.MENU_DEFAULT, "help_text": _CP.MENU_HELP, "onoff": True}
 
     def done(self):
         self.ok = True

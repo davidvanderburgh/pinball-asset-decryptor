@@ -146,12 +146,37 @@ def _pick_backglass(names, folder):
     return glass[0]
 
 
-def splash_bytes(path):
-    """``(png bytes, card path)`` of the primary game's loading splash, or
-    ``None`` when its tree has none (see the module docstring)."""
+def _splash_of(reader, img):
+    """``(png bytes, card path)`` of the loading splash of the game image *img* in *reader*'s tree, or ``None``."""
+    from ..plugins.stern.multiimage import _children
+    ino, where = 2, []
+    for name in ([img.subdir] if img.subdir else []) + [img.folder, "assets", "lcd"]:
+        ino = _children(reader, ino).get(name)
+        if ino is None:
+            return None
+        where.append(name)
+    lcd = _children(reader, ino)
+    pick = None
+    if SPLASH_FILE in lcd:
+        pick = (lcd[SPLASH_FILE], where + [SPLASH_FILE])
+    elif SPLASH_DIR in lcd:
+        sub = _children(reader, lcd[SPLASH_DIR])
+        name = _pick_backglass(sub, img.folder)
+        if name:
+            pick = (sub[name], where + [SPLASH_DIR, name])
+    if pick is None:
+        return None
+    node = reader.read_inode(pick[0])
+    return reader.read_file_bytes(node), "/" + "/".join(pick[1])
+
+
+def all_splash_bytes(path, limit=None):
+    """PAD-1632: ``[(png bytes, card path) or None, ...]``, one per game image on the card in boot-menu order (an
+    ordinary card has one), at most *limit*; ``[]`` for a card with no game image."""
     from ..plugins.stern import formats
     from ..plugins.stern.ext4 import Ext4Reader
-    from ..plugins.stern.multiimage import _children, _images_in
+    from ..plugins.stern.multiimage import _images_in
+    out = []
     f = formats.open_card(path)
     try:
         for idx, ptype, lba, n in formats.parse_all_partitions_file(f):
@@ -161,32 +186,111 @@ def splash_bytes(path):
                 reader = Ext4Reader(f, lba * 512, n * 512)
             except Exception:                           # noqa: BLE001
                 continue
-            imgs = _images_in(reader, idx + 1)
-            if not imgs:
-                continue
-            img = imgs[0]
-            ino, where = 2, []
-            for name in ([img.subdir] if img.subdir else []) +                     [img.folder, "assets", "lcd"]:
-                ino = _children(reader, ino).get(name)
-                if ino is None:
-                    return None
-                where.append(name)
-            lcd = _children(reader, ino)
-            pick = None
-            if SPLASH_FILE in lcd:
-                pick = (lcd[SPLASH_FILE], where + [SPLASH_FILE])
-            elif SPLASH_DIR in lcd:
-                sub = _children(reader, lcd[SPLASH_DIR])
-                name = _pick_backglass(sub, img.folder)
-                if name:
-                    pick = (sub[name], where + [SPLASH_DIR, name])
-            if pick is None:
-                return None
-            node = reader.read_inode(pick[0])
-            return reader.read_file_bytes(node), "/" + "/".join(pick[1])
-        return None
+            for img in _images_in(reader, idx + 1):
+                if limit is not None and len(out) >= limit:
+                    return out
+                try:
+                    out.append(_splash_of(reader, img))
+                except Exception:                       # noqa: BLE001 - that image just has no picture
+                    out.append(None)
+        return out
     finally:
         f.close()
+
+
+def splash_bytes(path):
+    """``(png bytes, card path)`` of the primary game's loading splash, or
+    ``None`` when its tree has none (see the module docstring)."""
+    got = all_splash_bytes(path, limit=1)
+    return got[0] if got else None
+
+
+#: The boot menu's own list on a multi-boot card's system partition
+MENU_CONF = ("usr", "local", "codeselect", "images.conf")
+
+
+def menu_titles(path):
+    """PAD-1632: the name the card's boot menu gives each game image, in menu order (``["Godzilla", "Heisei",
+    ...]``, from its ``images.conf``); ``[]`` for a card with no boot menu or one that cannot be read.  A few
+    directory reads; never raises."""
+    try:
+        from ..plugins.stern import formats
+        from ..plugins.stern.ext4 import Ext4Reader
+        from ..plugins.stern.multiimage import _children
+        f = formats.open_card(path)
+        try:
+            for _idx, ptype, lba, n in formats.parse_all_partitions_file(f):
+                if ptype != 0x83:
+                    continue
+                try:
+                    reader = Ext4Reader(f, lba * 512, n * 512)
+                    ino = 2
+                    for name in MENU_CONF:
+                        ino = _children(reader, ino).get(name)
+                        if ino is None:
+                            break
+                    if ino is None:
+                        continue
+                    text = reader.read_file_bytes(reader.read_inode(ino)).decode("utf-8", "replace")
+                except Exception:                       # noqa: BLE001 - not this partition
+                    continue
+                out = []
+                for line in text.splitlines():
+                    if line.startswith("image="):
+                        fields = line[len("image="):].split("|")
+                        out.append(fields[1].strip() if len(fields) > 1 else "")
+                return out
+            return []
+        finally:
+            f.close()
+    except Exception:                                   # noqa: BLE001
+        return []
+
+
+#: PAD-1632: a row of My machines shows its card's games as small pictures: this many at most, this wide
+THUMBS_MAX = 3
+THUMB_W = 256
+
+
+def thumbs(path, out_dir=None):
+    """PAD-1632: small pictures of the splash of each game image on the card *path* (at most
+    :data:`THUMBS_MAX`), for the card's row on My machines: ``[file, ...]``, ``""`` for an image with no splash.
+    Kept in the card's preview folder, so a card asked again costs a few ``stat`` calls; ``[]`` for a card that
+    cannot be read (a device, a missing file, not a Spike 2 games card).  Never raises."""
+    try:
+        key = card_key(path)
+        if key is None:
+            return []
+        out_dir = out_dir or os.path.join(cache_root(), key)
+        mark = os.path.join(out_dir, "thumbs.txt")
+        if os.path.isfile(mark):
+            with open(mark, encoding="utf-8") as f:
+                names = f.read().split("\n")
+            got = [os.path.join(out_dir, n) if n else "" for n in names if n != "."]
+            if all(not g or os.path.isfile(g) for g in got):
+                touch(out_dir)
+                return got
+        import io
+        from PIL import Image
+        os.makedirs(out_dir, exist_ok=True)
+        names = []
+        for i, one in enumerate(all_splash_bytes(path, limit=THUMBS_MAX)):
+            name = ""
+            if one is not None:
+                try:
+                    with Image.open(io.BytesIO(one[0])) as im:
+                        im = im.convert("RGB")
+                        im.thumbnail((THUMB_W, THUMB_W))
+                        name = "thumb%d.jpg" % i
+                        im.save(os.path.join(out_dir, name), "JPEG", quality=82)
+                except Exception:                       # noqa: BLE001 - a picture PIL cannot read
+                    name = ""
+            names.append(name)
+        with open(mark, "w", encoding="utf-8") as f:
+            f.write("\n".join(names) if names else ".")
+        return [os.path.join(out_dir, n) if n else "" for n in names]
+    except Exception:                                   # noqa: BLE001
+        return []
 
 
 def boot_screen_bytes(path):

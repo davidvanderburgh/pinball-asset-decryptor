@@ -478,3 +478,114 @@ def test_a_machine_set_up_before_is_made_to_say_where_it_is():
         A.announce_to_machine(_Machine({}))
     js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "shell.js").read_text(encoding="utf-8")
     assert 'call("shellx.machines_announce_on", n.address)' in js and "MACH.says" in js
+
+
+# ------------------------------------------------------------------ PAD-1632: remote access and the project, on the row
+def test_a_project_joins_by_hand_or_by_holding_the_card(tmp_path):
+    """David's Godzilla: its multi-boot card sits inside the project folder and is no revision of it, so the row
+    said "no project yet". The folder that holds the card is its project; one picked by hand comes first."""
+    proj, other = tmp_path / "godzilla", tmp_path / "kk"
+    (proj / "multi").mkdir(parents=True)
+    other.mkdir()
+    card = proj / "multi" / "godzilla.multi.raw"
+    card.write_bytes(b"x")
+    m = {"id": "a", "print": "q" * 32, "card": str(card), "manufacturer": "stern", "sidx": INFO["sidx"]}
+    found = machines.projects_for(m, [str(other), str(proj)], read=lambda f: {})
+    assert [(f, w) for f, w, _l in found] == [(str(proj), ("holds", 0))]
+    assert machines.card_words(m, found[0][1]) == "Not a known release"     # holding a card says nothing of the card
+    settings = {machines.SECTION: [dict(m)]}
+    assert machines.set_project(settings, "a", str(other)) and not machines.set_project(settings, "zz", str(other))
+    found = machines.projects_for(machines.entries(settings)[0], [str(other), str(proj)], read=lambda f: {})
+    assert [(f, w[0]) for f, w, _l in found] == [(os.path.normpath(str(other)), "linked"), (str(proj), "holds")]
+    assert machines.set_project(settings, "a", "") and "project" not in machines.entries(settings)[0]
+
+
+def test_the_projects_of_a_machines_game_are_offered(tmp_path):
+    lins = {"gz": {"stock": {"sidx": "godzilla_le-1_15_0.sidx"}}, "jaws": {"stock": {"sidx": "jaws_pro-1_00_0.sidx"}},
+            "bare": {}}
+    m = {"manufacturer": "stern", "sidx": INFO["sidx"]}
+    assert machines.game_projects(m, ["jaws", "gz", "bare"], read=lins.get) == ["gz"]
+    assert machines.game_projects({"manufacturer": "stern"}, ["gz"], read=lins.get) == []
+
+
+def test_a_machines_remote_panel_opens_on_the_page_with_no_project(tmp_path, monkeypatch):
+    """David: "I should be able to see the remote access controls here easily ... without having to make or load a
+    project": the one machine that is on has its panel open when the page comes up, the Network service pointed at
+    it and its status read; closing it is kept, and leaving the page stops what was reading the machine."""
+    from tests.webui_harness import web_app
+    from pinball_decryptor.core import machine_scan
+    keys = tmp_path / "remote_access"
+    keys.mkdir()
+    (keys / "machines.json").write_text(json.dumps(dict(NETWORK, current="10.0.0.9")))
+    monkeypatch.setattr(pad_ssh_key, "KEY_DIR", str(keys))
+    monkeypatch.delenv("PAD_UI_CAPTURE", raising=False)
+    monkeypatch.setattr(machine_scan, "online", lambda a, **kw: a == "10.0.0.7")
+    monkeypatch.setattr(machine_scan, "news", lambda *a, **kw: [])
+    with web_app(tmp_path) as w:
+        net = w.app.window.service("network")
+        read, quiet = [], []
+        monkeypatch.setattr(net, "machine_status", lambda: read.append(net.get("address")))
+        monkeypatch.setattr(net, "stop_live", lambda: quiet.append("live"))
+        assert _until(w, lambda: len(_m(w)["network"]) == 2)
+        assert _m(w)["remote"] == "" and [k for k, _l in _m(w)["buttons"]]
+        assert w.call("shellx.machines_open")
+        assert _until(w, lambda: _m(w)["remote"] == "10.0.0.7")
+        assert read == ["10.0.0.7"] and net.get("address") == "10.0.0.7"
+        assert pad_ssh_key.last_address() == "10.0.0.7"         # Send to machine goes to the machine on show
+        # closed by the owner: it stays closed when the lights are checked again
+        assert w.call("shellx.machines_remote", "10.0.0.7", False) and _m(w)["remote"] == ""
+        w.app.window.service("shellx")._machines_probed({"10.0.0.7": True, "10.0.0.9": False})
+        assert _m(w)["remote"] == "" and read == ["10.0.0.7"]
+        # the other machine's panel: not answering, so nothing is read from it; an address the page lacks is refused
+        assert w.call("shellx.machines_remote", "10.0.0.9") and _m(w)["remote"] == "10.0.0.9"
+        assert read == ["10.0.0.7"] and net.get("address") == "10.0.0.9"
+        assert not w.call("shellx.machines_remote", "10.9.9.9")
+        quiet.clear()
+        assert w.call("shellx.machines_close") and quiet == ["live"]
+
+
+def test_the_row_has_remote_and_the_project_picker():
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "shell.js").read_text(encoding="utf-8")
+    for needle in ('call("shellx.machines_remote", address, !open)', "function MachineRemote(",
+                   'call("network.capture_screen")', 'call("network.start_live")', 'call("network.machine_status")',
+                   'call("network.grab_logs")', 'call("network.restart_game")',
+                   'call("shellx.machines_link_project", r.id, p.folder, true)',
+                   'call("shellx.machines_go_network", address)'):
+        assert needle in js
+
+
+def test_the_row_shows_the_cards_games(tmp_path, monkeypatch):
+    """David: "I want this icon to be more informative. like if it's a multi-boot show it as such, or if it's a
+    single game, show its splash screen": a multi-boot card's games are named as its own boot menu names them."""
+    from pinball_decryptor.plugins.stern import multiimage
+    from pinball_decryptor.webui import card_preview
+    imgs = [multiimage.CardImage(3, "", "godzilla_le"), multiimage.CardImage(3, "img1", "godzilla_le")]
+    monkeypatch.setattr(multiimage, "images_for_path", lambda p: imgs)
+    monkeypatch.setattr(card_preview, "menu_titles", lambda p: ["Godzilla", "Heisei"])
+    assert SM._games("card.raw") == ["Godzilla", "Heisei"]
+    monkeypatch.setattr(card_preview, "menu_titles", lambda p: ["one too few"])
+    assert SM._games("card.raw") == ["Godzilla LE", "Godzilla LE"]
+    monkeypatch.setattr(multiimage, "images_for_path", lambda p: imgs[:1])
+    assert SM._games("card.raw") == ["Godzilla LE"]             # one game: its menu is never asked
+    # a file that is no card has no games, no titles and no pictures, and none of them raises
+    junk = tmp_path / "junk.raw"
+    junk.write_bytes(b"x" * 4096)
+    monkeypatch.undo()
+    assert SM._games(str(junk)) == [] and card_preview.menu_titles(str(junk)) == []
+    assert card_preview.thumbs(str(junk), str(tmp_path / "out")) == []
+    assert card_preview.thumbs(str(tmp_path / "gone.raw")) == []
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "shell.js").read_text(encoding="utf-8")
+    assert "function MachineArt(" in js and "<${MachineArt} r=${r} />" in js
+
+
+def test_my_machines_and_getting_started_are_sheets_that_close():
+    """David: "instead of 'back to stern pinball', it's more like a close button": both close with an X, with
+    Escape (unless a dialog or a menu is on top) and with their top-bar button; neither says "Back to"."""
+    js = (ROOT / "pinball_decryptor" / "webui" / "static" / "js" / "shell.js").read_text(encoding="utf-8")
+    for name, end in (("function MyMachines(", "function Picker("), ("function GettingStarted(", "function Disclaimer(")):
+        body = js[js.index(name):js.index(end, js.index(name))] if end in js[js.index(name):] else js[js.index(name):]
+        body = body[:6000]
+        assert "useSheetClose(" in body and "<${SheetClose} cls=" in body and "sx-sheet" in body
+        assert '"Back to "' not in body
+    assert 'e.key !== "Escape"' in js and 'document.querySelector(".scrim, body > div > .menu")' in js
+    assert 'call(machOpen ? "shellx.machines_close" : "shellx.machines_open")' in js

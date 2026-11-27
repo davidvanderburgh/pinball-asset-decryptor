@@ -134,6 +134,21 @@ def set_address(settings, mid, address):
     return False
 
 
+def set_project(settings, mid, folder):
+    """PAD-1632: the project folder the owner says is machine *mid*'s ("" takes that back; the row then finds
+    its project by itself again). True when stored."""
+    rows = entries(settings)
+    for e in rows:
+        if e.get("id") == mid:
+            if folder:
+                e["project"] = os.path.normpath(folder)
+            else:
+                e.pop("project", None)
+            settings[SECTION] = rows
+            return True
+    return False
+
+
 def rebind(settings, mid, card, info):
     """Point machine *mid* at another card (new code, a new build)."""
     rows = entries(settings)
@@ -189,19 +204,49 @@ def place_in(lin, pr):
 
 
 def projects_for(machine, folders, read=lineage.read_lineage):
-    """``[(folder, place, lineage)]`` for every folder in *folders* (the
-    registry's, most recent first) whose lineage knows the machine's card."""
-    pr = (machine or {}).get("print")
-    out = []
-    if not pr:
-        return out
+    """``[(folder, place, lineage)]``: the project the owner linked by hand first (``("linked", 0)``, PAD-1632),
+    then every folder in *folders* (the registry's, most recent first) whose lineage knows the machine's card,
+    then any that holds the card file itself (``("holds", 0)``: a multi-boot card is built inside its project and
+    is no revision of it)."""
+    machine = machine or {}
+    pr = machine.get("print")
+    out, held, seen = [], [], set()
+    linked = machine.get("project") or ""
+    if linked:
+        out.append((linked, ("linked", 0), read(linked) or {}))
+        seen.add(_norm(linked))
+    card = _norm(machine.get("card")) if machine.get("card") else ""
     for folder in folders:
-        lin = read(folder)
-        if not lin:
+        if _norm(folder) in seen:
             continue
-        w = place_in(lin, pr)
+        lin = read(folder)
+        w = place_in(lin, pr) if lin and pr else None
         if w is not None:
             out.append((folder, w, lin))
+        elif card and card.startswith(_norm(folder) + os.sep):
+            held.append((folder, ("holds", 0), lin or {}))
+    return out + held
+
+
+def game_projects(machine, folders, read=lineage.read_lineage):
+    """PAD-1632: the folders in *folders* that are projects of the machine's GAME (any build of it), for a
+    machine no project joined by itself: the owner picks which one is this machine's."""
+    info = release_info(machine) or {}
+    key = info.get("key")
+    out = []
+    if not key:
+        return out
+    for folder in folders:
+        lin = read(folder) or {}
+        sidx = (lin.get("stock") or {}).get("sidx") or ""
+        if not sidx:
+            continue
+        try:
+            rel = release_info({"manufacturer": machine.get("manufacturer"), "sidx": sidx}) or {}
+        except Exception:                               # noqa: BLE001 - a sidx its maker cannot read
+            rel = {}
+        if rel.get("key") == key:
+            out.append(folder)
     return out
 
 

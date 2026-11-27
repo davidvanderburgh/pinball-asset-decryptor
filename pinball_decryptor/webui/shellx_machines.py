@@ -13,7 +13,13 @@ the row links to the page.
 
     {"rows": [...], "watch": bool, "watch_text": str, "checking": bool,
      "open": bool (PAD-1585: its own page, from the top bar), "network": [...] (machines remote access found
-     that no row runs), "newer_count": int}
+     that no row runs), "newer_count": int,
+     "remote": address whose Remote panel is open ("" none; PAD-1632), "buttons": [[key, label], ...]}
+
+PAD-1632 (David: "I should be able to see the remote access controls here easily (to see the screen, data, etc.
+like on the remote access screen) without having to make or load a project"): a machine's row opens a Remote panel
+- its screen, its status, its logs, its settings and a restart - right on the page.  The panel is the Network
+tab's own service (``network.*``, tabs/network.py) pointed at that machine; nothing is done twice.
 """
 
 import datetime
@@ -74,10 +80,11 @@ class MachinesMixin:
         self._mach_finding = False      # PAD-1627: the page's own look over the network
         self._mach_find = {"pct": 0, "note": "", "kind": ""}
         self._mach_found_once = False
+        self._mach_remote = None        # PAD-1632: the address whose Remote panel is open; None = never chosen
         self.set(machines={"rows": [], "watch": False, "watch_text": "",
                            "checking": False, "open": False, "network": [], "newer_count": 0,
                            "online": {}, "finding": False, "find_pct": 0, "find_note": "",
-                           "find_kind": ""})
+                           "find_kind": "", "remote": "", "buttons": []})
         self.ctx.loop.after(0, self._machines_refresh)
         self.ctx.loop.after(WATCH_FIRST_MS, self._machines_tick)
         self._backing_up = False
@@ -134,7 +141,7 @@ class MachinesMixin:
             self._machines_probe()
 
     def _machines_set(self):
-        from ..core import machine_backups
+        from ..core import machine_backups, remote_buttons
         rows, on, unlinked = self._mach_last
         settings = self._mach_settings() or {}
         self.set(machines={"rows": rows, "watch": on,
@@ -145,6 +152,9 @@ class MachinesMixin:
                            "online": dict(self._mach_online),
                            "finding": bool(self._mach_finding), "find_pct": self._mach_find["pct"],
                            "find_note": self._mach_find["note"], "find_kind": self._mach_find["kind"],
+                           # PAD-1632: the Remote panel open on the page, and the service buttons it offers
+                           "remote": self._mach_remote if self._mach_remote in self._mach_addresses() else "",
+                           "buttons": [list(pair) for pair in remote_buttons.LABELS],
                            # PAD-1588: settings and score backups by themselves
                            "backup": {"auto": machine_backups.auto_on(settings),
                                       "keep": machine_backups.keep_of(settings),
@@ -208,6 +218,12 @@ class MachinesMixin:
     def _machines_probed(self, got):
         self._mach_probing = False
         self._mach_online = got
+        # PAD-1632: the one machine that is on has its Remote panel open when the page comes up (until the owner
+        # opens or closes one, which is then kept)
+        if self._mach_open and self._mach_remote is None and not os.environ.get("PAD_UI_CAPTURE"):
+            on = [a for a in self._mach_addresses() if got.get(a) is True]
+            if len(on) == 1:
+                self._remote_open(on[0])
         self._machines_set()
         # PAD-1627 (David: "I don't see my godzilla that is turned on right now"): a machine this computer knows
         # that doesn't answer at its address has most likely been given another by the router, so the network is
@@ -358,6 +374,57 @@ class MachinesMixin:
         self._machines_refresh()
         return True
 
+    # -- PAD-1632: the Remote panel of one machine, on the page -------------------------------------------------
+    def _net(self):
+        try:
+            return self.window.service("network")
+        except Exception:                               # noqa: BLE001 - no Network tab in this build
+            return None
+
+    def _remote_quiet(self):
+        """Nothing keeps reading a machine nobody is looking at: the live view and the followed log stop."""
+        net = self._net()
+        if net is None:
+            return
+        try:
+            net.stop_live()
+            net.follow_log(False)
+        except Exception:                               # noqa: BLE001
+            log.exception("stop the remote panel's readers")
+
+    def _remote_open(self, address, read=True):
+        """Point the Network tab's service at *address* (it is also the machine Send to machine uses from now)
+        and read its status once, when it is on."""
+        from ..core import pad_ssh_key
+        if not pad_ssh_key.select_machine(address):
+            return False
+        net = self._net()
+        if net is not None:
+            if net.get("address") != address:
+                # another machine's screen, status and notes are not this one's
+                self._remote_quiet()
+                net.set(check="", check_kind="", care_status=[], care_note="", care_kind="", care_log="",
+                        screen_path="", screen_note="", screen_kind="", buttons_note="", buttons_kind="")
+            net._show_machine()
+            if read and self._mach_online.get(address) is True and not os.environ.get("PAD_UI_CAPTURE"):
+                net.machine_status()
+        self._mach_remote = address
+        return True
+
+    @rpc
+    def machines_remote(self, address, on=True):
+        """Open (or close) the Remote panel of the machine at *address*: one at a time."""
+        address = (address or "").strip()
+        if not on or not address:
+            self._remote_quiet()
+            self._mach_remote = ""
+            self._machines_set()
+            return True
+        if address not in self._mach_addresses() or not self._remote_open(address):
+            return False
+        self._machines_set()
+        return True
+
     def _machines_online_tick(self):
         """While the page is open, the lights are checked again every :data:`ONLINE_EVERY_MS`."""
         if not self._mach_open:
@@ -383,13 +450,21 @@ class MachinesMixin:
     @rpc
     def machines_close(self):
         self._mach_open = False
+        self._remote_quiet()
         self._machines_set()
         return True
 
     @rpc
-    def machines_go_network(self):
-        """The empty page's way to remote access: Stern's Network tab (Find my machine)."""
-        if not self._enter("stern"):
+    def machines_go_network(self, address=None):
+        """The Network tab (remote access set up, Find my machine, Send an image): the maker's of the row at
+        *address*, with that machine the one it acts on (PAD-1632); Stern's with no address (the empty page)."""
+        mfr = "stern"
+        if address:
+            from ..core import pad_ssh_key
+            pad_ssh_key.select_machine(address)
+            row = next((r for r in self._mach_last[0] if r.get("address") == address), None)
+            mfr = (row or {}).get("mfr") or "stern"
+        if not self._enter(mfr):
             return False
         try:
             self.window.select_tab("network")
@@ -444,6 +519,8 @@ class MachinesMixin:
         info = self._release_info(m)
         mfr = m.get("manufacturer") or ""
         found = machines.projects_for(m, folders)
+        # PAD-1632: no project joined by itself: the known projects of its game are offered to pick from
+        same = [] if found else [f for f in machines.game_projects(m, folders) if os.path.isdir(f)]
         place = found[0][1] if found else None
         card = m.get("card") or ""
         row = {"id": m["id"], "name": m.get("name") or "",
@@ -462,11 +539,18 @@ class MachinesMixin:
                "project_name": os.path.basename(found[0][0]) if found else "",
                "project_missing": bool(found) and not os.path.isdir(found[0][0]),
                "more_projects": [f for f, _w, _l in found[1:]],
+               # PAD-1632: how the project joined ("linked" by hand, "holds" the card file, else by fingerprint)
+               "project_how": found[0][1][0] if found else "",
+               "game_projects": [{"folder": f, "name": os.path.basename(f)} for f in same],
                "newer": "", "newer_url": "",
                # PAD-1585: the game it runs (to find it on the network) and the address remote access reaches it at
                "game": (info or {}).get("key") or "", "address": m.get("address") or "",
                # PAD-1585: Update on a multi-boot card updates every image of the game on it
                "multi": mfr == "stern" and os.path.isfile(card) and _multi(card)}
+        # PAD-1632 (David: "I want this icon to be more informative ... if it's a multi-boot show it as such, or
+        # if it's a single game, show its splash screen"): the games on the card, and a small picture of each
+        row["games"] = _games(card) if mfr == "stern" and not row["card_missing"] else []
+        row["art"] = _art(card) if row["games"] else []
         row.update(self._backup_fields(m))
         if info and code_watch.has_source(mfr):
             newest = code_watch.newest(mfr, info["key"])
@@ -910,6 +994,7 @@ class MachinesMixin:
         if getattr(self, "_mach_open", False):          # PAD-1585: the working view, not the page over it
             self._mach_open = False
             self._machines_set()
+        self._remote_quiet()                            # PAD-1632: the page's live view ends with the page
         if self.window._is_running():
             return False
         mfr = next((m for m in self.window.manufacturers
@@ -930,12 +1015,56 @@ class MachinesMixin:
             return None
         if not self._enter(r["mfr"]):
             return None
-        from ..core import project_file
-        if project_file.has_anchor(r["project"]):
-            self.app._open_project_folder_checked(r["project"])
-        else:
-            self.window.extract_output_var.set(r["project"])
+        self._open_folder(r["project"])
         return r
+
+    def _open_folder(self, folder):
+        from ..core import project_file
+        if project_file.has_anchor(folder):
+            self.app._open_project_folder_checked(folder)
+        else:
+            self.window.extract_output_var.set(folder)
+
+    # -- PAD-1632: the owner says which project is a machine's ---------------------------------------------------
+    @rpc
+    def machines_link_project(self, mid, folder=None, open_it=False):
+        """This machine's project is *folder* (a folder picker when none): the row names it from now on, whatever
+        card it was extracted from.  *open_it* also opens it in the working view."""
+        from ..core import machines
+        m = self._mach(mid)
+        if m is None:
+            return False
+        if folder is None:
+            folder = compat.filedialog.askdirectory(
+                title="Pick the project folder of %s" % (m.get("name") or "this machine"))
+        if not folder:
+            return False
+        if not os.path.isdir(folder):
+            compat.messagebox.showerror("Choose project", "That folder isn't there:\n    %s" % folder)
+            return False
+        folder = os.path.abspath(folder)
+        machines.set_project(self.app._settings, mid, folder)
+        touch = getattr(self.app, "_registry_touch", None)
+        if touch is not None:
+            try:
+                touch(folder)
+            except Exception:                           # noqa: BLE001 - the link itself is stored
+                log.exception("registry touch %s", folder)
+        self._mach_save()
+        self._machines_refresh()
+        if open_it and self._enter(m.get("manufacturer") or "stern"):
+            self._open_folder(folder)
+        return True
+
+    @rpc
+    def machines_unlink_project(self, mid):
+        """Take the by-hand project link back: the row finds its project by itself again."""
+        from ..core import machines
+        if self._mach(mid) is None or not machines.set_project(self.app._settings, mid, ""):
+            return False
+        self._mach_save()
+        self._machines_refresh()
+        return True
 
     @rpc
     def machines_open_project(self, mid):
@@ -1138,6 +1267,31 @@ def link_network(rows, network):
             r["address"] = same[0]["address"]
             taken.add(r["address"])
     return rows, [n for n in network if n["address"] not in taken]
+
+
+def _games(card):
+    """PAD-1632: the name of every game image on the card *card*, boot-menu order ([] when it cannot be read)."""
+    try:
+        from ..plugins.stern import multiimage
+        names = [multiimage.pretty(img) for img in multiimage.images_for_path(card)]
+    except Exception:                                   # noqa: BLE001
+        return []
+    if len(names) > 1:
+        # a multi-boot card: as its own boot menu names them (three builds of one game are all "Godzilla LE")
+        from . import card_preview
+        titles = card_preview.menu_titles(card)
+        if len(titles) == len(names):
+            names = [t or n for t, n in zip(titles, names)]
+    return names
+
+
+def _art(card):
+    """PAD-1632: small pictures of the card's game splashes (webui/card_preview.thumbs); [] in a test run, which
+    has no card worth reading."""
+    if os.environ.get("PAD_UI_NO_ART"):
+        return []
+    from . import card_preview
+    return card_preview.thumbs(card)
 
 
 def _multi(card):

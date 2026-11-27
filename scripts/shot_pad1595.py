@@ -68,7 +68,7 @@ def main():
                                    timeout=60000)
             # the log pane belongs to a manufacturer's screen
             webui_shot.api(url, "ui.pick_manufacturer", "stern")
-            back = page.locator("button:has-text('Back to Stern Pinball')")
+            back = page.locator("button.sx-gs-close, button:has-text('Back to Stern Pinball')")
             if back.count():
                 back.first.click()
             time.sleep(10)          # the prune starts 3 s after the window

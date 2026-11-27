@@ -668,6 +668,22 @@ class MultibootTab(TabService):
             filetypes=list(panel._backend.image_types))
         if not path or panel._image_dialog is None:
             return False            # the dialog went while the picker was up
+        # PAD-1630: A LOGO DROPPED ON THE DIALOG.  With the game's own logo
+        # showing, Replace image… is the dialog's only drop target, so a
+        # picture dragged onto its title went into the card's place
+        # (Dustin's GameLogo.png).  A picture or clip here is the image's
+        # Picture: it goes there, as the Picture row's Browse… would put it.
+        kind = mt.file_media_kind(path)
+        if kind in getattr(panel._image_dialog, "file_kinds", ()):
+            var = panel._ed_picture if kind == "picture" else panel._ed_video
+            var.set(path)
+            panel._ed_media.set(kind)
+            panel._ok("%s is a %s, so it is now this image's %s. The image's "
+                      "own file is unchanged."
+                      % (os.path.basename(path), kind,
+                         "picture" if kind == "picture" else "video"))
+            panel._dirty("preview", "editor")
+            return True
         changed = panel.replace_image(path)
         panel._dirty("rows", "checks", "preview", "editor")
         return bool(changed)

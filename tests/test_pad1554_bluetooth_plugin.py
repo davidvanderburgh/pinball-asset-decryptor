@@ -834,3 +834,300 @@ def test_the_plugins_tab_checks_the_machine_the_network_tab_knows(tmp_path, monk
         assert w.call('plugins.check_machine', 'bluetooth')
         row = _settle(w, lambda r: not r['busy'] and r['kind'] == 'err')
         assert row['note'] == 'Nothing answered at 192.168.1.40.'
+
+
+# ------------------------------------------------------------------ PAD-1643: straight onto the machine
+class Live:
+    """A running machine over remote access: its files (path -> [bytes, mode]), its links, and the shell words
+    the app sends answered from them, as busybox would."""
+
+    def __init__(self, files=None, arch='armv7l', links=None, free_kb=200000, spike3=False):
+        self.files = {p: [d, 0o644] for p, d in (files or {}).items()}
+        self.links, self.arch, self.free_kb, self.spike3 = dict(links or {}), arch, free_kb, spike3
+        self.ran, self.rebooted, self.closed, self.rw, self.sftp = [], 0, False, False, self
+        self.corrupt, self.refuse_rw, self.wrote_ro = '', False, []
+
+    def _real(self, path):
+        for _ in range(8):
+            if path not in self.links:
+                break
+            path = self.links[path]
+        return path
+
+    def open(self, path, mode):
+        m, path = self, self._real(path)
+        if 'r' in mode:
+            if path not in m.files:
+                raise IOError(path)
+            return io.BytesIO(m.files[path][0])
+
+        class F:
+            def __init__(s):
+                s.buf = b''
+
+            def write(s, data):
+                s.buf += data
+
+            def __enter__(s):
+                return s
+
+            def __exit__(s, *a):
+                if not m.rw:
+                    m.wrote_ro.append(path)
+                m.files[path] = [s.buf + (b'!' if m.corrupt and path.startswith(m.corrupt) else b''), 0o600]
+        return F()
+
+    def sh(self, script, timeout=60, check=True):
+        self.ran.append(script)
+        words = script.replace("'", '').split()
+        if script.startswith('echo "arch'):
+            out = ['arch ' + self.arch] + (['spike3'] if self.spike3 else [])
+            real = self._real(BT.MONITOR)
+            if real in self.files:
+                out.append('monitor ' + real)
+            out += ['have ' + p for p in (B.MENU_SO, B.SO, B.MODE_SO, BT.WRAPPER) if p in self.files]
+            inside = sorted(p for p in self.files if p.startswith(BT.DIR + '/'))
+            if inside or getattr(self, 'empty_dir', False):
+                out += ['dir'] + ['file ' + p.rsplit('/', 1)[1] for p in inside]
+            out.append('free /dev/root 500000 300000 %d 60%% /' % self.free_kb)
+            return 0, '\n'.join(out) + '\n'
+        if script.startswith('p='):                         # network_apply._real: where a path's links lead
+            real = self._real(words[0][2:].rstrip(';'))
+            return 0, ('real %s\n' % real) if real in self.files else ''
+        if script.startswith('sha1sum '):
+            return 0, ''.join('%s  %s\n' % (hashlib.sha1(self.files[p][0]).hexdigest(), p)
+                              for p in words[1:] if p in self.files)
+        if 'remount,rw' in script:
+            if self.refuse_rw:
+                return 1, 'mount: permission denied\n'
+            self.rw = True
+            return 0, 'PAD_RW\n'
+        if 'remount,ro' in script:
+            self.rw = False
+            return 0, ''
+        if script.startswith('mkdir -p '):
+            return 0, ''
+        if 'PAD_PUT' in script:
+            assert self.rw, 'the card was changed while it was read-only'
+            for step in script.split(' && '):
+                w = step.replace("'", '').split()
+                if w[:1] == ['chmod']:
+                    self.files[w[2]][1] = int(w[1], 8)
+                elif w[:2] == ['mv', '-f']:
+                    self.files[w[3]] = self.files.pop(w[2])
+                elif w[:2] == ['rm', '-f']:
+                    self.files.pop(w[2], None)
+                elif w[:1] == ['rmdir']:
+                    assert not [p for p in self.files if p.startswith(w[1] + '/')], 'rmdir of a folder with files'
+            return 0, 'PAD_PUT\n'
+        if script.startswith('rm -f '):
+            for p in words[2:]:
+                self.files.pop(p, None)
+        return 0, ''
+
+    def reboot(self):
+        self.rebooted += 1
+
+    def close(self):
+        self.closed = True
+
+
+def _on_computer(store, plugin, monkeypatch, source=None):
+    fake, blobs, sums = plugin
+    P.install(fake, 'v0.3.0', opener=Web({'v0.3.0': (blobs, sums)}, source=source))
+    return fake
+
+
+def test_the_plugin_goes_straight_onto_a_running_machine_and_comes_off_again(store, plugin, monkeypatch):
+    fake = _on_computer(store, plugin, monkeypatch)
+    tag, members = P.files(fake, 'armv7')
+    game = b'\x7fELF the game'
+    m = Live({BT.MONITOR: STOCK.encode(), '/games/godzilla/game': game, BT.DISABLED: b''},
+             links={'/games/game': '/games/godzilla/game'})
+    said = []
+    res = BT.to_machine(m, True, log=said.append)
+    assert (res['result'], res['platform'], res['tag']) == ('done', BT.SPIKE2, 'v0.3.0') and m.rebooted == 1
+    # every file of the release as its archive holds it, the two of ours, the wrapper, and the block
+    for name, (data, mode) in BT.card_files(members, tag).items():
+        assert m.files[BT.DIR + '/' + name] == [data, mode], name
+    assert m.files[BT.DIR + '/run-live.sh'][1] == 0o755 and m.files[BT.DIR + '/pad-release'][0] == b'v0.3.0\n'
+    assert m.files[BT.WRAPPER] == [BT.WRAPPER_TEXT.encode(), 0o755]
+    assert m.files[BT.MONITOR] == [B.monitor_text(STOCK, False, bluetooth=True).encode(), 0o755]
+    assert B.has_block(m.files[BT.MONITOR][0], B.BT_HOOK_LINES)
+    # written only while the card was open for writing, closed again after, nothing left on its way
+    assert not m.wrote_ro and not m.rw and not [p for p in m.files if p.endswith(BT.NEW)]
+    # the files went into place before the script that starts them
+    put = next(s for s in m.ran if 'PAD_PUT' in s)
+    assert put.index(BT.DIR + '/run-live.sh') < put.index("mv -f '%s%s'" % (BT.MONITOR, BT.NEW))
+    # a launcher that had switched itself off is switched back on, and the progress was said
+    assert BT.DISABLED not in m.files and any('file 3 of' in s for s in said) and said[-1] == 'Restarting the machine'
+    assert 'is restarting' in BT.machine_said(res, True) and 'USB Bluetooth adapter' in BT.machine_said(res, True)
+    # again: nothing to do, nothing written, no restart
+    before = len(m.ran)
+    res = BT.to_machine(m, True)
+    assert res['result'] == 'already' and m.rebooted == 1 and not any('remount' in s for s in m.ran[before:])
+    assert 'already has spike-pinball-bluetooth v0.3.0; nothing was changed' in BT.machine_said(res, True)
+    assert BT.parse_status('on-card\nrelease v0.3.0\n')['on_card']
+    # off: the script first, then every file, the folder and the wrapper; the game's own data is not touched
+    m.files['/dump/spikebt/prefs'] = [b'paired', 0o644]
+    res = BT.to_machine(m, False)
+    assert res['result'] == 'done' and m.rebooted == 2
+    assert m.files[BT.MONITOR] == [STOCK.encode(), 0o755] and '/dump/spikebt/prefs' in m.files
+    assert not [p for p in m.files if p.startswith(BT.DIR + '/')] and BT.WRAPPER not in m.files
+    off = [s for s in m.ran if 'PAD_PUT' in s][-1]
+    assert off.index("mv -f '%s%s'" % (BT.MONITOR, BT.NEW)) < off.index('rm -f') and off.count('rmdir') == 1
+    assert 'off the machine and it is restarting' in BT.machine_said(res, False)
+    res = BT.to_machine(m, False)
+    assert res['result'] == 'already' and m.rebooted == 2 and 'nothing was changed' in BT.machine_said(res, False)
+
+
+def test_on_the_machine_the_other_preloads_and_a_linked_script_are_kept(store, plugin, monkeypatch):
+    _on_computer(store, plugin, monkeypatch)
+    # remote buttons and a boot menu on the card, and Stern's updater has left game_monitor a link (PAD-1619)
+    real = '/spk/packages/spike-1.16.0/etc/init.d/game_monitor'
+    script = B.monitor_text(STOCK, True, menu=True)
+    m = Live({real: script.encode(), B.SO: b'so', B.MENU_SO: b'menu', B.MODE_SO: b'mode'}, links={BT.MONITOR: real})
+    assert BT.to_machine(m, True)['result'] == 'done'
+    assert m.links == {BT.MONITOR: real} and BT.MONITOR not in m.files          # the link stays; its file changed
+    assert m.files[real][0].decode() == B.monitor_text(script, True, mode=True, menu=True, bluetooth=True)
+    assert B.SO in m.files[real][0].decode() and B.BT_GAME in m.files[real][0].decode()
+    assert BT.to_machine(m, False)['result'] == 'done'
+    assert m.files[real][0].decode() == script and m.links == {BT.MONITOR: real}  # back to the buttons block
+    # another release on the machine: its stray file goes, the changed ones are replaced, the same ones are not sent
+    assert BT.to_machine(m, True, restart=False)['result'] == 'done' and m.rebooted == 2
+    m.files[BT.DIR + '/old-helper'] = [b'old', 0o755]
+    m.files[BT.DIR + '/menu.so'][0] = b'another release'
+    m.files[BT.DIR + '/pad-release'][0] = b'v0.2.0\n'
+    plan = BT.plan_machine(m, True)
+    assert sorted(plan['puts']) == [BT.DIR + '/menu.so', BT.DIR + '/pad-release'] and plan['script'] is None
+    assert plan['removes'] == [BT.DIR + '/old-helper']
+    assert BT.to_machine(m, True)['result'] == 'done' and BT.DIR + '/old-helper' not in m.files
+    # the Network tab's own direct route rewrites the link's file too, and keeps the Bluetooth block
+    from pinball_decryptor.core import network_apply as A
+    assert A._real(m, BT.MONITOR) == real and A._real(Live({BT.MONITOR: b'x'}), BT.MONITOR) == BT.MONITOR
+
+
+def test_a_machine_that_cannot_take_it_is_left_exactly_as_it_was(store, plugin, monkeypatch):
+    fake = _on_computer(store, plugin, monkeypatch)
+    base = {BT.MONITOR: STOCK.encode()}
+
+    def same(m):
+        return {p: v[0] for p, v in m.files.items()} == base and m.rebooted == 0 and not m.rw
+
+    for m, words in (
+            (Live(base, arch='x86_64'), 'not a Stern Spike 2 or Spike 3 machine'),            # a JJP
+            (Live(base, arch='aarch64'), 'not a Stern Spike 2 or Spike 3 machine'),           # arm64, not Stern's
+            (Live({}), "This machine's game start-up script"),
+            (Live({BT.MONITOR: b'#!/bin/sh\nexec /games/game\n'}), "This machine's game start-up script"),
+            (Live(base, free_kb=100), 'MB free and Bluetooth headphones needs'),
+    ):
+        was = {p: v[0] for p, v in m.files.items()}
+        with pytest.raises(ExtrasError, match=words):
+            BT.to_machine(m, True)
+        assert {p: v[0] for p, v in m.files.items()} == was and m.rebooted == 0 and not m.rw
+    m = Live(base)
+    m.refuse_rw = True
+    with pytest.raises(ExtrasError, match='could not be opened for writing: mount: permission denied'):
+        BT.to_machine(m, True)
+    assert same(m)
+    # a file that arrives changed: nothing is moved into place, what was sent is cleared away
+    m = Live(base)
+    m.corrupt = BT.DIR + '/spikebt'
+    with pytest.raises(ExtrasError, match='spikebt did not arrive on the machine as sent; nothing was changed'):
+        BT.to_machine(m, True)
+    assert same(m)
+    # the plugin is not on this computer: said, before the machine is touched
+    P.remove(fake)
+    m = Live(base)
+    with pytest.raises(ExtrasError, match='is not installed'):
+        BT.to_machine(m, True)
+    assert same(m) and BT.to_machine(m, False)['result'] == 'already'              # off needs no release
+
+
+def test_a_spike3_machine_takes_the_arm64_release_and_its_own_block(store, plugin, monkeypatch):
+    fake = _on_computer(store, plugin, monkeypatch)
+    tag, members = P.files(fake, 'arm64')
+    m = Live({BT.MONITOR: S3_STOCK.encode()}, arch='aarch64', spike3=True)
+    res = BT.to_machine(m, True)
+    assert (res['result'], res['platform']) == ('done', BT.SPIKE3) and res['game'] == {'known': None, 'text': ''}
+    assert m.files[BT.MONITOR][0].decode() == BT.s3_monitor_text(S3_STOCK, True)
+    assert sorted(p.rsplit('/', 1)[1] for p in m.files if p.startswith(BT.DIR + '/')) == sorted(
+        BT.card_files(members, tag))
+    assert BT.WRAPPER not in m.files and BT.DIR + '/btusb.ko' not in m.files       # no wrapper, no driver
+    assert "machine's own Bluetooth radio" in BT.machine_said(res, True)
+    assert BT.to_machine(m, False)['result'] == 'done' and m.files[BT.MONITOR][0] == S3_STOCK.encode()
+
+
+def test_the_machine_is_told_whether_the_release_knows_its_game(store, plugin, monkeypatch):
+    game = b'\x7fELF the game'
+    monkeypatch.setattr(BT, 'known_games', lambda platform: {hashlib.sha256(game).hexdigest(): 'Godzilla Premium 1.16.0'}
+                        if platform == BT.SPIKE2 else None)
+    _on_computer(store, plugin, monkeypatch)
+    m = Live({BT.MONITOR: STOCK.encode(), '/games/gz/game': game}, links={'/games/game': '/games/gz/game'})
+    res = BT.to_machine(m, True)
+    assert res['game'] == {'known': True, 'text': "This machine's game is one spike-pinball-bluetooth v0.3.0 "
+                                                  'knows: Godzilla Premium 1.16.0.'}
+    m.files['/games/gz/game'][0] = game + b' changed by a build'
+    res = BT.to_machine(m, True)
+    assert res['result'] == 'already' and res['game']['known'] is False
+    assert 'with no Bluetooth entry' in BT.machine_said(res, True)
+    del m.files['/games/gz/game']                       # it cannot be read: nothing is said either way
+    assert BT.to_machine(m, True)['game'] == {'known': None, 'text': ''}
+
+
+def test_the_plugins_tab_puts_it_on_the_machine_and_takes_it_off(tmp_path, monkeypatch, store, plugin):
+    from pinball_decryptor.core import pad_ssh_key, remote_send
+    from tests.webui_harness import web_app
+    fake, blobs, sums = plugin
+    monkeypatch.setitem(P.PLUGINS, 'bluetooth', fake)
+    monkeypatch.setattr(P.net, 'urlopen', Web({'v0.3.0': (blobs, sums)}))
+    monkeypatch.setattr(pad_ssh_key, 'KEY_DIR', tmp_path / 'keys')
+    js = (ROOT / 'pinball_decryptor/webui/static/js/tabs/plugins.js').read_text(encoding='utf-8')
+    for words in ('plugins.put_on_machine', 'plugins.take_off_machine', 'Put it on the machine now',
+                  'Take it off the machine', 'On your machine'):
+        assert words in js, words
+    assert any(r[0] == 'Straight onto the machine' for r in BT.details(BT.SPIKE2))
+    assert any(r[0] == 'Straight onto the machine' for r in BT.details(BT.SPIKE3))
+    with web_app(tmp_path, mfr='stern') as w:
+        w.window.current_mfr._era = 'spike2'
+        svc = w.window.service('plugins')
+        project = tmp_path / 'project'
+        project.mkdir()
+        w.window.write_assets_var.set(str(project))
+        w.run(svc.on_show)
+        _settle(w, lambda r: r['releases_state'] == 'ok')
+        m = Live({BT.MONITOR: STOCK.encode()})
+        monkeypatch.setattr(remote_send, 'connect', lambda address: m)
+        assert w.call('plugins.put_on_machine', 'bluetooth') is False              # no machine known yet
+        w.call('network.set_address', '192.168.1.40')
+        w.run(svc.publish)
+        # not installed on this computer: said, nothing asked, the machine not touched
+        assert w.call('plugins.put_on_machine', 'bluetooth') is False
+        row = w.state('plugins')['plugins'][0]
+        assert row['kind'] == 'err' and 'on this computer first' in row['note'] and not m.ran
+        assert w.call('plugins.install', 'bluetooth', 'v0.3.0')
+        _settle(w, lambda r: not r['busy'] and r['installed'] == 'v0.3.0')
+        # not without a yes
+        w.answers.append('no')
+        assert w.call('plugins.put_on_machine', 'bluetooth') is False and not m.ran
+        assert 'restarts' in w.asked[-1]['message'] and '192.168.1.40' in w.asked[-1]['message']
+        assert 'v0.3.0' in w.asked[-1]['message']
+        w.answers.append('yes')
+        assert w.call('plugins.put_on_machine', 'bluetooth')
+        row = _settle(w, lambda r: not r['busy'] and r['note'])
+        assert row['kind'] == 'ok' and 'The machine has spike-pinball-bluetooth v0.3.0 now and is restarting' in row['note']
+        assert m.rebooted == 1 and m.closed and BT.DIR + '/menu.so' in m.files
+        # the project follows, so the next card written from it carries the plugin too
+        assert card_extras.load_bluetooth(str(project)) == {'enabled': True} and row['enabled']
+        assert 'This project is ticked for it now' in row['note']
+        w.answers.append('yes')
+        assert w.call('plugins.take_off_machine', 'bluetooth')
+        row = _settle(w, lambda r: not r['busy'] and 'off the machine' in r['note'])
+        assert row['kind'] == 'ok' and m.rebooted == 2 and BT.DIR + '/menu.so' not in m.files
+        assert card_extras.load_bluetooth(str(project)) == {'enabled': False} and not row['enabled']
+        # a machine that cannot take it: its reason, in red
+        monkeypatch.setattr(remote_send, 'connect', lambda address: Live({BT.MONITOR: STOCK.encode()}, arch='x86_64'))
+        w.answers.append('yes')
+        assert w.call('plugins.put_on_machine', 'bluetooth')
+        row = _settle(w, lambda r: not r['busy'] and r['kind'] == 'err')
+        assert row['note'] == BT.NOT_A_MACHINE

@@ -118,6 +118,10 @@ service menu needs Select twice (a splash page first); Bluetooth is the last row
 - The author asked to be credited as mattlqx; done everywhere.
 - Dropped: putting the plugin straight on a card or a running machine without a build. The existing direct routes
   keep a Bluetooth card's block (tested).
+  **PAD-1643 (2026-11-27) added the running machine**: "Put it on the machine now" / "Take it off the machine"
+  on the Plugins tab (`bluetooth_card.to_machine`, Spike 2 and Spike 3), proven on stand-in machines in
+  `docs/validation/2026-11-27-pad-1643-bluetooth-on-the-machine/`. An attached card without a build is still
+  not offered.
 
 Worth telling the author (none of it blocks this): an option for extra preloads in `run-live.sh` would retire
 `pad-bt-game`; `run-live.sh` exits 2 without starting the game on an unknown `SPIKEBT_BACKEND`; on Spike 3 exit

@@ -15,6 +15,8 @@ html.bp-1100 .plg-halves { grid-template-columns: 1fr; }
 .plg-state.on { border-color: var(--accent-line); background: var(--accent-soft); }
 .plg-state.off { color: var(--ink-3); }
 .plg-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+/* PAD-1643: the machine over remote access, its own group under the card half */
+.plg-machine { display: flex; flex-direction: column; gap: 8px; border-top: 1px solid var(--line); padding-top: 8px; }
 .plg-adv { border-top: 1px solid var(--line); padding-top: 8px; }
 .plg-adv-hd { font: inherit; font-weight: 600; color: var(--ink-2); background: transparent; border: 0; padding: 2px 0;
   cursor: pointer; text-align: left; }

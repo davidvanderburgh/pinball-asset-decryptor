@@ -151,7 +151,11 @@ def details(platform=SPIKE2):
          'do not start, and switches itself off after a game that ended badly.', False),
         ('Kept on the machine', "Paired headphones and settings, in /dump/spikebt on the machine's own data. A "
          'card build does not touch them.', False),
-        ('To undo', 'Untick it and write the card: the folder is taken off and the script put back.', False),
+        ('To undo', 'Untick it and write the card, or Take it off the machine: the folder is taken off and the '
+         'script put back.', False),
+        ('Straight onto the machine', 'Put it on the machine now makes the same changes over remote access, with '
+         'no card to write: each file is written beside its place, checked, then moved into place, and the '
+         'machine restarts.', False),
     ]
     return tuple(rows)
 
@@ -634,8 +638,8 @@ def check_machine(machine):
         return answer[1] if isinstance(answer, tuple) else answer
     state = parse_status(sh(STATUS))
     if not state['on_card']:
-        return ("This machine's card has no Bluetooth headphones on it. Tick it here and write the card from "
-                'this project.')
+        return ("This machine's card has no Bluetooth headphones on it. Put it on the machine now with the "
+                'button here: there is no card to write.')
     what = 'spike-pinball-bluetooth %s is on the machine' % (state['release'] or '(a release this app did not put on)')
     if state['switched_off']:
         sh('rm -f ' + DISABLED)
@@ -647,3 +651,260 @@ def check_machine(machine):
     return '%s and switched on%s.' % (what, ', and its helper is running' if state['helper'] else
                                       '; its helper is not running, which is normal on a game version it does '
                                       'not know or with no Bluetooth adapter')
+
+
+# ---- PAD-1643: the same install, straight onto a running machine (David: "i don't want to have to re-build my
+# card to have bluetooth headphones on it. can we make a feature for updating the card over remote access to
+# enable bluetooth?").  A running machine has its system partition mounted (a Spike 3's already unlocked), so the
+# files a build would put on the card go on as files: written beside their place, checked by their sha1, moved
+# into place, read back.  The game's start-up script is read only when the machine starts, so it restarts.
+NOT_A_MACHINE = ('The machine at this address is not a Stern Spike 2 or Spike 3 machine this app knows, so '
+                 'Bluetooth headphones cannot be put on it.')
+_SAFE = re.compile(r'^[A-Za-z0-9._-]{1,64}$')
+NEW = '.pad-new'                                 # a file on its way: written beside its place under this name
+
+
+def _q(text):
+    return "'" + str(text).replace("'", "'\\''") + "'"
+
+
+def _msh(machine, script, timeout=120):
+    answer = machine.sh(script, timeout=timeout, check=False)
+    return answer if isinstance(answer, tuple) else (0, answer)
+
+
+def _mread(machine, path, limit=64 << 10):
+    try:
+        with machine.sftp.open(path, 'rb') as f:
+            data = f.read(limit + 1)
+    except (OSError, IOError):
+        return None
+    if len(data) > limit:
+        raise ExtrasError('A Bluetooth system file on the machine has an unsafe size.')
+    return data
+
+
+#: one question, answered in lines: what kind of machine, where its start-up script really is (PAD-1619: Stern's
+#: own updater leaves it a link into /spk/packages; the link stays and its file is the one rewritten), which of
+#: this app's own objects its card has, what is in the plugin's folder, and the room on its system partition
+PROBE = ('echo "arch $(uname -m)"; grep -q "Stern Pinball Spike 3" /etc/issue 2>/dev/null && echo spike3; '
+         'p=' + MONITOR + '; n=0; while [ -L "$p" ] && [ $n -lt 8 ]; do t=$(readlink "$p"); '
+         'case "$t" in /*) p=$t ;; *) p=$(dirname "$p")/$t ;; esac; n=$((n+1)); done; '
+         '[ -f "$p" ] && [ ! -L "$p" ] && echo "monitor $p"; '
+         'for f in ' + ' '.join((B.MENU_SO, B.SO, B.MODE_SO, WRAPPER)) + '; do [ -f "$f" ] && echo "have $f"; done; '
+         '[ -d ' + DIR + ' ] && { echo dir; for f in ' + DIR + '/* ' + DIR + '/.[!.]*; do '
+         '[ -e "$f" ] || [ -L "$f" ] || continue; if [ -f "$f" ] && [ ! -L "$f" ]; then echo "file ${f##*/}"; '
+         'else echo "odd ${f##*/}"; fi; done; }; '
+         'echo "free $(df -k / 2>/dev/null | tail -n 1)"; true')
+
+
+def probe_machine(machine):
+    """What a connected machine is and has: ``dict(platform, monitor, have, dir, names, free)``.  ExtrasError for
+    a machine that is not one the plugin goes on, or whose plugin folder holds something that is not a file."""
+    lines = [l.rstrip('\r') for l in _msh(machine, PROBE, 60)[1].splitlines()]
+    arch = next((l[5:].strip() for l in lines if l.startswith('arch ')), '')
+    monitor = next((l[8:].strip() for l in lines if l.startswith('monitor ')), '')
+    if 'spike3' in lines and arch == 'aarch64':
+        platform = SPIKE3
+    elif arch.startswith('armv7') and 'spike3' not in lines:
+        platform = SPIKE2
+    else:
+        raise ExtrasError(NOT_A_MACHINE)
+    if not monitor or not re.match(r'^/[A-Za-z0-9._/+-]{1,200}$', monitor) or '/../' in monitor:
+        raise ExtrasError(NOT_STOCK.replace("This card's", "This machine's"))
+    names = [l[5:] for l in lines if l.startswith('file ')]
+    if any(l.startswith('odd ') for l in lines) or any(not _SAFE.match(n) for n in names):
+        raise ExtrasError('The Bluetooth folder on the machine holds something this app does not know.')
+    free = None
+    words = next((l.split() for l in lines if l.startswith('free ')), [])
+    # busybox df: Filesystem 1K-blocks Used Available Use% Mounted (a long device name wraps: count from the end)
+    if len(words) >= 5 and words[-3].isdigit():
+        free = int(words[-3]) * 1024
+    return {'platform': platform, 'monitor': monitor, 'have': {l[5:] for l in lines if l.startswith('have ')},
+            'dir': 'dir' in lines, 'names': sorted(names), 'free': free}
+
+
+def _sha1s(machine, paths):
+    """``{path: sha1}`` of the files at *paths* on the machine (one that is not there is left out)."""
+    out = {}
+    paths = list(paths)
+    for k in range(0, len(paths), 20):
+        text = _msh(machine, 'sha1sum %s 2>/dev/null; true' % ' '.join(_q(p) for p in paths[k:k + 20]), 180)[1]
+        for line in text.splitlines():
+            words = line.split(None, 1)
+            if len(words) == 2 and re.match(r'^[0-9a-f]{40}$', words[0]):
+                out[words[1].strip().lstrip('*')] = words[0]
+    return out
+
+
+def plan_machine(machine, on):
+    """What :func:`to_machine` would do: ``dict(platform, tag, puts, removes, rmdir, script)``.  *puts* is
+    ``{path: (bytes, mode)}`` for only the files that differ from the machine's, *script* the start-up script's
+    ``(path, bytes)`` when it must change (None when it is right already).  ExtrasError when the machine cannot
+    take it (a plugin that is not installed on this computer is said that way too)."""
+    state = probe_machine(machine)
+    platform = state['platform']
+    s3 = platform == SPIKE3
+    have = state['have']
+    not_stock = NOT_STOCK.replace("This card's", "This machine's").replace('on it', 'on the machine')
+    script = _mread(machine, state['monitor'])
+    if not script:
+        raise ExtrasError(not_stock)
+    try:
+        if s3:
+            want_script = s3_monitor_text(script, on).encode('utf-8')
+        else:
+            buttons = B.SO in have and (B.has_block(script, B.BT_HOOK_LINES) or B.has_block(script, B.ALL_HOOK_LINES))
+            want_script = B.monitor_text(script, buttons, mode=B.MODE_SO in have, menu=B.MENU_SO in have,
+                                         bluetooth=on).encode('utf-8')
+    except ExtrasError:
+        raise ExtrasError(not_stock) from None
+    tag, want = '', {}
+    if on:
+        try:
+            tag, members = card_plugins.files(PLUGIN, ARCHES[platform])
+        except PluginError as e:
+            raise ExtrasError(str(e)) from None
+        want = {DIR + '/' + n: v for n, v in card_files(members, tag).items()}
+        if not s3:
+            want[WRAPPER] = (WRAPPER_TEXT.encode(), 0o755)
+    there = [DIR + '/' + n for n in state['names']]
+    got = _sha1s(machine, [p for p in want if p in there or p in have])
+    puts = {p: v for p, v in want.items() if got.get(p) != hashlib.sha1(v[0]).hexdigest()}
+    removes = [p for p in there if p not in want]            # off: all of it; on: a file of another release
+    if not on and WRAPPER in have:
+        removes.append(WRAPPER)
+    if on and puts and state['free'] is not None:
+        need = sum(len(d) + 4096 for d, _m in puts.values()) + MARGIN
+        if state['free'] < need:
+            raise ExtrasError("The machine's system partition has %.1f MB free and Bluetooth headphones needs "
+                              '%.1f MB.' % (state['free'] / 1e6, need / 1e6))
+    return {'platform': platform, 'tag': tag, 'puts': puts, 'removes': removes,
+            'rmdir': bool(not on and state['dir']),
+            'script': None if want_script == script else (state['monitor'], want_script)}
+
+
+def _changes(plan):
+    return bool(plan['puts'] or plan['removes'] or plan['rmdir'] or plan['script'])
+
+
+def machine_game_check(machine, platform, say=None):
+    """Whether the installed release's menu knows the game program the machine runs, as :func:`game_check` says
+    it of a card: ``dict(known, text)``, *known* None when it cannot be told.  A Spike 2 machine has no sha256
+    tool, so its game program is read over the connection (tens of MB).  Never raises."""
+    nothing = {'known': None, 'text': ''}
+    rec = card_plugins.installed(PLUGIN)
+    games = known_games(platform) if rec else None
+    if games is None or platform != SPIKE2:
+        return nothing
+    try:
+        if say:
+            say("Reading the machine's game program, to see whether this release knows it")
+        digest, size = hashlib.sha256(), 0
+        with machine.sftp.open('/games/game', 'rb') as f:
+            if hasattr(f, 'prefetch'):
+                f.prefetch()
+            while True:
+                chunk = f.read(1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > (512 << 20):
+                    return nothing
+                digest.update(chunk)
+    except Exception:                                       # noqa: BLE001 - a note only; the install is done
+        return nothing
+    if not size:
+        return nothing
+    if digest.hexdigest() in games:
+        return {'known': True, 'text': "This machine's game is one spike-pinball-bluetooth %s knows: %s."
+                % (rec['tag'], games[digest.hexdigest()])}
+    return {'known': False, 'text': (
+        "This machine's game program is not one spike-pinball-bluetooth %s knows, so the game will run as it "
+        'is, with no Bluetooth entry. It knows exact game versions only (%d of them for this kind of machine), '
+        'and a game program this app has changed (Music Mode rows, editions) is not one of them.'
+        % (rec['tag'], len(games)))}
+
+
+def to_machine(machine, on, log=None, restart=True):
+    """Put the installed release on *machine* (a connected ``remote_send`` machine), or take the plugin off it,
+    and restart it.  ``dict(result, platform, tag, game)``: *result* ``'done'``, or ``'already'`` when the
+    machine was that way (then nothing on its card is written and it is not restarted)."""
+    say = log or (lambda *_a: None)
+    on = bool(on)
+    plan = plan_machine(machine, on)
+    platform, tag = plan['platform'], plan['tag']
+    out = {'result': 'already', 'platform': platform, 'tag': tag, 'game': {'known': None, 'text': ''}}
+    doing = ('Putting spike-pinball-bluetooth %s on the machine' % tag if on
+             else 'Taking Bluetooth headphones off the machine')
+    if _changes(plan):
+        say(doing)
+        _rc, text = _msh(machine, 'mount -o remount,rw / 2>&1 && echo PAD_RW', 60)
+        if 'PAD_RW' not in text:
+            raise ExtrasError("The machine's system partition could not be opened for writing: %s"
+                              % text.strip()[-160:])
+        try:
+            puts = dict(plan['puts'])
+            if plan['script']:
+                puts[plan['script'][0]] = (plan['script'][1], 0o755)
+            staged = []
+            try:
+                if on:
+                    _msh(machine, 'mkdir -p %s %s' % (_q(DIR), _q(WRAPPER.rsplit('/', 1)[0])), 30)
+                for n, (path, (data, mode)) in enumerate(sorted(puts.items())):
+                    tmp = path + NEW
+                    with machine.sftp.open(tmp, 'wb') as f:
+                        f.write(data)
+                    staged.append((tmp, path, mode, hashlib.sha1(data).hexdigest()))
+                    say('%s: file %d of %d' % (doing, n + 1, len(puts)))
+                # every file checked where it was written, before any is moved into place
+                got = _sha1s(machine, [t for t, _p, _m, _s in staged])
+                bad = [p for t, p, _m, s in staged if got.get(t) != s]
+                if bad:
+                    raise ExtrasError('%s did not arrive on the machine as sent; nothing was changed.' % bad[0])
+            except BaseException:
+                if staged:
+                    _msh(machine, 'rm -f %s' % ' '.join(_q(t) for t, _p, _m, _s in staged), 30)
+                raise
+            script_path = plan['script'][0] if plan['script'] else None
+            move = [('chmod %o %s && chown 0:0 %s && mv -f %s %s' % (m, _q(t), _q(t), _q(t), _q(p)), p == script_path)
+                    for t, p, m, _s in staged]
+            # on: the files, then the script that starts them.  Off: the script first, then the files it named.
+            steps = [s for s, is_script in move if is_script != on]
+            steps += ['rm -f %s' % _q(p) for p in plan['removes']]
+            steps += [s for s, is_script in move if is_script == on]
+            if plan['rmdir']:
+                steps.append('rmdir %s' % _q(DIR))
+            _rc, text = _msh(machine, ' && '.join(steps + ['sync', 'echo PAD_PUT']), 180)
+            if 'PAD_PUT' not in text:
+                raise ExtrasError('The machine did not take the change: %s' % text.strip()[-200:])
+        finally:
+            _msh(machine, 'sync; mount -o remount,ro / 2>/dev/null; true', 60)
+        if _changes(plan_machine(machine, on)):
+            raise ExtrasError('The Bluetooth headphones files did not read back from the machine as written.')
+        out['result'] = 'done'
+    if on:
+        # his launcher's switched-off mark (after a game that ended badly) would keep a fresh install off
+        _msh(machine, 'rm -f ' + DISABLED, 30)
+        out['game'] = machine_game_check(machine, platform, say)
+    if out['result'] == 'done' and restart:
+        say('Restarting the machine')
+        machine.reboot()
+    return out
+
+
+def machine_said(res, on):
+    """The sentence the Plugins tab shows for :func:`to_machine`'s answer."""
+    if on:
+        what = 'spike-pinball-bluetooth %s' % res['tag']
+        text = ('The machine already has %s; nothing was changed.' % what if res['result'] == 'already' else
+                'The machine has %s now and is restarting; it is back in about a minute.' % what)
+        text += (" It uses the machine's own Bluetooth radio." if res['platform'] == SPIKE3
+                 else ' A Spike 2 machine needs a USB Bluetooth adapter plugged in.')
+        if res['game'].get('text'):
+            text += ' ' + res['game']['text']
+        return text
+    if res['result'] == 'already':
+        return 'The machine has no Bluetooth headphones on it; nothing was changed.'
+    return ('Bluetooth headphones are off the machine and it is restarting; it is back in about a minute. '
+            "Paired headphones and settings stay in the machine's own data.")

@@ -316,10 +316,16 @@ class PluginsTab(TabService):
         return plugin if plugin is not None and key in CARDS else None
 
     def on_show(self):
-        self.publish()
         for key in CARDS:
             if not self._releases.get(key, ('',))[0]:
-                self.refresh_releases(key)
+                # the list read last time, when it is recent: gitlab.com is not asked again each time the app
+                # starts (it allows a set number of requests an hour); Check for versions always asks
+                rows, fresh = card_plugins.kept_releases(card_plugins.PLUGINS[key])
+                if fresh:
+                    self._releases[key] = ('ok', rows)
+                else:
+                    self.refresh_releases(key)
+        self.publish()
 
     def on_project(self, folder):
         self.publish()
@@ -344,13 +350,17 @@ class PluginsTab(TabService):
         self.publish()
 
         def work():
+            # when it cannot be read now, the list read last time is still offered, under the reason
+            old = card_plugins.kept_releases(plugin)[0]
             try:
                 rows = card_plugins.releases(plugin)
                 got = ('ok', rows) if rows else ('Its author has published no release this app can use.', [])
+                if rows:
+                    card_plugins.keep_releases(plugin, rows)
             except card_plugins.PluginError as e:
-                got = (str(e).split('\n')[0], [])
+                got = (str(e).split('\n')[0], old)
             except Exception as e:                          # noqa: BLE001 - said on the card, never raised
-                got = ('The list of versions could not be read: %s' % e, [])
+                got = ('The list of versions could not be read: %s' % e, old)
 
             def done():
                 self._releases[key] = got

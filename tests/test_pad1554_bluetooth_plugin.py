@@ -1287,3 +1287,17 @@ def test_a_spike3_machine_keeps_its_pairings_over_remote_access(store, plugin, m
     other = S40_STOCK.replace('Trusted=true', 'Trusted=yes').encode()
     m = Live({BT.MONITOR: S3_STOCK.encode(), BT.S40: other}, arch='aarch64', spike3=True)
     assert BT.to_machine(m, True)['result'] == 'done' and m.files[BT.S40][0] == other and BT.S40_KEPT not in m.files
+
+
+def test_the_list_of_versions_is_kept_so_gitlab_is_not_asked_each_time(store, plugin):
+    fake, blobs, sums = plugin
+    assert P.kept_releases(fake) == ([], False)
+    rows = P.releases(fake, opener=Web({'v0.3.0': (blobs, sums), 'v0.4.0': release(b'two')}))
+    P.keep_releases(fake, rows, now=1000)
+    assert P.kept_releases(fake, now=1000 + 60) == (rows, True)                  # recent: not asked again
+    assert P.kept_releases(fake, now=1000 + P.RELEASES_FRESH + 1) == (rows, False)   # old: asked, and still shown
+    assert not (store / 'bluetooth').exists() and (store / 'bluetooth.releases.json').is_file()
+    P.install(fake, opener=Web({'v0.3.0': (blobs, sums)}))                       # an install does not lose it
+    assert P.kept_releases(fake, now=1000)[0] == rows
+    (store / 'bluetooth.releases.json').write_text('{"at": 1, "rows": [{"tag": "; rm", "title": "", "date": ""}]}')
+    assert P.kept_releases(fake) == ([], False)                                  # not one this app wrote

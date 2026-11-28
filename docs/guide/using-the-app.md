@@ -578,7 +578,7 @@ own menus, a volume for each headset, and cabinet speakers that can go quiet whi
 
 - **Spike 2** needs a USB Bluetooth adapter plugged into the machine. **Spike 3** uses the machine's own radio;
   its card must be unlocked with your own key, as for anything else written to a Spike 3 card.
-- **Which games.** The game versions its author lists on his project page. From v0.4 the menu finds what it
+- **Which games.** The game versions its author lists on his project page. Plugin versions 0.4 and newer find what the menu
   needs in the game each time the game starts, so a game program this app has changed (Music
   Mode rows, editions) can have the Bluetooth entry too. v0.3 knew exact game programs only: on a changed one
   it showed no Bluetooth entry at all, so update the plugin if that is what you see.

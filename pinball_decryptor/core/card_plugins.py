@@ -193,6 +193,44 @@ def releases(plugin, opener=None):
     return out
 
 
+# PAD-1647: gitlab.com allows a computer that is not signed in a number of requests an hour from its internet
+# address, so the list is not asked for again each time the app starts: the last one read is kept beside the
+# store (not in the plugin's folder, which an install replaces whole) and is good for RELEASES_FRESH seconds.
+RELEASES_FRESH = 6 * 3600
+
+
+def _releases_file(plugin):
+    return os.path.join(store_root(), plugin.key + '.releases.json')
+
+
+def keep_releases(plugin, rows, now=None):
+    """Remember *rows* (:func:`releases`' answer) as the last list read.  Never raises."""
+    import time
+    try:
+        os.makedirs(store_root(), exist_ok=True)
+        with open(_releases_file(plugin), 'w', encoding='utf-8') as f:
+            json.dump({'at': int(now if now is not None else time.time()),
+                       'rows': [{'tag': r['tag'], 'title': r['title'], 'date': r['date']} for r in rows]}, f)
+    except (OSError, KeyError, TypeError):
+        pass
+
+
+def kept_releases(plugin, now=None):
+    """``(rows, fresh)``: the last list read, newest first, and whether it is recent enough not to ask again.
+    ``([], False)`` when there is none or it is not one this app wrote."""
+    import time
+    try:
+        with open(_releases_file(plugin), encoding='utf-8') as f:
+            kept = json.load(f)
+        rows = [{'tag': _tag(r['tag']), 'title': str(r['title'])[:120], 'date': str(r['date'])[:10],
+                 'tested': r['tag'] in plugin.pinned} for r in kept['rows']]
+        age = (now if now is not None else time.time()) - int(kept['at'])
+    except (OSError, ValueError, KeyError, TypeError, PluginError):
+        return [], False
+    rows.sort(key=lambda r: tag_key(r['tag']), reverse=True)
+    return rows, bool(rows) and 0 <= age < RELEASES_FRESH
+
+
 # ------------------------------------------------------------------ checking a release
 def parse_sums(text):
     """``{file name: sha256}`` from a ``sha256sum`` listing; lines that are not one are refused."""

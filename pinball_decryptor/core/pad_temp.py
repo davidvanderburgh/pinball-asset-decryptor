@@ -71,6 +71,7 @@ NAMES = (
     _n("pad_network_", STERN, "network settings hand-over"),
     _n("pad_srcfind_", STERN, "Find originals video staging"),
     _n("pad_spk_", STERN, "Spike 3 speaker staging"),
+    _n("pad_spk2_", STERN, "Spike 2 package unpacking"),
     _n("pad_s3_snd_", STERN, "Spike 3 sound staging"),
     _n("image_sound_selftest_", STERN, "Spike 3 sound self-test"),
     _n("pad-modes-", STERN, "Modes tab scratch"),

@@ -1,0 +1,60 @@
+card: remote access on=True, lets in this PC=True
+P2 offset/size 12582912 352321536
+twin: Bluetooth headphones: spike-pinball-bluetooth v0.3.0 is on the card. A Spike 2 machine needs a USB Bluetooth adapter.
+twin: plugin on=True release=v0.3.0
+  root: ro (as mounted for the machine)
+  boot hook: /etc/rc5.d/S30sshd -> ../init.d/sshd
+release on this PC: v0.3.0 (tested with the app: True)
+mounted over the card, so left out of every comparison: /data, /dev, /dump, /etc/avahi/services, /games, /proc, /proc/sys/kernel/core_pattern, /run, /sbin/halt.sysvinit, /usr/local/bin/boot_display, /usr/local/bin/dprint, /var/volatile
+VERDICT the machine starts as the card without the plugin, mounted read-only: PASS  (4484 files and folders, root ro)
+VERDICT before: its game_monitor starts the game directly: PASS  (STANDIN started as: /games/standin  | STANDIN LD_PRELOAD=)
+machine: godzilla_pro/game
+VERDICT Check it on the machine, before: PASS  (This machine's card has no Bluetooth headphones on it. Put it on the machine now with the button here: there is no card to write.)
+VERDICT the machine is told apart by its own answers: PASS  (platform stern-spike2, script /etc/init.d/game_monitor, 182.6 MB free)
+    app: Putting spike-pinball-bluetooth v0.3.0 on the machine
+    app: Reading the machine's game program, to see whether this release knows it
+    app: Restarting the machine
+    said on the page: The machine has spike-pinball-bluetooth v0.3.0 now and is restarting; it is back in about a minute. A Spike 2 machine needs a USB Bluetooth adapter plugged in. This machine's game is one spike-pinball-bluetooth v0.3.0 knows: Godzilla Pro – v1.16.0.
+VERDICT Put it on the machine now: PASS  (result done, release v0.3.0, 12.7 s)
+VERDICT the restart was asked for, once: PASS
+VERDICT the machine's real game program is one the release knows: PASS  (This machine's game is one spike-pinball-bluetooth v0.3.0 knows: Godzilla Pro – v1.16.0.)
+    the card straight after: mounted rw (while the running game_monitor still holds its replaced script open the card cannot go back to read-only; the restart ends that)
+VERDICT the launcher's switched-off mark is gone: PASS
+VERDICT the machine's card now equals one the card-write path made, file for file (bytes, mode, owner): PASS  (4498 entries compared; differ: none)
+    added: /usr/local/bin/pad-bt-game, /usr/local/spikebt, /usr/local/spikebt/LICENSE, /usr/local/spikebt/NOTICE.md, /usr/local/spikebt/SHA256SUMS, /usr/local/spikebt/btusb.ko, /usr/local/spikebt/enabled, /usr/local/spikebt/menu-elf.txt, /usr/local/spikebt/menu.so, /usr/local/spikebt/pad-release, /usr/local/spikebt/radio-start.sh, /usr/local/spikebt/rollback.sh, /usr/local/spikebt/run-live.sh, /usr/local/spikebt/spikebt
+    changed: /etc/init.d/game_monitor
+VERDICT only the plugin folder, the wrapper and game_monitor changed: PASS
+VERDICT the author's own SHA256SUMS checks out on the machine: PASS  (9 files OK)
+VERDICT nothing left on its way: PASS
+VERDICT once the old game_monitor has ended the card is read-only again: PASS
+VERDICT after the restart game_monitor runs the launcher with the game: PASS  (+ /usr/local/spikebt/run-live.sh /games/standin -> STANDIN started as: /games/standin  | STANDIN LD_PRELOAD=)
+    game_monitor trace (tail):
+      + ulimit -c unlimited
+      + echo /dump/core
+      + '[' true ']'
+      + PADPRE=
+      + '[' -f /usr/local/codeselect/padmenu.so ']'
+      + '[' -f /usr/local/bin/pad-buttons.so ']'
+      + '[' -f /usr/local/spikebt/enabled ']'
+      + '[' -x /usr/local/spikebt/run-live.sh ']'
+      + '[' -n '' ']'
+      + /usr/local/spikebt/run-live.sh /games/standin
+      Unsupported kernel; Bluetooth unchanged
+VERDICT Check it on the machine, after: PASS  (spike-pinball-bluetooth v0.3.0 is on the machine and switched on; its helper is not running, which is normal on a game version it does not know or with no Bluetooth adapter.)
+    app: Reading the machine's game program, to see whether this release knows it
+VERDICT Put it on again changes nothing and does not restart: PASS  (The machine already has spike-pinball-bluetooth v0.3.0; nothing was changed. A Spike 2 machine needs a USB Bluetooth adapter plugged in. This machine's game is one spike-pinball-bluetooth v0.3.0 knows: Godzilla Pro – v1.16.0.)
+    app: Taking Bluetooth headphones off the machine
+    app: Restarting the machine
+VERDICT Take it off the machine puts the card back exactly as it was: PASS  (differ from the card before: none)
+VERDICT after that restart game_monitor starts the game directly again: PASS
+VERDICT a linked game_monitor is followed to its file: PASS  (/spk/packages/spike-1.16.0/etc/init.d/game_monitor)
+    app: Putting spike-pinball-bluetooth v0.3.0 on the machine
+    app: Reading the machine's game program, to see whether this release knows it
+    app: Restarting the machine
+VERDICT on such a card the link stays and its file gets the block: PASS
+VERDICT and its game_monitor runs the launcher: PASS
+VERDICT with the plugin not on this PC it is refused and the machine untouched: PASS
+ALL 22 CHECKS PASSED
+proof.py exit: 0
+VERDICT the card's system partition is a clean filesystem afterwards: PASS  (/var/tmp/pad1643/p2.img: 4521/86016 files (0.9% non-contiguous), 156307/344064 blocks)
+VERDICT the app's card inspector reads the machine's card as carrying the plugin: PASS  (spike-pinball-bluetooth v0.3.0, started with the game)

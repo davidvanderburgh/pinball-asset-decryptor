@@ -839,9 +839,10 @@ class SternRevertPipeline(BasePipeline):
 #: Spike 2 machine joined is one of those settings (/data/nv/<game>/NVM): remote access is on the card, and the
 #: machine is on no network to be reached over until it joins the Wi-Fi again from its own menu.
 FORGETS_WIFI = ("The card was written without its own settings, so the machine starts as new: if it is on Wi-Fi, it "
-                "has forgotten your Wi-Fi network. Join it again from the machine's own menu, then Find my machine "
-                "on the Network tab finds it. A machine on a network cable needs nothing. (Keep the SD card's "
-                "settings, audits and high scores, in this dialog, keeps it next time.)")
+                "has forgotten your Wi-Fi network. Join it again from the machine's own menu, switch the machine "
+                "off and on, then Find my machine on the Network tab finds it. A machine on a network cable "
+                "needs nothing. (Keep the SD card's settings, audits and high scores, in this dialog, keeps it "
+                "next time.)")
 
 
 class SternFlashImagePipeline(BasePipeline):

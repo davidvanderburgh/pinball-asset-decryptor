@@ -641,7 +641,8 @@ class NetworkTab(TabService):
                                 "starting up, on the same network as this computer (not a guest network), and was "
                                 "its card set up for remote access? A machine on Wi-Fi whose card was just "
                                 "written whole, without keeping the card's settings, has forgotten your Wi-Fi "
-                                "network: join it again from the machine's own menu." % looked), scan_kind='err')
+                                "network: join it again from the machine's own menu, then switch the machine off and "
+                                "on." % looked), scan_kind='err')
 
     @rpc
     def use_machine(self, address):

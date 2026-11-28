@@ -267,3 +267,43 @@ def test_spike3_reconstruct_joins_split_parts(tmp_path):
     out = tmp_path / "f.spk"
     S3.reconstruct_spk(str(tmp_path / "f.spk.002.000"), str(out))
     assert out.read_bytes() == blob
+
+
+# --------------------------------------------------------------------------
+# PAD-1644: a package is not a card (Modes, the emulator, Write)
+# --------------------------------------------------------------------------
+def test_package_says_it_is_not_a_card(tmp_path):
+    for name in ("iron_maiden_le-1_18_0.spk.zip", "x-1_00_0.spk", "x-1_00_0.spk.002.001"):
+        why = S2.not_a_card_words(str(tmp_path / name))
+        assert why.startswith(name + " is Stern's game code download")
+        assert "SD card image" in why and "download this game's SD card image" in why
+    for name in ("iron_maiden_le-1_18_0.Release.16G.sdcard.raw", "card.img", "", None):
+        assert S2.not_a_card_words(name) == ""
+    # a package renamed past its .spk name is told by its first bytes, when asked to look
+    img, _ = build_package()
+    renamed = write_zip(str(tmp_path / "renamed.zip"), img)
+    assert S2.not_a_card_words(renamed) == ""
+    assert "game code download" in S2.not_a_card_words(renamed, look=True)
+
+
+def test_modes_card_reader_names_the_package(tmp_path):
+    from pinball_decryptor.plugins.stern import mode_tryit as MT
+    img, _ = build_package()
+    z = write_zip(str(tmp_path / "iron_maiden_le-1_18_0.spk.zip"), img)
+    with pytest.raises(MT.TryItError) as e:
+        MT.card_title(z)
+    assert "not an SD card image" in str(e.value)
+    assert "no games partition" not in str(e.value)
+    renamed = write_zip(str(tmp_path / "renamed.zip"), img)
+    with pytest.raises(MT.TryItError, match="not an SD card image"):
+        MT.card_title(renamed)
+
+
+def test_write_refuses_a_package_original(tmp_path):
+    from pinball_decryptor.plugins.stern.manufacturer import SternManufacturer
+    img, _ = build_package()
+    z = write_zip(str(tmp_path / "iron_maiden_le-1_18_0.spk.zip"), img)
+    m = SternManufacturer()
+    m.set_era("spike2")
+    why = m.write_preflight(z, str(tmp_path))
+    assert why and "not an SD card image" in str(why)

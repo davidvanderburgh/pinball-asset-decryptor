@@ -1712,3 +1712,23 @@ def test_the_scenes_tab_edits_have_their_own_tick_under_the_opt_in(tmp_path, mon
     old = dict(man)
     old.pop("scene_edits")                                           # a set from before the tick
     assert emulate_core.overrides_reason(old, str(card), str(tmp_path), "fp") == ""
+
+
+def test_start_refuses_a_game_code_package(tmp_path, monkeypatch):
+    """PAD-1644: Stern's .spk.zip download is not a card: Start says so and what to use,
+    before any rig is claimed (the rig's own guard said "no games partition")."""
+    from pinball_decryptor.webui import emulate_rig
+    from pinball_decryptor.core import rigslot
+    monkeypatch.setattr(emulate_rig, "rig_available", lambda: True)
+    claims = []
+    monkeypatch.setattr(rigslot, "claim_for_run", lambda *a, **k: claims.append(1))
+    pkg = tmp_path / "iron_maiden_le-1_18_0.spk.zip"
+    pkg.write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    with web_app(tmp_path, mfr="stern") as w:
+        svc = _svc(w)
+        w.run(lambda: w.window.emulate_card_var.set(str(pkg)))
+        w.call(NS + ".toggle")
+        assert svc.last_refusal.startswith(
+            "iron_maiden_le-1_18_0.spk.zip is Stern's game code download")
+        assert "SD card image" in svc.last_refusal
+        assert claims == []

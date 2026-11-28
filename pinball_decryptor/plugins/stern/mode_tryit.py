@@ -132,6 +132,10 @@ def card_title(card):
     title". Only when no ``.sidx`` parses does the one title directory decide."""
     from .explorer import CardImage
     from .info import index_entries_name, other_image_path, version_from_filename
+    from .spike2_spk import not_a_card_words
+    why = not_a_card_words(card)        # PAD-1644: Stern's game code download, not a card
+    if why:
+        raise TryItError(why)
     try:
         img = CardImage(card)
     except OSError as e:
@@ -155,6 +159,9 @@ def card_title(card):
                 return game, version, p.index
             version = version_from_filename(name)[0] if name else None
             return dirs[0] if len(dirs) == 1 else "", version or "", p.index
+    why = not_a_card_words(card, look=True)
+    if why:
+        raise TryItError(why)
     raise TryItError("%s is not a Spike 2 card image this can read (no games partition)."
                      % os.path.basename(card))
 

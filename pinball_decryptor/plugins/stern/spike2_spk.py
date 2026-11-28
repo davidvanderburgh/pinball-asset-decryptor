@@ -112,6 +112,27 @@ def is_spike2_spk(path):
     return package_kind(path) == "spike2"
 
 
+def is_package_name(path):
+    """True when *path* is NAMED like a Stern game code package (``.spk.zip``, ``.spk``
+    or a split part), either era.  Name only: it never opens the file, so the UI may ask."""
+    low = os.path.basename(str(path or "")).lower()
+    return low.endswith(".spk.zip") or low.endswith(".spk") or bool(_SPLIT.match(low))
+
+
+def not_a_card_words(path, look=False):
+    """PAD-1644: why a Stern game code package cannot stand in for an SD card image, or
+    ``""`` when *path* is not one.  Extract reads a package in full (PAD-1641), but Modes,
+    the emulator and Write all work on the game's SD card image: a package holds the game's
+    files and Stern's program, never a card's partitions.  *look* also reads the file's
+    first bytes (a package renamed past its ``.spk`` name), so never on the UI thread."""
+    if not path or not (is_package_name(path) or (look and package_kind(path))):
+        return ""
+    return ("%s is Stern's game code download (a .spk package), not an SD card image. "
+            "Extract reads it, but Modes, the emulator and Write work on SD card images: "
+            "download this game's SD card image from Stern and use that instead."
+            % os.path.basename(path))
+
+
 def game_key(path):
     """The Spike 2 game key for a package: a known title's when the name
     hints at one, else the generic Spike 2 key (as :func:`.formats.detect_game`

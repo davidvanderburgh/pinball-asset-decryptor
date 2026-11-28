@@ -3301,6 +3301,13 @@ class EmulateTab(EmulateLogMixin, TabService):
         if self._backup and self._backup_probed == self._card():
             self._refuse_start(self._backup)
             return
+        # PAD-1644: Stern's game code download (.spk.zip) is not a card: say so
+        # here, before a rig is claimed, rather than the rig's "no games partition"
+        from ...plugins.stern.spike2_spk import not_a_card_words
+        why = not_a_card_words(self._card())
+        if why:
+            self._refuse_start(why)
+            return
         if not rig.rig_available():
             self._refuse_start("the emulator is not set up on this PC; use "
                                "Check setup on the Emulate tab")

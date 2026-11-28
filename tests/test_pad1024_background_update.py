@@ -816,6 +816,9 @@ def _ready_v999(w, staged):
     w.run(w.app._offer_update, "9.9.9", "u", _installer())
     assert _until(w, lambda: "v9.9.9 is ready" in (_banner(w) or {}).get(
         "text", ""))
+    # the check that found it was a while ago (PAD-1646: a click within a
+    # minute of the feed's last answer does not ask it again)
+    w.app._update_offer_at = None
 
 
 def test_restart_gets_a_release_published_since(tmp_path, staged):
@@ -829,8 +832,9 @@ def test_restart_gets_a_release_published_since(tmp_path, staged):
         assert staged["closed"] == 1
         assert staged["launched"] == [str(staged["dir"] / (WIN % "9.9.10"))]
         assert staged["downloads"][-1].endswith(WIN % "9.9.10")
-        # asked at the click, and again once 9.9.10 was ready
-        assert len(staged["checks"]) == 2
+        # asked at the click; 9.9.10 was ready within the minute that
+        # answer stands for, so not again (PAD-1646)
+        assert len(staged["checks"]) == 1
         texts = [e["text"] for e in w.window.log_history()]
         assert any("v9.9.10 has been released since v9.9.9" in t
                    for t in texts)

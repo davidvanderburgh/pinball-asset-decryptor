@@ -40,6 +40,7 @@ def test_a_whole_card_with_remote_access_and_fresh_settings_says_the_wifi_is_for
     said, done = _flash(tmp_path, monkeypatch, True)
     assert said and done == [True]
     assert "forgotten your Wi-Fi network" in PIPE.FORGETS_WIFI and "machine's own menu" in PIPE.FORGETS_WIFI
+    assert "off and on" in PIPE.FORGETS_WIFI
 
 
 @pytest.mark.parametrize("remote, kwargs", [

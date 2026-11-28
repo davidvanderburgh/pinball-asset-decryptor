@@ -148,7 +148,8 @@ class FlashDialog:
     #: comes up with none: remote access on, and nothing to reach it over.  Dustin's Iron Maiden vanished that way.
     NET_WIFI_NOTE = ("Your machine's own Wi-Fi network is not one of them: the machine keeps it with its settings on "
                      "the SD card. Tick Keep the SD card's settings, audits and high scores as well, or the machine "
-                     "has to join your Wi-Fi again from its own menu before it can be found.")
+                     "has to join your Wi-Fi again from its own menu, and be switched off and on, before it "
+                     "can be found.")
     MENU_NOTE_BUILD = ("A freshly built image has never been on this card, "
                        "so the whole of it has to be written.")
     MENU_NOTE_FRESH = ("This card was only just built or updated, so no SD "

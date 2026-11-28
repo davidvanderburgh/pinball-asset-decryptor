@@ -79,11 +79,23 @@ function OnYourCards({ p, s }) {
     ${p.error ? html`<p role="alert" class="err-ink">${p.error}</p>` : null}
     <span class="small muted">${p.needs}</span>
     ${p.game_note ? html`<${Note} kind=${p.game_kind === "warn" ? "warn" : "ok"}>${p.game_note}<//>` : null}
-    ${p.address ? html`<div class="plg-row">
-      <${Button} size="sm" disabled=${!!p.busy || s.running}
-        title="Asks the machine over remote access whether the plugin is on it and switched on. Its launcher switches itself off after a game that ended badly; this switches it back on."
-        onClick=${() => call("plugins.check_machine", p.key)}>Check it on the machine<//>
-      <span class="small muted">The machine at ${p.address} (Network tab)</span></div>` : null}
+    ${p.address ? html`<div class="plg-machine">
+      <div class="plg-half-hd"><b>On your machine</b>
+        <span class="muted small">The machine at ${p.address} (Network tab), over remote access: no card to write</span></div>
+      <div class="plg-row">
+        <${Button} size="sm" kind="primary" disabled=${!!p.busy || s.running || !p.installed || !p.offered}
+          title=${p.installed ? "Puts the version installed on this computer on the machine's card over remote access, the same changes a card write makes. The machine restarts."
+            : "Install the plugin on this computer first: the machine gets the version installed here."}
+          onClick=${() => call("plugins.put_on_machine", p.key)}>Put it on the machine now<//>
+        <${Button} size="sm" disabled=${!!p.busy || s.running}
+          title="Asks the machine over remote access whether the plugin is on it and switched on. Its launcher switches itself off after a game that ended badly; this switches it back on."
+          onClick=${() => call("plugins.check_machine", p.key)}>Check it on the machine<//>
+        <${Button} size="sm" disabled=${!!p.busy || s.running || !p.offered}
+          title="Takes the plugin's folder off the machine's card and puts its start-up script back, over remote access. The machine restarts. Paired headphones stay in the machine's own data."
+          onClick=${() => call("plugins.take_off_machine", p.key)}>Take it off the machine<//>
+      </div>
+      <span class="small muted">The machine restarts when the plugin is put on or taken off (about a minute).</span>
+    </div>` : null}
     <${Advanced} title="Exactly what it changes on the card">
       <table class="plg-fields">
         <tbody>${(p.details || []).map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th>

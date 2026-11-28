@@ -547,7 +547,7 @@ Optional add-ons that other people made and publish themselves. A plugin is not 
 install one, the app downloads the version you pick from its author's own project and keeps it on this
 computer beside your settings, so updating the app leaves it installed.
 
-Each plugin has two halves:
+Each plugin has these parts:
 
 - **On this computer.** The versions its author has published, newest first. The one marked *tested with this
   app* is the version this release of the app was proven with.
@@ -557,6 +557,10 @@ Each plugin has two halves:
   - **Remove** takes it off this computer; cards already written keep it.
 - **On your cards.** Tick it for the open project, then Write: cards written from that project carry it.
   Untick it and Write again to take it off. *Exactly what it changes on the card* lists every file.
+- **On your machine.** Shown when remote access is set up (Network tab). **Put it on the machine now** makes
+  the same changes on the machine's card over your network, with no card to write, and **Take it off the
+  machine** undoes them. The machine restarts either way (about a minute); the game, its settings and high
+  scores stay as they are. The open project's tick follows, so a card you write from it later matches.
 
 ### Bluetooth headphones
 

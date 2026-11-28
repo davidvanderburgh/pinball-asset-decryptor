@@ -228,6 +228,18 @@ def _read(machine, path):
         return None
 
 
+def _real(machine, path):
+    """The file *path* names on the machine once its own links are followed (PAD-1619: Stern's updater leaves
+    game_monitor a link into /spk/packages).  A rewrite goes to that file, so the link stays (PAD-1643: moving a
+    new file onto *path* itself replaced the link)."""
+    import re
+    rc, out = _sh(machine, 'p=%s; n=0; while [ -L "$p" ] && [ $n -lt 8 ]; do t=$(readlink "$p"); '
+                           'case "$t" in /*) p=$t ;; *) p=$(dirname "$p")/$t ;; esac; n=$((n+1)); done; '
+                           '[ -f "$p" ] && [ ! -L "$p" ] && echo "real $p"' % _q(path), 30)
+    real = next((l[5:].strip() for l in out.splitlines() if l.startswith('real ')), '')
+    return real if re.match(r'^/[A-Za-z0-9._/+-]{1,200}$', real) and '/../' not in real else path
+
+
 def plan_machine(machine, *, wifi=None, buttons=None, stern_module=None):
     """What :func:`to_machine` would do: ``(puts, links, removes)``, *puts* ``{path: (bytes, mode)}`` only for
     files that differ from what the machine has.  Raises ExtrasError for a machine that cannot take it."""
@@ -268,7 +280,7 @@ def plan_machine(machine, *, wifi=None, buttons=None, stern_module=None):
             raise ExtrasError(remote_buttons.NOT_STOCK)
         want = remote_buttons.monitor_text(script, on, mode=remote_buttons.MODE_SO in have,
                                            menu=remote_buttons.MENU_SO in have).encode('utf-8')
-        puts[remote_buttons.MONITOR] = (want, 0o755)
+        puts[_real(machine, remote_buttons.MONITOR)] = (want, 0o755)
         if on:
             puts[remote_buttons.SO] = (remote_buttons.shim_bytes(), 0o755)
         elif remote_buttons.SO in have:

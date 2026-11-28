@@ -179,6 +179,74 @@ class PluginsTab(TabService):
                 machine.close()
         return self._start(key, 'Asking the machine at %s' % address, work, lambda text: text)
 
+    def _to_machine(self, key, on):
+        """PAD-1643: put plugin *key* on the machine the Network tab knows, or take it off, over remote access:
+        no card is written.  The machine restarts, so it is asked first."""
+        plugin = self._plugin(key)
+        address = self._address()
+        card = CARDS[key]['card'] if plugin is not None else None
+        if plugin is None or not address or not hasattr(card, 'to_machine') or self._busy.get(key) \
+                or self.get('running'):
+            return False
+        if on and card_plugins.installed(plugin) is None:
+            self._said[key] = ('Install %s on this computer first (the Install button on the left): the machine '
+                               'gets the version installed here.' % plugin.name, 'err')
+            self.publish()
+            return False
+        title = 'Put it on the machine now' if on else 'Take it off the machine'
+        ask = ('Put %s %s on the machine at %s now?' % (plugin.name, card_plugins.installed(plugin)['tag'], address)
+               if on else 'Take %s off the machine at %s now?' % (plugin.name, address))
+        if not compat.messagebox.askyesno(
+                title, ask + "\n\nOnly the machine's system files change: the game, its settings and high scores "
+                'stay as they are. The machine restarts when it is done (about a minute), so a game being played '
+                'ends.', icon='warning'):
+            return False
+        project = self._project()
+        try:
+            choice = CARDS[key]['load'](project) if os.path.isdir(project or '') else None
+        except card_extras.ExtrasError:
+            choice = None
+        ticked = bool(choice and choice['enabled'])
+
+        def work(say):
+            from ...core import remote_send
+            try:
+                machine = remote_send.connect(address)
+            except remote_send.SendError as e:
+                raise card_plugins.PluginError(str(e)) from None
+            try:
+                text = card.machine_said(card.to_machine(machine, on, log=say), on)
+            except (card_extras.ExtrasError, remote_send.SendError) as e:
+                raise card_plugins.PluginError(str(e)) from None
+            except (OSError, EOFError) as e:
+                raise card_plugins.PluginError('The connection to the machine at %s was lost (%s). Check it on '
+                                               'the machine, then try again.' % (address, e)) from None
+            finally:
+                machine.close()
+            # the project follows the machine, as Turn on remote buttons does: the next card written or sent from
+            # it must not undo what was just done
+            if os.path.isdir(project or '') and ticked != on and project == self._project():
+                try:
+                    CARDS[key]['save'](project, on)
+                    text += (' This project is ticked for it now, so a card written from it carries it too.' if on
+                             else ' This project is unticked for it now, so a card written from it leaves it off.')
+                except card_extras.ExtrasError:
+                    text += (' This project could not be ticked for it: tick it above, or a card written from '
+                             'this project will not carry it.' if on else '')
+            return text
+        return self._start(key, ('Putting %s on the machine at %s' if on else 'Taking %s off the machine at %s')
+                           % (plugin.name, address), work, lambda text: text)
+
+    @rpc
+    def put_on_machine(self, key):
+        """Put the installed release on the machine over remote access, with no card to write (asked first)."""
+        return self._to_machine(key, True)
+
+    @rpc
+    def take_off_machine(self, key):
+        """Take the plugin off the machine over remote access (asked first)."""
+        return self._to_machine(key, False)
+
     def publish(self):
         project = self._project()
         self.set(project=project, store=card_plugins.store_root(),

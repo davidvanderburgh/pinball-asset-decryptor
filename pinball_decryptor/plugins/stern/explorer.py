@@ -69,13 +69,28 @@ PREVIEW_CAP = 256 * 1024
 
 def _extent_writes(reader, node, file_off, buf):
     """``[(disk_offset, bytes), ...]`` placing *buf* at *file_off* within
-    *node*'s file, split across whatever extents that range spans."""
-    out = []
-    pos = 0
-    for doff, n in reader.disk_ranges(node, file_off, len(buf)):
-        out.append((doff, buf[pos:pos + n]))
-        pos += n
-    return out
+    *node*'s file, split across whatever extents that range spans.
+
+    PAD-1648: a file this app's own Build grew onto the card (debugfs) can
+    have a HOLE, a block of zeros left unallocated: Iron Maiden LE's grown
+    game program had one at 0x60b000, and the staged Defaults then failed
+    with "file offset 0x60b000 not allocated".  Zeros over a hole need no
+    write (the file already reads as them, :meth:`Ext4Reader.place`); only
+    other bytes there raise :class:`HoleWriteError`, for the caller to write
+    the file whole instead."""
+    writes, held = reader.place(node, file_off, buf)
+    if held:
+        raise HoleWriteError(held[0][0])
+    return writes
+
+
+class HoleWriteError(Exception):
+    """Bytes other than zeros land where a card file has no block (a hole),
+    so they can't be written in place.  ``.file_off`` is the first one."""
+
+    def __init__(self, file_off):
+        self.file_off = file_off
+        super().__init__("file offset 0x%x not allocated" % file_off)
 
 
 @dataclass
@@ -581,7 +596,15 @@ class CardImage:
                 "(pad or trim the file, or allow the file to be resized)"
                 % (len(new), path, node["size"]))
 
-        writes = _extent_writes(reader, node, 0, new) if new else []
+        try:
+            writes = _extent_writes(reader, node, 0, new) if new else []
+        except HoleWriteError:
+            # PAD-1648: the new bytes put something other than zeros in a
+            # hole of the file on the card, which can't be filled in place:
+            # the platform's filesystem driver writes the file whole (the
+            # route a resize takes; it allocates the blocks and refreshes the
+            # .sidx record the same way).
+            return self._replace_through_driver(part_index, path, new)
 
         # Refresh the file's validation record (HMAC-SHA1 + MD5) so the card
         # still passes Stern's SD validation.  Files the manifest doesn't
@@ -609,6 +632,23 @@ class CardImage:
                 wf.seek(doff)
                 wf.write(chunk)
         return len(new), refreshed
+
+    def _replace_through_driver(self, part_index, path, new):
+        """*new* over the file at *path* written whole by the platform's ext4
+        driver (:meth:`_resize_file`), for a same-size replace that can't go
+        in place because the file has a hole the new bytes don't leave zero."""
+        import tempfile
+        fd, tmp = tempfile.mkstemp(prefix="pad_replace_", suffix=".bin")
+        try:
+            with os.fdopen(fd, "wb") as f:
+                f.write(new)
+            n, refreshed = self._resize_file(part_index, path, tmp, len(new))
+        finally:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        return n, refreshed
 
     # ---- game firmware (adjustment defaults) ---------------------------------
     def find_firmwares(self):

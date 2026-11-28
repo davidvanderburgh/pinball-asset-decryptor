@@ -6950,6 +6950,7 @@ class App:
         """The check found *version*: banner it, and with the background
         switch on, start fetching it."""
         self._update_offer = (version, url, installer)
+        self._update_offer_at = time.monotonic()
         bg = getattr(self, "_bg_update", None)
         if bg and bg["version"] == version:
             # a re-check finding the same version: the download already
@@ -6982,6 +6983,10 @@ class App:
               "path": dest, "stage": "downloading", "pct": None,
               "cancel": threading.Event(), "staged": None,
               "how": self._staging_for(installer)}
+        # PAD-1646: where the new version is got ready - beside the app
+        # when this run is elevated, else in the user's own folder
+        bg["stage_dir"] = (self._stage_dir() if bg["how"] == "windows"
+                           else None)
         self._bg_update = bg
         self._show_background_update(bg)
         total = int(installer.get("size") or 0)
@@ -7065,17 +7070,36 @@ class App:
         (the disk image), or None - the download is all there is to do
         ahead (an AppImage, a source checkout)."""
         kind = (installer or {}).get("kind")
-        if kind == "windows-installer" and update_slots.installed_app_dir():
+        app_dir = update_slots.installed_app_dir()
+        if kind == "windows-installer" and app_dir:
             # PAD-1563: the app starts unelevated, and the copy beside the
-            # install (Program Files) and the swap need Administrator; the
-            # setup exe asks for it itself, with one UAC prompt, at the click
+            # install (Program Files) needs Administrator.  PAD-1646: so an
+            # unelevated run gets the version ready in the user's own
+            # folder (core/update_slots.user_stage_dir), from the changed
+            # files - the setup exe asks for Administrator to run at all -
+            # and the Restart click asks once, for the swap.  With no such
+            # folder or no file list, the setup exe at the click as before
             from .core.admin import is_admin
-            if not is_admin():
+            if not is_admin() and not (
+                    installer.get("delta")
+                    and update_slots.user_stage_dir(app_dir)):
                 return None
             return "windows"
         if kind == "macos-dmg" and sys.platform == "darwin":
             return "macos"
         return None
+
+    def _stage_dir(self):
+        """The folder this run gets a new version ready in (Windows):
+        ``<app>.next`` when elevated, else the user's own staging folder
+        (PAD-1646)."""
+        from .core.admin import is_admin
+        app_dir = update_slots.installed_app_dir()
+        if not app_dir:
+            return None
+        if is_admin():
+            return update_slots.next_dir(app_dir)
+        return update_slots.user_stage_dir(app_dir)
 
     def _stage_update(self, bg, progress_cb=None):
         """Worker thread: install the downloaded update beside the running
@@ -7083,6 +7107,11 @@ class App:
         *progress_cb* is told how far the Windows install is, 0-100."""
         if bg["how"] == "windows":
             app_dir = update_slots.installed_app_dir()
+            if bg.get("stage_dir") != update_slots.next_dir(app_dir):
+                # an unelevated run (PAD-1646): the setup exe cannot be run
+                # into a folder from here, so the download is all there is
+                # and Restart to update runs it
+                return None, None
             if update_slots.staged_install_ok(app_dir, bg["version"]):
                 return update_slots.next_dir(app_dir), None
             ok, info = update_slots.stage_install(
@@ -7112,12 +7141,13 @@ class App:
             # swap in is still there, and without the setup exe on disk it
             # would fail the same way again
             return None, "switching to it in place did not work last time"
-        if update_slots.staged_install_ok(app_dir, version):
-            return update_slots.next_dir(app_dir), "it was ready already"
+        stage_dir = bg.get("stage_dir") or update_slots.next_dir(app_dir)
+        if update_slots.staged_install_ok(app_dir, version, staged=stage_dir):
+            return stage_dir, "it was ready already"
         cancel = bg["cancel"].is_set
         took = {}
         started = time.time()
-        lst = os.path.join(update_slots.next_dir(app_dir), ".pad_compile.lst")
+        lst = os.path.join(stage_dir, ".pad_compile.lst")
 
         def _fill(target, _copy_progress):
             manifest = update_delta.fetch_manifest(installer["delta"],
@@ -7145,7 +7175,7 @@ class App:
         try:
             ok, info = update_slots.stage_delta_install(
                 _fill, app_dir, version, cancel_cb=cancel,
-                progress_cb=_installed)
+                progress_cb=_installed, target=stage_dir)
         except InterruptedError:
             raise
         except update_delta.DeltaUnavailable as e:
@@ -7167,7 +7197,7 @@ class App:
             _mb(took["fetched_bytes"]),
             " instead of the %s installer" % _mb(whole) if whole else "",
             time.time() - started)
-        return update_slots.next_dir(app_dir), note
+        return stage_dir, note
 
     def _background_update_downloading(self, bg, why):
         """The changed-files route gave up (PAD-1519), possibly after its
@@ -7268,6 +7298,9 @@ class App:
     # how often it looks again meanwhile.
     PUBLISHING_WAIT_S = 600
     PUBLISHING_POLL_MS = 30000
+    # How long the release feed's last answer stands for (seconds): a
+    # Restart to update inside it goes straight to the restart.
+    RECHECK_FRESH_S = 60
 
     def _recheck_then_restart(self, bg):
         """Restart to update, step one: is the ready version still the newest?
@@ -7289,6 +7322,18 @@ class App:
         (offline) restarts into what is ready - never a reason to refuse it.
         """
         if bg.get("rechecking"):
+            return
+        # PAD-1646: the feed said this version was the newest a moment ago
+        # (the check that found it, or the last one to confirm it) - asking
+        # again is a second or more of every Restart spent on the network
+        # for an answer already in hand
+        asked = getattr(self, "_update_offer_at", None)
+        if (asked is not None and bg["stage"] == "ready"
+                and time.monotonic() - asked < self.RECHECK_FRESH_S
+                and not (getattr(self, "_restart_pending", None)
+                         or {}).get("publishing")):
+            self._restart_pending = None
+            self._restart_into(bg)
             return
         bg["rechecking"] = True
         mfr_repo = (self._current_mfr.update_repo
@@ -7315,6 +7360,8 @@ class App:
 
     def _after_restart_recheck(self, bg, fresh, failed, publishing):
         bg["rechecking"] = False
+        if not failed:
+            self._update_offer_at = time.monotonic()    # the feed answered
         if getattr(self, "_bg_update", None) is not bg:
             return                         # replaced or switched off meanwhile
         from .core.updater import _parse_version
@@ -7420,9 +7467,15 @@ class App:
             return True
         if bg["how"] == "windows":
             app_dir = update_slots.installed_app_dir()
-            if not app_dir or not update_slots.staged_install_ok(app_dir,
-                                                                 version):
+            stage_dir = bg.get("stage_dir") or (
+                update_slots.next_dir(app_dir) if app_dir else None)
+            if not app_dir or not update_slots.staged_install_ok(
+                    app_dir, version, staged=stage_dir):
                 return False
+            # PAD-1646: got ready in the user's own folder by a run without
+            # Administrator - the swap is started elevated (Windows asks
+            # once) and takes it from there
+            from_user = stage_dir != update_slots.next_dir(app_dir)
             if update_slots.swap_failed_version() == version:
                 # PAD-1529: the helper could not switch to this version a
                 # moment ago and brought this one back up to fetch the
@@ -7435,7 +7488,23 @@ class App:
             # the helper only renames once this process is gone, so the
             # state is written first, as for the installer (PAD-188)
             self._save_session_state()
-            ok, info = update_slots.start_swap(app_dir, version, bg["path"])
+            if from_user:
+                ok, info = update_slots.start_swap(
+                    app_dir, version, bg["path"], staged=stage_dir,
+                    elevate=True)
+                if not ok and info == update_slots.NOT_ALLOWED:
+                    # No at the prompt: nothing was started and nothing
+                    # changed.  Not the setup program's turn - it would
+                    # only ask the same question again
+                    self.window.append_log(
+                        f"v{version} was not switched to: Windows asked for "
+                        "Administrator permission and it was not given. "
+                        "Press Restart to update again whenever you're "
+                        "ready.", "warning")
+                    return True
+            else:
+                ok, info = update_slots.start_swap(app_dir, version,
+                                                   bg["path"])
         else:
             self._save_session_state()
             ok, info = commit_update_macos(bg["staged"])

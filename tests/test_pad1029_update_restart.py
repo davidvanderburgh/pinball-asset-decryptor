@@ -130,7 +130,8 @@ def test_the_install_progress_reaches_the_banner(tmp_path, staged,
     hold = threading.Event()
     monkeypatch.setattr(us, "installed_app_dir",
                         lambda *a, **k: str(tmp_path / "PAD"))
-    monkeypatch.setattr(us, "staged_install_ok", lambda app, v: False)
+    monkeypatch.setattr(us, "staged_install_ok",
+                        lambda app, v, **k: False)
     # the background copy beside the install is an elevated run's (PAD-1563)
     from pinball_decryptor.core import admin
     monkeypatch.setattr(admin, "is_admin", lambda: True)

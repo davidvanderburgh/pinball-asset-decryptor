@@ -124,6 +124,46 @@ def old_dir(app_dir):
     return app_dir + OLD_SUFFIX
 
 
+def _app_tag(app_dir):
+    """A short name for one install folder (two installs never share a
+    staging folder or a swap lock)."""
+    import hashlib
+    import ntpath       # a Windows path, whatever host builds the text
+    return hashlib.sha1(ntpath.normcase(ntpath.abspath(app_dir))
+                        .encode("utf-8")).hexdigest()[:12]
+
+
+def user_stage_dir(app_dir, local=None):
+    """Where a copy of the app that runs WITHOUT Administrator gets the new
+    version ready (PAD-1646), or None when it cannot.
+
+    The app has started unelevated since PAD-1563, and ``<app>.next`` is in
+    Program Files, which only an elevated program writes.  So from then on
+    nothing was installed in the background at all, and every Restart to
+    update ran the whole setup program: 37 s on David's PC against 6 s for
+    the swap ("I'm seeing this screen for far too long").  Nothing about
+    GETTING THE VERSION READY needs Administrator though - only putting it
+    in place does.  So the folder is filled here, in the user's own
+    ``%LOCALAPPDATA%``, and the swap helper, started elevated by the Restart
+    click (one consent prompt, as the setup program had), renames it to
+    ``<app>.next`` and swaps as before.
+
+    ON THE SAME DRIVE AS THE APP, or not at all: the helper's move is then a
+    rename, instant however big the folder; across drives it would be a copy
+    of the whole app with the user waiting.
+    """
+    import ntpath
+    local = local or os.environ.get("LOCALAPPDATA") or ""
+    if not local or not app_dir:
+        return None
+    drive = ntpath.splitdrive(ntpath.abspath(app_dir))[0]
+    if not drive or drive.lower() != ntpath.splitdrive(
+            ntpath.abspath(local))[0].lower():
+        return None
+    return ntpath.join(ntpath.abspath(local), "pinball_decryptor", "update",
+                       _app_tag(app_dir), "next")
+
+
 def tree_version(folder):
     """The ``__version__`` an app folder holds, or None."""
     try:
@@ -145,11 +185,12 @@ def _layout_problem(folder, version):
     return None
 
 
-def staged_version(app_dir):
-    """The version waiting in ``<app>.next``, or None when there is no whole
-    one (no marker: staging never finished, or never started)."""
+def staged_version(app_dir, staged=None):
+    """The version waiting in ``<app>.next`` (or in *staged*, the user's own
+    staging folder), or None when there is no whole one (no marker: staging
+    never finished, or never started)."""
     try:
-        with open(os.path.join(next_dir(app_dir), MARKER),
+        with open(os.path.join(staged or next_dir(app_dir), MARKER),
                   encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
@@ -157,11 +198,11 @@ def staged_version(app_dir):
     return data.get("version") if isinstance(data, dict) else None
 
 
-def staged_install_ok(app_dir, version):
-    """True when ``<app>.next`` holds a whole, finished install of
-    *version*."""
-    return (staged_version(app_dir) == version
-            and _layout_problem(next_dir(app_dir), version) is None)
+def staged_install_ok(app_dir, version, staged=None):
+    """True when ``<app>.next`` (or *staged*) holds a whole, finished
+    install of *version*."""
+    return (staged_version(app_dir, staged) == version
+            and _layout_problem(staged or next_dir(app_dir), version) is None)
 
 
 def _dist_name(entry):
@@ -302,7 +343,7 @@ DELTA_COPY_SHARE = 70
 
 
 def stage_delta_install(fill, app_dir, version, run=None, cancel_cb=None,
-                        progress_cb=None):
+                        progress_cb=None, target=None):
     """Stage *version* into ``<app>.next`` from the running install's own
     files plus the changed ones, without the setup exe (PAD-1519).
 
@@ -313,18 +354,22 @@ def stage_delta_install(fill, app_dir, version, run=None, cancel_cb=None,
     carried)`` or ``(False, reason)`` like :func:`stage_install`; whatever
     *fill* raises is the caller's to read (DeltaUnavailable says why the
     setup exe is needed), with the folder already removed.
+
+    *target* is the folder to fill when it is not ``<app>.next``: the
+    user's own staging folder (:func:`user_stage_dir`, PAD-1646).
     """
     run = run or subprocess.run
     progress_cb = progress_cb or (lambda pct: None)
     with _STAGE_LOCK:
         if cancel_cb and cancel_cb():
             raise InterruptedError("staging canceled")
-        target = next_dir(app_dir)
+        target = target or next_dir(app_dir)
         shutil.rmtree(target, ignore_errors=True)
         if os.path.exists(target):
             return False, "%s could not be cleared" % target
         try:
             progress_cb(0)
+            os.makedirs(os.path.dirname(target), exist_ok=True)
             _grant_before_fill(target, run)
             compile_cmd = fill(target, lambda pct: progress_cb(
                 min(DELTA_COPY_SHARE, int(pct * DELTA_COPY_SHARE / 100))))
@@ -526,6 +571,13 @@ def clear_leftovers(app_dir, current_version):
     staged = staged_version(app_dir)
     if staged and _version(staged) <= _version(str(current_version)):
         targets.append(next_dir(app_dir))
+    # the user's own staging folder (PAD-1646), when what it holds is not
+    # newer than this version, or was never finished
+    mine = user_stage_dir(app_dir)
+    if mine and os.path.isdir(mine):
+        staged = staged_version(app_dir, mine)
+        if not staged or _version(staged) <= _version(str(current_version)):
+            targets.append(mine)
     for path in targets:
         if not os.path.isdir(path):
             continue
@@ -557,6 +609,13 @@ $ErrorActionPreference = 'Stop'
 $log = %(log)s
 function Say($m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format s) + ' ' + $m) } catch {} }
 $app = %(app)s; $next = %(next)s; $old = %(old)s
+# PAD-1646: started elevated by an app that runs without Administrator.
+# $staged is the new version in the user's own folder, moved to $next here;
+# $done is where this says how it ended, for the helper that starts the app
+# again WITHOUT Administrator (anything started from here would be elevated)
+$staged = %(staged)s; $done = %(done)s
+function Done($what) { if ($done) { try { [System.IO.File]::WriteAllText($done, $what) } catch { Say ('could not write ' + $done + ': ' + $_) } } }
+trap { Say ('stopped: ' + $_); Done 'inplace'; exit 1 }
 # ONE HELPER AT A TIME (PAD-1034): a second Restart to update click starts a
 # second helper, which renamed the version the first had just swapped in to
 # .old - the folder the first deletes - and ran the installer on top.  Per
@@ -564,7 +623,7 @@ $app = %(app)s; $next = %(next)s; $old = %(old)s
 # the same thing, and were refusing each other
 $lock = New-Object System.Threading.Mutex($false, ('Global\PinballAssetDecryptorUpdateSwap-' + %(tag_q)s))
 try { $owned = $lock.WaitOne(0) } catch [System.Threading.AbandonedMutexException] { $owned = $true }
-if (-not $owned) { Say 'another Restart to update is already switching versions - leaving it to that one'; exit 0 }
+if (-not $owned) { Say 'another Restart to update is already switching versions - leaving it to that one'; Done 'none'; exit 0 }
 function AppVersion {
   try { $m = Select-String -LiteralPath (Join-Path $app 'pinball_decryptor\__init__.py') -Pattern '^__version__\s*=\s*["'']([^"'']+)' | Select-Object -First 1
         if ($m) { return $m.Matches[0].Groups[1].Value } } catch {}
@@ -586,7 +645,7 @@ function KeepUsers($from, $to) {
 }
 function Fallback($why) {
   Say ('swap not done: ' + $why + ' - running the installer instead')
-  if (%(setup)s -and (Test-Path -LiteralPath %(setup)s)) { Start-Process -FilePath %(setup)s -ArgumentList %(setup_args)s }
+  if (%(setup)s -and (Test-Path -LiteralPath %(setup)s)) { Start-Process -FilePath %(setup)s -ArgumentList %(setup_args)s; Done 'installer' }
   else {
     # staged from changed files (PAD-1519): no setup exe was downloaded.
     # Note the version, so the app fetches its installer this time, and
@@ -596,6 +655,7 @@ function Fallback($why) {
     try { Set-Content -LiteralPath %(failed_note)s -Value %(version_q)s -Encoding UTF8 } catch {}
     $vbs = Join-Path $app 'launcher.vbs'
     if (%(launch)s -and (Test-Path -LiteralPath $vbs)) { Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + $vbs + '"') -WorkingDirectory $app }
+    Done 'inplace'
   }
   exit 1
 }
@@ -642,8 +702,18 @@ Say 'waiting for the app (pid %(pid)d) to close'
 $t0 = Get-Date
 try { Wait-Process -Id %(pid)d -Timeout 180 -ErrorAction SilentlyContinue } catch {}
 Say ('the app closed after ' + [int]((Get-Date) - $t0).TotalSeconds + ' s')
+$fromUser = $false
+if ($staged -and (Test-Path -LiteralPath (Join-Path $staged %(marker)s))) {
+  # the version got ready in the user's own folder: a rename on one drive
+  try {
+    if (Test-Path -LiteralPath $next) { Remove-Item -LiteralPath $next -Recurse -Force }
+    Move-Item -LiteralPath $staged -Destination $next
+    $fromUser = $true
+  } catch { Fallback ('the new version would not move beside the app: ' + $_) }
+}
 if (-not (Test-Path -LiteralPath (Join-Path $next %(marker)s)) -and ((AppVersion) -eq %(version_q)s)) {
   Say 'already on v%(version)s - nothing to switch'
+  Done 'none'
   exit 0
 }
 if (Test-Path -LiteralPath $old) {
@@ -655,9 +725,12 @@ $moved = $false; $inside = $false
 for ($i = 0; $i -lt 30 -and -not $moved; $i++) {
   try { Rename-Item -LiteralPath $app -NewName (Split-Path $old -Leaf); $moved = $true }
   catch {
-    # a second for a straggler to let go, then the swap one level down
-    if ($i -ge 2 -and (SwapInside)) { $moved = $true; $inside = $true }
-    else { Start-Sleep -Milliseconds 500 }
+    # the swap one level down, at once (PAD-1646: it used to wait a
+    # second first, on every restart of a PC where something sits in the
+    # folder).  A straggler with a file open fails it too, and it puts
+    # back what it moved: then a wait, and both again
+    if (SwapInside) { $moved = $true; $inside = $true }
+    else { Start-Sleep -Milliseconds 250 }
   }
 }
 if (-not $moved) { Fallback ('a file in the app folder is still in use (' + $moveWhy + ')') }
@@ -699,6 +772,7 @@ if (%(launch)s) {
   Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + (Join-Path $app 'launcher.vbs') + '"') -WorkingDirectory $app
   Say 'started the new version'
 }
+Done 'ok'
 # AFTER the new version is started, never before it (PAD-1548).  Registering
 # the Visual Pinball controller loads the kit, which asks WSL where the rig
 # is - and the app shut WSL down on its way out, so that ask boots WSL cold:
@@ -715,24 +789,85 @@ if (%(register)s) {
     }
   } catch { Say ('Visual Pinball controller not registered: ' + $_) }
 }
+if ($fromUser) {
+  # WHAT CAME FROM THE USER'S FOLDER STILL HAS THAT FOLDER'S PERMISSIONS: a
+  # rename keeps them, so the user could write the new version's files.
+  # Make them Program Files' own again - owned by Administrators, nothing
+  # but inherited entries, and the installer's read grant on the bundled
+  # Python.  After the new version is started, never before it: it walks
+  # every file, and nothing in a start waits on it
+  try {
+    $icacls = Join-Path $env:SystemRoot 'System32\icacls.exe'
+    & $icacls $app /setowner '*S-1-5-32-544' /T /C /Q | Out-Null
+    & $icacls $app /reset /T /C /Q | Out-Null
+    & $icacls (Join-Path $app 'python') /grant '*S-1-5-32-545:(OI)(CI)RX' /T /C /Q | Out-Null
+    Say 'the new version''s files have the install folder''s permissions'
+  } catch { Say ('permissions not set: ' + $_) }
+}
 if ($whole -and -not $stuck) { Remove-Item -LiteralPath $old -Recurse -Force -ErrorAction SilentlyContinue }
 if (Test-Path -LiteralPath $old) { Say ($old + ' is left for the next start to delete') }
 Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue
 """
 
 
+#: Started WITHOUT Administrator beside an elevated swap (PAD-1646): waits
+#: for the swap to say how it ended and starts the app as the user.  A swap
+#: that says nothing (it never ran, it was ended) still gets the app back.
+_RELAUNCH_SCRIPT = r"""
+$ErrorActionPreference = 'SilentlyContinue'
+$log = %(log)s; $app = %(app)s; $done = %(done)s
+function Say($m) { try { Add-Content -LiteralPath $log -Value ((Get-Date -Format s) + ' ' + $m) } catch {} }
+$t0 = Get-Date; $what = ''
+while (((Get-Date) - $t0).TotalSeconds -lt %(timeout)d) {
+  if (Test-Path -LiteralPath $done) {
+    try { $what = ([System.IO.File]::ReadAllText($done)).Trim() } catch { $what = '' }
+    if ($what) { break }
+  }
+  Start-Sleep -Milliseconds 40
+}
+Remove-Item -LiteralPath $done -Force
+if (-not $what) { Say 'the switch never said it was done - starting the app again' }
+if ($what -ne 'none' -and $what -ne 'installer' -and %(launch)s) {
+  $vbs = Join-Path $app 'launcher.vbs'
+  if (Test-Path -LiteralPath $vbs) {
+    Start-Process -FilePath 'wscript.exe' -ArgumentList ('"' + $vbs + '"') -WorkingDirectory $app
+    Say 'started the app without Administrator'
+  } else { Say ('nothing to start: ' + $vbs + ' is not there') }
+}
+Remove-Item -LiteralPath $PSCommandPath -Force
+"""
+
+#: how long the unelevated helper waits for the swap (the swap itself gives
+#: the app three minutes to close)
+RELAUNCH_TIMEOUT = 300
+
+#: start_swap's reason when the user said No to the consent prompt
+NOT_ALLOWED = "Administrator permission was not given"
+
+
+def relaunch_script(app_dir, done_path, log_path, launch=True,
+                    timeout=RELAUNCH_TIMEOUT):
+    """The PowerShell text of the unelevated helper beside an elevated
+    swap."""
+    return _RELAUNCH_SCRIPT % {
+        "log": _psq(log_path), "app": _psq(app_dir), "done": _psq(done_path),
+        "timeout": int(timeout), "launch": "$true" if launch else "$false"}
+
+
 def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
-                register=True, setup_args=None, failed_note=None):
-    """The PowerShell text of the swap (see module docstring)."""
+                register=True, setup_args=None, failed_note=None,
+                staged=None, done_path=None):
+    """The PowerShell text of the swap (see module docstring).  *staged* is
+    the user's own staging folder to take the new version from and
+    *done_path* where to say how it ended (PAD-1646, both for a swap started
+    elevated by an unelevated app)."""
     from .updater import installer_args
     keys =", ".join(_psq("HKLM:\\" + k) for k in (
         UNINSTALL_KEY,
         UNINSTALL_KEY.replace("SOFTWARE\\", "SOFTWARE\\WOW6432Node\\", 1)))
-    import hashlib
-    import ntpath       # a Windows path, whatever host builds the text
-    tag = hashlib.sha1(ntpath.normcase(ntpath.abspath(app_dir))
-                       .encode("utf-8")).hexdigest()[:12]
+    tag = _app_tag(app_dir)
     return _SWAP_SCRIPT % {
+        "staged": _psq(staged or ""), "done": _psq(done_path or ""),
         "log": _psq(log_path), "app": _psq(app_dir), "tag_q": _psq(tag),
         "next": _psq(next_dir(app_dir)), "old": _psq(old_dir(app_dir)),
         "setup": _psq(setup_path or ""),
@@ -747,7 +882,8 @@ def swap_script(app_dir, version, setup_path, pid, log_path, launch=True,
 
 
 def start_swap(app_dir, version, setup_path, pid=None, popen=None,
-               launch=True, register=True, log_path=None, failed_note=None):
+               launch=True, register=True, log_path=None, failed_note=None,
+               staged=None, elevate=False, shell_execute=None):
     """Write the swap script to the temp folder and start it detached.
     Returns ``(True, log_path)`` or ``(False, reason)``.
 
@@ -762,28 +898,97 @@ def start_swap(app_dir, version, setup_path, pid=None, popen=None,
     back.  CREATE_NO_WINDOW gives it a console nobody sees, and a child
     outlives its parent on Windows anyway; the new process group keeps the
     app's Ctrl+C / Ctrl+Break from reaching it.
+
+    ``elevate`` (PAD-1646) is for an app running WITHOUT Administrator: the
+    swap is started with the "runas" verb - Windows asks the user once, the
+    same prompt the setup program raised - and takes the new version from
+    *staged*, the user's own staging folder.  A second helper, unelevated,
+    starts the app afterwards, so the new version runs as the user and not
+    as Administrator.  A No at the prompt returns ``(False, NOT_ALLOWED)``
+    with nothing started and nothing changed.
     """
     popen = popen or subprocess.Popen
     tmp = tempfile.gettempdir()
     log_path = log_path or os.path.join(tmp, "pad_update_swap.log")
-    fd, script = tempfile.mkstemp(prefix="pad-swap-", suffix=".ps1")
-    with os.fdopen(fd, "w", encoding="utf-8-sig", newline="\r\n") as f:
-        f.write(swap_script(app_dir, version, setup_path,
-                            pid if pid is not None else os.getpid(),
-                            log_path, launch=launch, register=register,
-                            failed_note=failed_note))
+    pid = pid if pid is not None else os.getpid()
     flags = (getattr(subprocess, "CREATE_NO_WINDOW", 0)
              | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
-    try:
-        popen(["powershell.exe", "-NoProfile", "-NonInteractive",
-               "-ExecutionPolicy", "Bypass", "-WindowStyle", "Hidden",
-               "-File", script], cwd=tmp, creationflags=flags,
-              close_fds=True, stdin=subprocess.DEVNULL,
+    ps_args = ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+               "-WindowStyle", "Hidden", "-File"]
+
+    def _write(prefix, text):
+        fd, path = tempfile.mkstemp(prefix=prefix, suffix=".ps1", dir=tmp)
+        with os.fdopen(fd, "w", encoding="utf-8-sig", newline="\r\n") as f:
+            f.write(text)
+        return path
+
+    def _drop(*paths):
+        for p in paths:
+            try:
+                os.unlink(p)
+            except OSError:
+                pass
+
+    def _popen(script):
+        popen(["powershell.exe"] + ps_args + [script], cwd=tmp,
+              creationflags=flags, close_fds=True, stdin=subprocess.DEVNULL,
               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    except OSError as e:
+
+    if not elevate:
+        script = _write("pad-swap-", swap_script(
+            app_dir, version, setup_path, pid, log_path, launch=launch,
+            register=register, failed_note=failed_note, staged=staged))
         try:
-            os.unlink(script)
+            _popen(script)
+        except OSError as e:
+            _drop(script)
+            return False, str(e)
+        return True, log_path
+
+    # the swap elevated, and the app started again by an unelevated helper.
+    # That helper first: it only waits, and a swap with nothing to start
+    # the app after it is the one outcome nobody can act on
+    import uuid
+    from .updater import installer_args
+    done = os.path.join(tmp, "pad-swap-done-%d-%s.txt" % (
+        pid, uuid.uuid4().hex[:8]))
+    script = _write("pad-swap-", swap_script(
+        app_dir, version, setup_path, pid, log_path, launch=False,
+        register=register, failed_note=failed_note, staged=staged,
+        done_path=done,
+        # the setup program, should the swap hand over to it, is started by
+        # an elevated program here (PAD-1635)
+        setup_args=installer_args(elevated=True)))
+    relaunch = _write("pad-relaunch-", relaunch_script(
+        app_dir, done, log_path, launch=launch))
+
+    def _call_off(why):
+        # tell the waiting helper there is nothing to start
+        try:
+            with open(done, "w", encoding="utf-8") as f:
+                f.write("none")
         except OSError:
             pass
+        _drop(script)
+        return False, why
+
+    try:
+        _popen(relaunch)
+    except OSError as e:
+        _drop(script, relaunch)
         return False, str(e)
+    if shell_execute is None:
+        import ctypes
+        shell_execute = ctypes.windll.shell32.ShellExecuteW  # noqa
+    try:
+        # returns once the user has answered the prompt; > 32 is started
+        ret = int(shell_execute(
+            None, "runas", "powershell.exe",
+            subprocess.list2cmdline(ps_args + [script]), tmp, 0))
+    except Exception as e:                              # noqa: BLE001
+        return _call_off(str(e))
+    if ret <= 32:
+        # 5 = SE_ERR_ACCESSDENIED: No at the consent prompt
+        return _call_off(NOT_ALLOWED if ret == 5
+                         else "the helper did not start (code %d)" % ret)
     return True, log_path

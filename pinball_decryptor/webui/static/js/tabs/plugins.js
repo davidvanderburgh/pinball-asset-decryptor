@@ -29,6 +29,32 @@ function versionOptions(p) {
   }));
 }
 
+// PAD-1647 (David: "i want to see some instructions / screenshots of how the bluetooth feature works. otherwise, I
+// have to go to the repo page"): how the plugin is used on the machine, as numbered sections of steps with the
+// pictures that show them. A picture opens full size when it is clicked.
+function Guide({ g }) {
+  const [big, setBig] = useState(null);
+  if (!g || !(g.sections || []).length) return null;
+  return html`<div class="plg-guide">
+    <div class="plg-half-hd"><b>${g.title}</b><span class="muted small">${g.lead}</span></div>
+    <div class="plg-guide-secs">${g.sections.map((sec) => html`<section class="plg-guide-sec" key=${sec.title}>
+      <div class="plg-guide-hd">${sec.title}</div>
+      <ul class="plg-guide-steps">${sec.steps.map((t, i) => html`<li key=${i}>${t}</li>`)}</ul>
+      ${(sec.shots || []).length ? html`<div class="plg-guide-shots">${sec.shots.map(([file, cap]) => html`
+        <figure key=${file}>
+          <button type="button" class="plg-shot" aria-label=${"Show larger: " + cap} onClick=${() => setBig([file, cap])}>
+            <img src=${"/static/img/plugins/" + file} alt=${cap} loading="lazy" /></button>
+          <figcaption class="small muted">${cap}</figcaption>
+        </figure>`)}</div>` : null}
+    </section>`)}</div>
+    ${g.shots_note ? html`<span class="small muted">${g.shots_note}</span>` : null}
+    ${big ? html`<div class="plg-big" role="dialog" aria-label=${big[1]} onClick=${() => setBig(null)}>
+      <figure><img src=${"/static/img/plugins/" + big[0]} alt=${big[1]} />
+        <figcaption>${big[1]} <span class="muted">(click to close)</span></figcaption></figure>
+    </div>` : null}
+  </div>`;
+}
+
 function OnThisComputer({ p, s }) {
   const off = !!p.busy || s.running;
   const same = p.installed && p.installed === p.pick;
@@ -37,6 +63,7 @@ function OnThisComputer({ p, s }) {
     <div class="plg-half-hd"><b>On this computer</b>
       <span class=${cx("plg-state", p.installed ? "on" : "off")}>${p.installed
         ? "Installed: " + p.installed : "Not installed"}</span></div>
+    ${p.update ? html`<${Note} kind="info">A newer version is out: ${p.newest}. You have ${p.installed}.<//>` : null}
     ${p.installed && !p.installed_tested ? html`<${Note} kind="warn">Version ${p.installed} is newer than this
       version of the app was tested with (${p.tested}). It was checked against its author's own checksums, and it
       may work differently from what this page says.<//>` : null}
@@ -46,15 +73,15 @@ function OnThisComputer({ p, s }) {
         onChange=${(v) => call("plugins.pick", p.key, v)} />
       <${Button} kind="primary" disabled=${off || same} busy=${!!p.busy}
         onClick=${() => call("plugins.install", p.key, p.pick)}>${same ? "Installed"
-          : p.installed ? "Install this version" : "Install"}<//>
+          : p.installed ? (p.update && p.pick === p.newest ? "Update to " + p.newest : "Install this version") : "Install"}<//>
       ${p.installed ? html`<${Button} disabled=${off} onClick=${() => call("plugins.remove", p.key)}>Remove<//>` : null}
     </div>
     ${picked && !picked.tested ? html`<span class="small muted">${p.pick} has not been tested with this version of
-      the app; ${p.tested} has.</span>` : null}
+      the app yet; ${p.tested} has. It is checked against its author's own checksums.</span>` : null}
     ${p.busy ? html`<span class="small">${p.busy}…</span><${Progress} busy />` : null}
     <${Said} text=${p.note} kind=${p.kind} />
     ${p.releases_state && p.releases_state !== "ok" && p.releases_state !== "loading"
-      ? html`<span class="small muted">${p.releases_state} Only ${p.tested} is offered until the list can be read.</span>` : null}
+      ? html`<span class="small muted">${p.releases_state} ${(p.releases || []).length > 1 ? "The list shown is the last one read." : "Only " + p.tested + " is offered until the list can be read."}</span>` : null}
     <div class="plg-row">
       <${Button} size="sm" disabled=${off || p.releases_state === "loading"} busy=${p.releases_state === "loading"}
         onClick=${() => call("plugins.refresh_releases", p.key)}>Check for versions<//>
@@ -117,6 +144,7 @@ function Plugin({ p, s }) {
       <${OnThisComputer} p=${p} s=${s} />
       <${OnYourCards} p=${p} s=${s} />
     </div>
+    <${Guide} g=${p.guide} />
   <//>`;
 }
 

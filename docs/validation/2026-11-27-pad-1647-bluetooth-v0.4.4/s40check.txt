@@ -1,0 +1,25 @@
+﻿Inode: 170   Type: regular    Mode:  0755   Flags: 0x80000
+Generation: 0    Version: 0x00000000:00000000
+User:     0   Group:     0   Project:     0   Size: 1796
+Installed owned-bond boot retention; original: /var/tmp/pad1647s40/his/init.d/.spikebt-originals/S40bluetoothd
+his installer exit 0
+/var/tmp/pad1647s40/his/init.d:
+total 16
+drwxr-xr-x 3 root root 4096 Nov 27 20:26 .
+drwxr-xr-x 3 root root 4096 Nov 27 20:26 ..
+drwx------ 2 root root 4096 Nov 27 20:26 .spikebt-originals
+-rw-r--r-- 1 root root 1989 Nov 27 20:26 S40bluetoothd
+
+/var/tmp/pad1647s40/his/init.d/.spikebt-originals:
+total 12
+drwx------ 2 root root 4096 Nov 27 20:26 .
+drwxr-xr-x 3 root root 4096 Nov 27 20:26 ..
+-rw-r--r-- 1 root root 1796 Nov 27 20:26 S40bluetoothd
+VERDICT the app makes the same S40bluetoothd as his installer, byte for byte: PASS
+VERDICT the copy kept is the script as it was: PASS
+VERDICT taken back out equals the original: PASS
+VERDICT a second pass changes nothing: PASS
+29c29
+<                         if grep -q "Trusted=true" "info"; then
+---
+>                         if grep -q "Trusted=true" "info" || /usr/local/spikebt/spikebt --bluez5-keep-bond="$(basename "$(dirname "$PWD")")/$(basename "$PWD")" --state=/dump/spikebt/live/bluetooth-state.json 2>/dev/null; then # spikebt-owned-bond-retention

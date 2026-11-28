@@ -543,15 +543,23 @@ edition music modes, or none.
 
 ## Plugins tab (Stern Spike 2 and Spike 3)
 
+My machines shows what the app has put on a machine's card as a list under **From PAD on this card** (remote
+access, remote buttons, the mode runtime, the Bluetooth headphones plugin and its version), so you can see
+at a glance whether a plugin is on it.
+
 Optional add-ons that other people made and publish themselves. A plugin is not part of this app: when you
 install one, the app downloads the version you pick from its author's own project and keeps it on this
 computer beside your settings, so updating the app leaves it installed.
 
 Each plugin has these parts:
 
-- **On this computer.** The versions its author has published, newest first. The one marked *tested with this
-  app* is the version this release of the app was proven with.
-  - **Install** downloads and checks it. A newer version can be installed too and is marked as not tested yet.
+- **On this computer.** The versions its author has published, newest first. The newest is the one offered,
+    and the tab says when a newer one than yours is out. The ones marked *tested with this app* were proven
+    with this release of the app.
+  - **Install** downloads and checks it. A version newer than the app has been tested with can be installed too
+    and is marked as not tested yet.
+  - If gitlab.com answers that this computer must wait, the tab says for how long: gitlab.com allows a set
+    number of requests an hour from one internet address, and its pages in a browser count.
   - **Install from files** is for a computer that cannot reach gitlab.com: download the release's two `.tar.gz`
     files and its `SHA256SUMS` elsewhere and pick all three.
   - **Remove** takes it off this computer; cards already written keep it.
@@ -570,12 +578,15 @@ own menus, a volume for each headset, and cabinet speakers that can go quiet whi
 
 - **Spike 2** needs a USB Bluetooth adapter plugged into the machine. **Spike 3** uses the machine's own radio;
   its card must be unlocked with your own key, as for anything else written to a Spike 3 card.
-- **It works on exact game versions.** The tab says whether the card you picked is one the installed version
-  knows. On any other the game runs as it is, with no Bluetooth entry. A game program this app has changed
-  (Music Mode rows in the service menu, editions) is not one it knows either, and the Write log says so when
-  the card it built is such a one.
-- **In the game:** hold the left flipper in attract mode and choose Bluetooth, or open Service and choose
-  Bluetooth with the coin door buttons.
+- **Which games.** The game versions its author lists on his project page. Plugin versions 0.4 and newer find what the menu
+  needs in the game each time the game starts, so a game program this app has changed (Music
+  Mode rows, editions) can have the Bluetooth entry too. v0.3 knew exact game programs only: on a changed one
+  it showed no Bluetooth entry at all, so update the plugin if that is what you see.
+- **How it works on the machine** is on the tab itself, with pictures: pairing in Service, using it as a player
+  (hold the left flipper with no game running), each headset's volume and the cabinet speakers.
+- **Spike 3, v0.4.4 on:** one line of the machine's Bluetooth start-up script is changed as well, so paired
+  headphones are still paired after the machine is switched off and on. It is the change the plugin's own
+  installer makes; taking the plugin off puts the script back.
 - **If the Bluetooth entry goes away** after the game crashed: the plugin switches itself off when a game ends
   badly. With remote access set up (Network tab), **Check it on the machine** on this tab switches it back on.
 - Paired headphones and their settings are kept on the machine, not on the card.

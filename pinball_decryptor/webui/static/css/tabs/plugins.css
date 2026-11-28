@@ -25,3 +25,22 @@ html.bp-1100 .plg-halves { grid-template-columns: 1fr; }
 .plg-fields th, .plg-fields td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
 .plg-fields th { color: var(--ink-3); font-weight: 600; width: 30%; white-space: normal; }
 .plg-fields td { overflow-wrap: anywhere; }
+/* PAD-1647: how the plugin is used on the machine: sections of steps, each with its pictures */
+.plg-guide { display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
+.plg-guide-secs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 24px; align-items: start; }
+html.bp-1100 .plg-guide-secs { grid-template-columns: 1fr; }
+.plg-guide-sec { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.plg-guide-hd { font-weight: 600; font-size: 13.5px; }
+.plg-guide-steps { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; line-height: 1.45;
+  color: var(--ink-2); font-size: 13px; }
+.plg-guide-shots { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.plg-guide-shots figure { margin: 0; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.plg-shot { padding: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #000;
+  cursor: zoom-in; display: block; }
+.plg-shot:hover, .plg-shot:focus-visible { border-color: var(--accent); }
+.plg-shot img { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: cover; }
+.plg-big { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, .78); display: flex; align-items: center;
+  justify-content: center; padding: 24px; cursor: zoom-out; }
+.plg-big figure { margin: 0; display: flex; flex-direction: column; gap: 8px; align-items: center; max-width: 100%; max-height: 100%; }
+.plg-big img { max-width: min(1280px, 94vw); max-height: 84vh; border-radius: 8px; }
+.plg-big figcaption { color: #fff; font-size: 13px; }

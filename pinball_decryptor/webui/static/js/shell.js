@@ -1037,7 +1037,8 @@ function MachineRemote({ address, name, mfr, on, buttons }) {
         <span class="mach-h grow">Status</span>
         <${Button} size="sm" icon="refresh" disabled=${careOff} onClick=${() => call("network.machine_status")}>${reading ? "Reading…" : "Read again"}<//>
       </div>
-      ${status.length ? html`<table class="mach-status"><tbody>${status.map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th><td>${r[1]}</td></tr>`)}</tbody></table>`
+      ${status.length ? html`<table class="mach-status"><tbody>${status.map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th><td>${Array.isArray(r[1])
+          ? html`<ul class="care-list">${r[1].map((t) => html`<li key=${t}>${t}</li>`)}</ul>` : r[1]}</td></tr>`)}</tbody></table>`
         : html`<span class="muted small">${reading ? "Reading " + name + "'s status…" : on === true ? "Read again shows what the machine runs, its Wi-Fi and the room on its card." : "Shown once the machine answers."}</span>`}
       <div class="mach-remote-acts">
         <span class="mach-h">Logs</span>

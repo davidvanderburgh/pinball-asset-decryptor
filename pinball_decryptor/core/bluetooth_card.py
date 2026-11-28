@@ -32,7 +32,15 @@ normal end, not a fault: 1 (reboot asked for, after a software update), 3 (power
 sleep).  His launcher cannot tell and would switch Bluetooth off for good after any of them, so the block takes
 his switched-off mark away again after exactly those three, and hands the code on to Stern's script unchanged.
 
-Off takes everything back out: the folder gone, the script as the card had it without the plugin.
+**Spike 3's saved pairings (v0.4.4 on, PAD-1647).**  Some Spike 3 firmware forgets, each time it starts, every
+Bluetooth device nobody marked trusted (``/etc/init.d/S40bluetoothd``), so headphones would need pairing again
+after every power-off.  The release carries ``install-bluez5-bond-retention.sh``, which changes that one line so
+the pairings his helper made are kept, and saves the script as it was in ``/etc/init.d/.spikebt-originals``.  That
+script is written to be run on the machine; a card build cannot run it, so :func:`s3_keep_bonds_text` makes the
+same change, reading the line and what it becomes out of the release's own script (never out of this file), and
+leaves a start-up script it does not recognise alone, as his does.
+
+Off takes everything back out: the folder gone, the scripts as the card had them without the plugin.
 """
 import hashlib
 import json
@@ -60,11 +68,20 @@ PLUGIN = card_plugins.register(Plugin(
     archives={'armv7': 'spike-pinball-bluetooth-armv7.tar.gz', 'arm64': 'spike-pinball-bluetooth-arm64.tar.gz'},
     needs={'armv7': ('menu.so', 'spikebt', 'run-live.sh', 'radio-start.sh', 'btusb.ko'),
            'arm64': ('menu.so', 'spikebt', 'run-live.sh')},
-    tested='v0.3.0',
-    pinned={'v0.3.0': {
-        'spike-pinball-bluetooth-armv7.tar.gz': '31433015ed0eccdac49b2625e799b0e5d64c51e28c0d0bb033fbd796e6b77f07',
-        'spike-pinball-bluetooth-arm64.tar.gz': 'ff2da6232b156db30ab007937f597c0b3b73ce97dc17452ce998ce5216f46bbf',
-    }},
+    # PAD-1647 (David: "we should always promote the latest version and test that as well"): the newest release
+    # is the one Install offers; each one proven here is pinned.  v0.4.4 on 2026-11-27
+    # (docs/validation/2026-11-27-pad-1647-bluetooth-v0.4.4/).
+    tested='v0.4.4',
+    pinned={
+        'v0.3.0': {
+            'spike-pinball-bluetooth-armv7.tar.gz': '31433015ed0eccdac49b2625e799b0e5d64c51e28c0d0bb033fbd796e6b77f07',
+            'spike-pinball-bluetooth-arm64.tar.gz': 'ff2da6232b156db30ab007937f597c0b3b73ce97dc17452ce998ce5216f46bbf',
+        },
+        'v0.4.4': {
+            'spike-pinball-bluetooth-armv7.tar.gz': '07d3da295f4d6585ce955191818e760cfb5a88fda00701b2fa914ca21af1ef99',
+            'spike-pinball-bluetooth-arm64.tar.gz': '95a73b5d0e944a623ca3445d235b28b646804cc93de341eef4d6657d436717b9',
+        },
+    },
     # the game programs each release's menu knows, by the hash of the executable (not in the archives)
     source_keep=('profiles/supported-games.json', 'profiles/spike3/'),
 ))
@@ -108,6 +125,96 @@ S3_HOOK_LINES = [
     '\t\t(exit "$PADBT")',
 ]
 
+# ---- Spike 3's /etc/init.d/S40bluetoothd: the boot clean-up that forgets untrusted devices (v0.4.4 on) ----
+S40 = '/etc/init.d/S40bluetoothd'
+S40_KEPT_DIR = '/etc/init.d/.spikebt-originals'
+S40_KEPT = S40_KEPT_DIR + '/S40bluetoothd'
+KEEP_SCRIPT = 'install-bluez5-bond-retention.sh'
+KEEP_MARK = 'spikebt-owned-bond-retention'
+_KEEP_ORIGINAL = 'if grep -q "Trusted=true" "info"; then'      # only to put a changed line back with no copy kept
+
+
+def keep_bonds_rule(installer):
+    """``(original line, its replacement)`` out of the release's own ``install-bluez5-bond-retention.sh``, or
+    None when *installer* is not that script in a form this app reads (then nothing of the kind is done)."""
+    text = installer.decode('utf-8', 'replace') if isinstance(installer, bytes) else (installer or '')
+    got = {}
+    for name in ('marker', 'original', 'replacement'):
+        hits = re.findall(r"(?m)^%s=(?:'([^'\n]*)'|([A-Za-z0-9_-]+))$" % name, text)
+        if len(hits) != 1:
+            return None
+        got[name] = hits[0][0] or hits[0][1]
+    if got['marker'] != KEEP_MARK or not got['original'].endswith('; then') \
+            or not got['replacement'].endswith('# ' + KEEP_MARK) \
+            or not got['replacement'].startswith(got['original'][:-len('; then')] + ' ||'):
+        return None
+    return got['original'], got['replacement']
+
+
+def s3_keep_bonds_text(text, rule):
+    """*text* (a Spike 3 ``S40bluetoothd``) with the release's change made, as its own installer makes it: the
+    one line that is *rule*'s original, whatever its indent, becomes the replacement.  None when the script has
+    the change already, or is not one the installer would take (not exactly one such line)."""
+    text = text.decode('utf-8', 'replace') if isinstance(text, bytes) else text
+    if rule is None or KEEP_MARK in text:
+        return None
+    lines = text.split('\n')
+    hits = [k for k, line in enumerate(lines) if line.lstrip(' \t') == rule[0]]
+    if len(hits) != 1:
+        return None
+    line = lines[hits[0]]
+    lines[hits[0]] = line[:len(line) - len(line.lstrip(' \t'))] + rule[1]
+    return '\n'.join(lines)
+
+
+def s3_forget_bonds_text(text, kept=None):
+    """*text* with the change taken back out: the copy kept beside it (*kept*) when there is one, else the
+    marked line put back as Stern wrote it.  None when *text* does not carry the change."""
+    text = text.decode('utf-8', 'replace') if isinstance(text, bytes) else text
+    if KEEP_MARK not in text:
+        return None
+    if kept:
+        kept = kept.decode('utf-8', 'replace') if isinstance(kept, bytes) else kept
+        if KEEP_MARK not in kept:
+            return kept
+    lines = text.split('\n')
+    for k, line in enumerate(lines):
+        if line.rstrip().endswith('# ' + KEEP_MARK):
+            lines[k] = line[:len(line) - len(line.lstrip(' \t'))] + _KEEP_ORIGINAL
+    return '\n'.join(lines)
+
+
+def _plain(reader, path):
+    """The node of the plain file at *path* (not a link, not hard-linked), else None."""
+    node = ssh_card._node(reader, path)
+    if node is None or stat.S_IFMT(node['mode']) != stat.S_IFREG or node['links'] != 1:
+        return None
+    return node
+
+
+def keep_bonds_state(reader):
+    """What a Spike 3 system partition says of its saved pairings: ``dict(state, script, kept, mode)``.  *state*
+    is ``'done'`` (the change is made), ``'todo'`` (the release on the card carries the installer, the card's
+    script is one it takes, and the change is not made), or ``''`` (nothing to do: an older release, or a script
+    it would leave alone).  *script* and *kept* are the bytes of the script and of the copy kept beside it."""
+    node = _plain(reader, S40)
+    script = reader.read_file_bytes(node) if node is not None and node['size'] <= (64 << 10) else None
+    knode = _plain(reader, S40_KEPT)
+    kept = reader.read_file_bytes(knode) if knode is not None and knode['size'] <= (64 << 10) else None
+    state = ''
+    if script is not None:
+        if KEEP_MARK.encode() in script:
+            state = 'done'
+        else:
+            inode = _plain(reader, DIR + '/' + KEEP_SCRIPT)
+            rule = keep_bonds_rule(reader.read_file_bytes(inode)) if inode is not None \
+                and inode['size'] <= (64 << 10) else None
+            if s3_keep_bonds_text(script, rule) is not None:
+                state = 'todo'
+    return {'state': state, 'script': script, 'kept': kept,
+            'mode': stat.S_IMODE(node['mode']) if node is not None else 0o755}
+
+
 NOT_OFFERED = 'Bluetooth headphones can be put on Stern Spike 2 and Spike 3 cards only.'
 NOT_SPIKE2 = NOT_OFFERED                         # the name the Plugins tab reads
 NOT_STOCK = ("This card's game start-up script (/etc/init.d/game_monitor) is not one this app knows, so it is left "
@@ -136,6 +243,10 @@ def details(platform=SPIKE2):
             ('What it needs', "Nothing added: Spike 3 uses the machine's own Bluetooth radio and services.", False),
             ('Normal power-off', "The launcher switches itself off after a game that ended badly. Power off, a "
              'reboot for an update and deep sleep are not that, so the changed line keeps it on after those.', False),
+            ('Second file changed (v0.4.4 on)', S40 + ': one line, so the headphones you paired are still paired '
+             'after the machine is switched off and on (some Spike 3 firmware forgets them each start). The change '
+             "is the one the release's own " + KEEP_SCRIPT + ' makes; the script as it was is kept in '
+             + S40_KEPT_DIR + '. A script that is not the one it expects is left alone.', True),
         ]
     else:
         rows += [
@@ -145,8 +256,9 @@ def details(platform=SPIKE2):
              'USBBT2EDR4 and USBBT1EDR4). Its driver is loaded only on the kernel it was built for.', False),
         ]
     rows += [
-        ('Which games', 'The exact game versions its author lists. On any other version the game runs as Stern '
-         'shipped it, with no Bluetooth entry.', False),
+        ('Which games', 'The game versions its author lists (the list is on his project page). From v0.4 the '
+         'menu finds what it needs in the game each time the game starts, so a game program this app has changed '
+         'can have it too. Where it cannot, the game runs as Stern shipped it, with no Bluetooth entry.', False),
         ('If something fails', "The author's launcher starts the plain game whenever its own parts are missing or "
          'do not start, and switches itself off after a game that ended badly.', False),
         ('Kept on the machine', "Paired headphones and settings, in /dump/spikebt on the machine's own data. A "
@@ -228,6 +340,7 @@ def inspect_root(reader, platform=SPIKE2):
         s3_monitor_text(script, False)                      # refuses a script that is not a known form
         hooked = _find(script.decode('utf-8', 'replace').split('\n'), S3_HOOK_LINES) is not None
         wrapper, wrapper_ok = None, True
+        keep = keep_bonds_state(reader)
     else:
         try:
             B.monitor_text(script, False)
@@ -236,6 +349,7 @@ def inspect_root(reader, platform=SPIKE2):
         hooked = B.has_block(script, B.BT_HOOK_LINES)
         wrapper = _read(reader, WRAPPER, 64 << 10)
         wrapper_ok = wrapper == WRAPPER_TEXT.encode()
+        keep = {'state': '', 'kept': None}
     names = _names(reader, DIR)
     release = (_read(reader, RELEASE, 64) or b'').decode('ascii', 'replace').strip() if 'pad-release' in names else ''
     intact = False
@@ -246,8 +360,8 @@ def inspect_root(reader, platform=SPIKE2):
             sums = {}
         intact = bool(sums) and set(PLUGIN.needs[ARCHES[platform]]) <= set(sums) and all(
             n in names and card_plugins.sha256(_read(reader, DIR + '/' + n) or b'') == h for n, h in sums.items())
-    return {'enabled': bool(intact and wrapper_ok), 'hooked': hooked,
-            'files': bool(names) or wrapper is not None,
+    return {'enabled': bool(intact and wrapper_ok and keep['state'] != 'todo'), 'hooked': hooked,
+            'files': bool(names) or wrapper is not None or keep['state'] == 'done' or keep['kept'] is not None,
             'release': release if card_plugins.TAG.match(release) else ''}
 
 
@@ -343,6 +457,26 @@ def game_program_sha256(path, key_source=None):
         return SPIKE3, _hash_node(reader, node or spike3_modes.game_program(reader, target))
 
 
+def finds_games(tag):
+    """Whether release *tag* looks for what it needs in the game when the game starts (v0.4.0 on), so that a game
+    program its author does not list can still get the Bluetooth entry."""
+    return bool(card_plugins.TAG.match(tag or '')) and card_plugins.tag_key(tag) >= (0, 4, 0)
+
+
+def _not_listed(where, tag, count):
+    """``dict(known, text)`` for a game program the installed release's list does not name."""
+    if finds_games(tag):
+        return {'known': None, 'text': (
+            "%s game program is not one of the %d its author lists for this kind of machine (a game program this "
+            'app has changed never is). spike-pinball-bluetooth %s looks for what it needs in the game each time '
+            'the game starts: where it finds it the Bluetooth entry is there, where it does not the game runs as '
+            'it is.' % (where, count, tag))}
+    return {'known': False, 'text': (
+        "%s game program is not one spike-pinball-bluetooth %s knows, so the game will run as it is, "
+        'with no Bluetooth entry. It knows exact game versions only (%d of them for this kind of machine), and a '
+        'game program this app has changed (Music Mode rows, editions) is not one of them.' % (where, tag, count))}
+
+
 def game_check(path, key_source=None):
     """Whether the installed release's menu knows the game program of the card at *path*:
     ``dict(known, text)`` with *known* True, False, or None when it cannot be told.  Never raises."""
@@ -359,10 +493,7 @@ def game_check(path, key_source=None):
     if digest in games:
         return {'known': True, 'text': "This card's game is one %s %s knows: %s." % (
             'spike-pinball-bluetooth', rec['tag'], games[digest])}
-    return {'known': False, 'text': (
-        "This card's game program is not one spike-pinball-bluetooth %s knows, so the game will run as it is, "
-        'with no Bluetooth entry. It knows exact game versions only (%d of them for this kind of machine), and a '
-        'game program this app has changed (Music Mode rows, editions) is not one of them.' % (rec['tag'], len(games)))}
+    return _not_listed("This card's", rec['tag'], len(games))
 
 
 def describe(info):
@@ -517,6 +648,29 @@ def prepare_rootfs(part, work, on, members=None, tag='', cancel=None, platform=S
         monitor = ssh_card.script_dest(r, MONITOR, 'Bluetooth')
         if want_script != script:
             put(r, monitor, want_script, 0o755)
+        want_s40 = None                                     # Spike 3's saved pairings: (script, the copy kept)
+        if s3:
+            keep = keep_bonds_state(r)
+            if on:
+                rule = keep_bonds_rule(want[KEEP_SCRIPT][0]) if KEEP_SCRIPT in want else None
+                new = s3_keep_bonds_text(keep['script'], rule) if keep['script'] is not None else None
+                if new is not None:
+                    want_s40 = (new.encode('utf-8'), keep['script'])
+                    if ssh_card._node(r, S40_KEPT_DIR) is None:
+                        commands.append('mkdir %s' % S40_KEPT_DIR)
+                        commands.append('set_inode_field %s mode 040700' % S40_KEPT_DIR)
+                    put(r, S40_KEPT, keep['script'], keep['mode'])
+                    put(r, S40, want_s40[0], keep['mode'])
+            else:
+                back = s3_forget_bonds_text(keep['script'], keep['kept']) if keep['script'] is not None else None
+                if back is not None:
+                    put(r, S40, back.encode('utf-8'), keep['mode'])
+                if ssh_card._node(r, S40_KEPT_DIR) is not None:
+                    left = _names(r, S40_KEPT_DIR)
+                    if 'S40bluetoothd' in left and plain(r, S40_KEPT) is not None:
+                        commands.append('rm %s' % S40_KEPT)
+                    if left in ([], ['S40bluetoothd']):
+                        commands.append('rmdir %s' % S40_KEPT_DIR)
     script_file = work / 'debugfs.commands'
     script_file.write_text('\n'.join(commands) + '\n')
     if commands:
@@ -532,6 +686,8 @@ def prepare_rootfs(part, work, on, members=None, tag='', cancel=None, platform=S
             ok = ok and after['release'] == tag and _names(r, DIR) == sorted(want) and all(
                 _read(r, DIR + '/' + n) == d and stat.S_IMODE(ssh_card._node(r, DIR + '/' + n)['mode']) == m
                 for n, (d, m) in want.items())
+            if want_s40 is not None:
+                ok = ok and _read(r, S40, 64 << 10) == want_s40[0] and _read(r, S40_KEPT, 64 << 10) == want_s40[1]
         else:
             ok = ok and not after['files'] and ssh_card._node(r, DIR) is None
         if not ok:
@@ -695,6 +851,9 @@ PROBE = ('echo "arch $(uname -m)"; grep -q "Stern Pinball Spike 3" /etc/issue 2>
          '[ -d ' + DIR + ' ] && { echo dir; for f in ' + DIR + '/* ' + DIR + '/.[!.]*; do '
          '[ -e "$f" ] || [ -L "$f" ] || continue; if [ -f "$f" ] && [ ! -L "$f" ]; then echo "file ${f##*/}"; '
          'else echo "odd ${f##*/}"; fi; done; }; '
+         'for f in ' + S40 + ' ' + S40_KEPT + '; do [ -f "$f" ] && [ ! -L "$f" ] && echo "have $f"; done; '
+         '[ -d ' + S40_KEPT_DIR + ' ] && [ ! -L ' + S40_KEPT_DIR + ' ] && echo "keptdir $(ls -A ' + S40_KEPT_DIR
+         + ' 2>/dev/null | wc -l)"; '
          'echo "free $(df -k / 2>/dev/null | tail -n 1)"; true')
 
 
@@ -720,8 +879,10 @@ def probe_machine(machine):
     # busybox df: Filesystem 1K-blocks Used Available Use% Mounted (a long device name wraps: count from the end)
     if len(words) >= 5 and words[-3].isdigit():
         free = int(words[-3]) * 1024
+    kept = next((l.split()[1] for l in lines if l.startswith('keptdir ') and len(l.split()) == 2), None)
     return {'platform': platform, 'monitor': monitor, 'have': {l[5:] for l in lines if l.startswith('have ')},
-            'dir': 'dir' in lines, 'names': sorted(names), 'free': free}
+            'dir': 'dir' in lines, 'names': sorted(names), 'free': free,
+            'keptdir': int(kept) if kept is not None and kept.isdigit() else None}
 
 
 def _sha1s(machine, paths):
@@ -769,23 +930,45 @@ def plan_machine(machine, on):
         if not s3:
             want[WRAPPER] = (WRAPPER_TEXT.encode(), 0o755)
     there = [DIR + '/' + n for n in state['names']]
+    # Spike 3's saved pairings (v0.4.4 on): the one line of S40bluetoothd, as a card build changes it
+    back, rmdir_kept = None, False
+    if s3 and S40 in have:
+        script40 = _mread(machine, S40)
+        kept40 = _mread(machine, S40_KEPT) if S40_KEPT in have else None
+        if on:
+            name = DIR + '/' + KEEP_SCRIPT
+            new = s3_keep_bonds_text(script40, keep_bonds_rule(want[name][0]) if name in want else None) \
+                if script40 else None
+            if new is not None:
+                want[S40_KEPT] = (script40, 0o755)
+                want[S40] = (new.encode('utf-8'), 0o755)
+        else:
+            text = s3_forget_bonds_text(script40, kept40) if script40 else None
+            back = text.encode('utf-8') if text is not None else None
     got = _sha1s(machine, [p for p in want if p in there or p in have])
     puts = {p: v for p, v in want.items() if got.get(p) != hashlib.sha1(v[0]).hexdigest()}
     removes = [p for p in there if p not in want]            # off: all of it; on: a file of another release
     if not on and WRAPPER in have:
         removes.append(WRAPPER)
+    if not on and s3:
+        if back is not None:
+            puts[S40] = (back, 0o755)
+        if S40_KEPT in have:
+            removes.append(S40_KEPT)
+        # the folder goes when the copy kept was all it held (or it holds nothing)
+        rmdir_kept = state['keptdir'] is not None and state['keptdir'] == (1 if S40_KEPT in have else 0)
     if on and puts and state['free'] is not None:
         need = sum(len(d) + 4096 for d, _m in puts.values()) + MARGIN
         if state['free'] < need:
             raise ExtrasError("The machine's system partition has %.1f MB free and Bluetooth headphones needs "
                               '%.1f MB.' % (state['free'] / 1e6, need / 1e6))
     return {'platform': platform, 'tag': tag, 'puts': puts, 'removes': removes,
-            'rmdir': bool(not on and state['dir']),
+            'rmdir': bool(not on and state['dir']), 'rmdir_kept': rmdir_kept,
             'script': None if want_script == script else (state['monitor'], want_script)}
 
 
 def _changes(plan):
-    return bool(plan['puts'] or plan['removes'] or plan['rmdir'] or plan['script'])
+    return bool(plan['puts'] or plan['removes'] or plan['rmdir'] or plan['script'] or plan.get('rmdir_kept'))
 
 
 def machine_game_check(machine, platform, say=None):
@@ -819,11 +1002,7 @@ def machine_game_check(machine, platform, say=None):
     if digest.hexdigest() in games:
         return {'known': True, 'text': "This machine's game is one spike-pinball-bluetooth %s knows: %s."
                 % (rec['tag'], games[digest.hexdigest()])}
-    return {'known': False, 'text': (
-        "This machine's game program is not one spike-pinball-bluetooth %s knows, so the game will run as it "
-        'is, with no Bluetooth entry. It knows exact game versions only (%d of them for this kind of machine), '
-        'and a game program this app has changed (Music Mode rows, editions) is not one of them.'
-        % (rec['tag'], len(games)))}
+    return _not_listed("This machine's", rec['tag'], len(games))
 
 
 def to_machine(machine, on, log=None, restart=True):
@@ -851,6 +1030,8 @@ def to_machine(machine, on, log=None, restart=True):
             try:
                 if on:
                     _msh(machine, 'mkdir -p %s %s' % (_q(DIR), _q(WRAPPER.rsplit('/', 1)[0])), 30)
+                    if S40_KEPT in puts:
+                        _msh(machine, 'mkdir -p %s && chmod 700 %s' % (_q(S40_KEPT_DIR), _q(S40_KEPT_DIR)), 30)
                 for n, (path, (data, mode)) in enumerate(sorted(puts.items())):
                     tmp = path + NEW
                     with machine.sftp.open(tmp, 'wb') as f:
@@ -875,6 +1056,8 @@ def to_machine(machine, on, log=None, restart=True):
             steps += [s for s, is_script in move if is_script == on]
             if plan['rmdir']:
                 steps.append('rmdir %s' % _q(DIR))
+            if plan.get('rmdir_kept'):
+                steps.append('rmdir %s' % _q(S40_KEPT_DIR))
             _rc, text = _msh(machine, ' && '.join(steps + ['sync', 'echo PAD_PUT']), 180)
             if 'PAD_PUT' not in text:
                 raise ExtrasError('The machine did not take the change: %s' % text.strip()[-200:])

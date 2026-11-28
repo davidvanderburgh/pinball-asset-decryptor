@@ -94,7 +94,7 @@ def plugin(monkeypatch):
     """The plugin with a made-up release as its tested one (the real one's archives are not in this repo)."""
     blobs, sums = release()
     pinned = {'v0.3.0': {n: hashlib.sha256(d).hexdigest() for n, d in blobs.items()}}
-    fake = P.Plugin(**dict(BT.PLUGIN.__dict__, pinned=pinned))
+    fake = P.Plugin(**dict(BT.PLUGIN.__dict__, pinned=pinned, tested='v0.3.0'))
     monkeypatch.setattr(BT, 'PLUGIN', fake)
     return fake, blobs, sums
 
@@ -103,8 +103,11 @@ def plugin(monkeypatch):
 def test_the_plugin_names_its_author_project_and_the_release_it_was_tested_with():
     p = BT.PLUGIN
     assert P.PLUGINS['bluetooth'] is p and p.project == 'https://gitlab.com/mattlqx/spike-pinball-bluetooth'
-    assert p.author == 'mattlqx' and p.license == 'GPL-2.0' and p.tested == 'v0.3.0'
-    assert set(p.pinned['v0.3.0']) == {ARMV7, ARM64} and all(len(h) == 64 for h in p.pinned['v0.3.0'].values())
+    # PAD-1647: the newest release proven with the app is the tested one; every one proven stays pinned
+    assert p.author == 'mattlqx' and p.license == 'GPL-2.0' and p.tested == 'v0.4.4'
+    assert p.tested == max(p.pinned, key=P.tag_key) and 'v0.3.0' in p.pinned
+    for pin in p.pinned.values():
+        assert set(pin) == {ARMV7, ARM64} and all(len(h) == 64 for h in pin.values())
     assert P.asset_url(p, 'v0.3.0', ARMV7) == (
         'https://gitlab.com/mattlqx/spike-pinball-bluetooth/-/releases/v0.3.0/downloads/' + ARMV7)
     assert 'projects/mattlqx%2Fspike-pinball-bluetooth/releases' in P.releases_url(p)
@@ -473,7 +476,13 @@ def test_the_plugins_tab_installs_a_version_and_saves_the_projects_tick(tmp_path
         assert row['name'] == 'Bluetooth headphones' and row['author'] == 'mattlqx'
         assert row['project_url'] == 'https://gitlab.com/mattlqx/spike-pinball-bluetooth' and row['license'] == 'GPL-2.0'
         assert [(r['tag'], r['tested']) for r in row['releases']] == [('v0.4.0', False), ('v0.3.0', True)]
-        assert row['pick'] == 'v0.3.0' and not row['installed'] and row['offered'] and row['supported']
+        # PAD-1647: the newest release is the one offered first, tested with the app yet or not
+        assert row['pick'] == 'v0.4.0' and row['newest'] == 'v0.4.0' and not row['update']
+        assert not row['installed'] and row['offered'] and row['supported']
+        assert [t['title'][:2] for t in row['guide']['sections']][:4] == ['1.', '2.', '3.', '4.']
+        for sec in row['guide']['sections']:
+            assert sec['steps'] and all((ROOT / 'pinball_decryptor/webui/static/img/plugins' / f).is_file()
+                                        for f, _cap in sec['shots'])
         assert row['now'] == 'no Bluetooth headphones (as shipped)' and any(r[0] == 'To undo' for r in row['details'])
         # ticked before it is installed: said, in the words that tell the user what to do
         assert w.call('plugins.configure', 'bluetooth', True, str(project))
@@ -482,13 +491,15 @@ def test_the_plugins_tab_installs_a_version_and_saves_the_projects_tick(tmp_path
         assert row['enabled'] and 'not installed on this computer' in row['hint']
         assert w.call('plugins.configure', 'bluetooth', True, str(tmp_path)) is False     # not this tab's project
         # install the tested version, then a newer one
-        assert w.call('plugins.install', 'bluetooth', '')
+        assert w.call('plugins.install', 'bluetooth', 'v0.3.0')
         row = _settle(w, lambda r: not r['busy'])
         assert row['installed'] == 'v0.3.0' and row['installed_tested'] and row['kind'] == 'ok' and not row['hint']
+        assert row['update'] and row['newest'] == 'v0.4.0'           # a newer one is out: said, and offered
         assert P.installed(fake)['tag'] == 'v0.3.0' and (store / 'bluetooth' / 'installed.json').is_file()
-        assert w.call('plugins.pick', 'bluetooth', 'v0.4.0') and w.call('plugins.install', 'bluetooth', 'v0.4.0')
+        assert w.call('plugins.install', 'bluetooth', '')            # with no version named: the newest
         row = _settle(w, lambda r: not r['busy'])
         assert row['installed'] == 'v0.4.0' and not row['installed_tested'] and 'newer than this version' in row['note']
+        assert not row['update']
         # a download that fails says so and leaves what was installed
         monkeypatch.setattr(P.net, 'urlopen', lambda req, timeout: (_ for _ in ()).throw(OSError('offline')))
         assert w.call('plugins.install', 'bluetooth', 'v0.3.0')
@@ -885,7 +896,11 @@ class Live:
             real = self._real(BT.MONITOR)
             if real in self.files:
                 out.append('monitor ' + real)
-            out += ['have ' + p for p in (B.MENU_SO, B.SO, B.MODE_SO, BT.WRAPPER) if p in self.files]
+            out += ['have ' + p for p in (B.MENU_SO, B.SO, B.MODE_SO, BT.WRAPPER, BT.S40, BT.S40_KEPT)
+                    if p in self.files]
+            if any(x.startswith('mkdir -p') and BT.S40_KEPT_DIR in x for x in self.ran) and not getattr(
+                    self, 'kept_gone', False):
+                out.append('keptdir %d' % sum(p.startswith(BT.S40_KEPT_DIR + '/') for p in self.files))
             inside = sorted(p for p in self.files if p.startswith(BT.DIR + '/'))
             if inside or getattr(self, 'empty_dir', False):
                 out += ['dir'] + ['file ' + p.rsplit('/', 1)[1] for p in inside]
@@ -919,6 +934,8 @@ class Live:
                     self.files.pop(w[2], None)
                 elif w[:1] == ['rmdir']:
                     assert not [p for p in self.files if p.startswith(w[1] + '/')], 'rmdir of a folder with files'
+                    if w[1] == BT.S40_KEPT_DIR:
+                        self.kept_gone = True
             return 0, 'PAD_PUT\n'
         if script.startswith('rm -f '):
             for p in words[2:]:
@@ -1131,3 +1148,142 @@ def test_the_plugins_tab_puts_it_on_the_machine_and_takes_it_off(tmp_path, monke
         assert w.call('plugins.put_on_machine', 'bluetooth')
         row = _settle(w, lambda r: not r['busy'] and r['kind'] == 'err')
         assert row['note'] == BT.NOT_A_MACHINE
+
+
+# ------------------------------------------------------------------ PAD-1647: the newest release, v0.4.4
+KEEP_INSTALLER = b"""#!/bin/sh
+marker=spikebt-owned-bond-retention
+original='if grep -q "Trusted=true" "info"; then'
+replacement='if grep -q "Trusted=true" "info" || /usr/local/spikebt/spikebt --keep="$PWD" 2>/dev/null; then # spikebt-owned-bond-retention'
+"""
+S40_STOCK = ('#!/bin/sh\ncase "$1" in\n  start)\n\tfor d in /var/lib/bluetooth/*/*; do\n\t\tcd "$d"\n'
+             '\t\t\tif grep -q "Trusted=true" "info"; then\n\t\t\t\ttrue\n\t\t\telse\n\t\t\t\trm -rf "$d"\n'
+             '\t\t\tfi\n\tdone\n\t;;\nesac\n')
+
+
+def test_a_busy_gitlab_says_when_to_try_again(store, plugin):
+    """gitlab.com allows a computer that is not signed in so many requests an hour: its 429 is said in words,
+    with the wait it names, and nothing is installed."""
+    import urllib.error
+    fake, _blobs, _sums = plugin
+
+    def busy(req, timeout):
+        raise urllib.error.HTTPError(req.full_url, 429, 'Too Many Requests', {'Retry-After': '1876'}, None)
+    with pytest.raises(PluginError) as e:
+        P.install(fake, opener=busy)
+    said = str(e.value)
+    assert 'asking this computer to wait' in said and '(about 32 minutes)' in said and 'Install from files' in said
+    assert '429' not in said and P.installed(fake) is None
+    with pytest.raises(PluginError, match='asking this computer to wait before'):
+        P.releases(fake, opener=lambda req, timeout: (_ for _ in ()).throw(
+            urllib.error.HTTPError(req.full_url, 429, 'Too Many Requests', {}, None)))
+    with pytest.raises(PluginError, match='Could not download'):       # any other answer: as before
+        P.install(fake, opener=lambda req, timeout: (_ for _ in ()).throw(
+            urllib.error.HTTPError(req.full_url, 404, 'Not Found', {}, None)))
+
+
+def test_from_v0_4_a_game_its_author_does_not_list_is_not_said_to_lose_the_entry(store, plugin, monkeypatch):
+    """v0.4.0 on, the menu finds what it needs in the game when the game starts: a program that is not on its
+    author's list (one this app changed) is no longer told it will have no Bluetooth entry."""
+    assert not BT.finds_games('v0.3.1') and BT.finds_games('v0.4.0') and BT.finds_games('v0.4.4')
+    assert not BT.finds_games('') and not BT.finds_games('nightly')
+    old = BT._not_listed("This card's", 'v0.3.0', 61)
+    assert old['known'] is False and 'with no Bluetooth entry' in old['text']
+    new = BT._not_listed("This card's", 'v0.4.4', 61)
+    assert new['known'] is None and 'no Bluetooth entry' not in new['text']
+    assert 'looks for what it needs in the game each time the game starts' in new['text'] and '61' in new['text']
+    monkeypatch.setattr(P, 'installed', lambda plugin: {'tag': 'v0.4.4', 'tested': True, 'files': {}})
+    monkeypatch.setattr(BT, 'game_program_sha256', lambda path, key_source=None: (BT.SPIKE2, 'f' * 64))
+    monkeypatch.setattr(BT, 'known_games', lambda platform: {'a' * 64: 'Godzilla Pro'})
+    assert BT.game_check('card.raw') == BT._not_listed("This card's", 'v0.4.4', 1)
+    monkeypatch.setattr(BT, 'known_games', lambda platform: {'f' * 64: 'Godzilla Pro'})
+    assert BT.game_check('card.raw')['known'] is True
+
+
+def test_the_saved_pairings_line_is_changed_as_the_releases_own_installer_says():
+    rule = BT.keep_bonds_rule(KEEP_INSTALLER)
+    assert rule[0] == 'if grep -q "Trusted=true" "info"; then' and rule[1].endswith('# ' + BT.KEEP_MARK)
+    # an installer this app does not read: nothing is done
+    assert BT.keep_bonds_rule(b'#!/bin/sh\necho hello\n') is None and BT.keep_bonds_rule(None) is None
+    assert BT.keep_bonds_rule(KEEP_INSTALLER.replace(b'# spikebt-owned', b'# other')) is None
+    assert BT.keep_bonds_rule(KEEP_INSTALLER + b"original='again'\n") is None
+    assert BT.keep_bonds_rule(KEEP_INSTALLER.replace(b'replacement=\'if grep', b'replacement=\'rm -rf /; if grep')) is None
+    new = BT.s3_keep_bonds_text(S40_STOCK, rule)
+    assert new.count(BT.KEEP_MARK) == 1 and '\t\t\t' + rule[1] + '\n' in new          # its indent kept
+    assert new.replace('\t\t\t' + rule[1], '\t\t\t' + rule[0]) == S40_STOCK          # nothing else changed
+    assert BT.s3_keep_bonds_text(new, rule) is None                                     # already made
+    assert BT.s3_keep_bonds_text(S40_STOCK.replace('Trusted=true', 'Trusted=yes'), rule) is None   # not the script
+    assert BT.s3_keep_bonds_text(S40_STOCK + S40_STOCK, rule) is None                   # two such lines
+    assert BT.s3_keep_bonds_text(S40_STOCK, None) is None
+    assert BT.s3_forget_bonds_text(new, S40_STOCK) == S40_STOCK and BT.s3_forget_bonds_text(new) == S40_STOCK
+    assert BT.s3_forget_bonds_text(new, new) == S40_STOCK              # a copy that is itself changed is not used
+    assert BT.s3_forget_bonds_text(S40_STOCK) is None
+
+
+def _keep_release():
+    """A made-up release whose arm64 archive carries the saved-pairings installer, as v0.4.4's does."""
+    common = {'menu.so': b'\x7fELF menu keep', 'spikebt': b'\x7fELF helper ' + b'keep' * 4000,
+              'run-live.sh': b'#!/bin/sh\n# launcher\n', 'rollback.sh': b'#!/bin/sh\n',
+              'LICENSE': b'GPL 2\n', 'NOTICE.md': b'notice\n'}
+    blobs = {ARMV7: archive(dict(common, **{'radio-start.sh': b'#!/bin/sh\n# radio\n', 'btusb.ko': b'ko'})),
+             ARM64: archive(dict(common, **{BT.KEEP_SCRIPT: KEEP_INSTALLER}))}
+    sums = ''.join('%s  %s\n' % (hashlib.sha256(d).hexdigest(), n) for n, d in blobs.items()).encode()
+    return blobs, sums
+
+
+def test_a_spike3_card_keeps_its_pairings_and_gives_the_script_back(tmp_path, store, plugin):
+    from pinball_decryptor.plugins.stern.ext4 import Ext4Reader
+    fake, _blobs, _sums = plugin
+    blobs, sums = _keep_release()
+    P.install(fake, 'v0.4.4', opener=Web({'v0.4.4': (blobs, sums)}))
+    tag, members = P.files(fake, 'arm64')
+    image = build(tmp_path, extra={'etc/init.d/game_monitor': S3_STOCK.encode(),
+                                   'etc/issue': b'Welcome to Stern Pinball Spike 3\n',
+                                   'etc/init.d/S40bluetoothd': S40_STOCK.encode()})
+    root = tmp_path / 'rootfs.img'
+    root.write_bytes(image.read_bytes()[1 << 20:25 << 20])
+    work = tmp_path / 'work'
+    work.mkdir()
+
+    def info():
+        with open(root, 'rb') as f:
+            return BT.inspect_root(Ext4Reader(f, 0, root.stat().st_size), BT.SPIKE3)
+    before_mode = _s3_node(root, BT.S40)['mode'] & 0o7777
+    BT.prepare_rootfs(root, work, True, members, tag, platform=BT.SPIKE3)
+    assert info() == dict(enabled=True, hooked=True, files=True, release='v0.4.4')
+    want = BT.s3_keep_bonds_text(S40_STOCK, BT.keep_bonds_rule(KEEP_INSTALLER)).encode()
+    got = _s3_node(root, BT.S40)
+    assert got['data'] == want and got['mode'] & 0o7777 == before_mode and got['uid'] == 0
+    kept = _s3_node(root, BT.S40_KEPT)
+    assert kept['data'] == S40_STOCK.encode() and _s3_node(root, BT.S40_KEPT_DIR)['mode'] & 0o7777 == 0o700
+    BT.prepare_rootfs(root, work, True, members, tag, platform=BT.SPIKE3)          # again: nothing to do
+    assert _s3_node(root, BT.S40)['data'] == want and _s3_node(root, BT.S40_KEPT)['data'] == S40_STOCK.encode()
+    # a card with the release on it and the line not changed is not the whole install: a build finishes it
+    with open(root, 'rb') as f:
+        r = Ext4Reader(f, 0, root.stat().st_size)
+        assert BT.keep_bonds_state(r)['state'] == 'done'
+    BT.prepare_rootfs(root, work, False, platform=BT.SPIKE3)
+    assert _s3_node(root, BT.S40)['data'] == S40_STOCK.encode() and _s3_node(root, BT.S40_KEPT_DIR) is None
+    assert _s3_node(root, BT.DIR) is None and info() == dict(enabled=False, hooked=False, files=False, release='')
+
+
+def test_a_spike3_machine_keeps_its_pairings_over_remote_access(store, plugin, monkeypatch):
+    fake, _blobs, _sums = plugin
+    blobs, sums = _keep_release()
+    monkeypatch.setattr(P.net, 'urlopen', Web({'v0.4.4': (blobs, sums)}))
+    P.install(fake, 'v0.4.4')
+    m = Live({BT.MONITOR: S3_STOCK.encode(), BT.S40: S40_STOCK.encode()}, arch='aarch64', spike3=True)
+    res = BT.to_machine(m, True)
+    assert (res['result'], res['tag']) == ('done', 'v0.4.4')
+    want = BT.s3_keep_bonds_text(S40_STOCK, BT.keep_bonds_rule(KEEP_INSTALLER)).encode()
+    assert m.files[BT.S40] == [want, 0o755] and m.files[BT.S40_KEPT][0] == S40_STOCK.encode()
+    assert any(x.startswith('mkdir -p') and BT.S40_KEPT_DIR in x and 'chmod 700' in x for x in m.ran)
+    assert not m.wrote_ro and BT.to_machine(m, True)['result'] == 'already'
+    assert BT.to_machine(m, False)['result'] == 'done'
+    assert m.files[BT.S40][0] == S40_STOCK.encode() and BT.S40_KEPT not in m.files
+    assert any('rmdir' in x and BT.S40_KEPT_DIR in x for x in m.ran)
+    assert BT.to_machine(m, False)['result'] == 'already'
+    # a script that is not the one the installer takes is left alone, and the plugin still goes on
+    other = S40_STOCK.replace('Trusted=true', 'Trusted=yes').encode()
+    m = Live({BT.MONITOR: S3_STOCK.encode(), BT.S40: other}, arch='aarch64', spike3=True)
+    assert BT.to_machine(m, True)['result'] == 'done' and m.files[BT.S40][0] == other and BT.S40_KEPT not in m.files

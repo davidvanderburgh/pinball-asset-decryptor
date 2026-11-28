@@ -41,6 +41,9 @@ def _tar(files):
 SETTINGS = {'nv/godzilla_le/NVM/00000031': b'scores' * 50, 'nv/godzilla_le/NVRAM/00000014': b'adjust'}
 
 
+ROOT = __import__('pathlib').Path(__file__).resolve().parent.parent
+
+
 class Machine:
     """A stand-in for a connected machine: answers by what the script asks for, and records what it was told."""
 
@@ -108,7 +111,20 @@ def test_status_reads_as_plain_rows():
     assert rows['Switched on for'] == '1 h 6 min'
     assert rows['Wi-Fi'] == 'HomeNet, 5 GHz (5200 MHz), signal -48 dBm, link 867 Mbit/s'
     assert rows['Room on the card, games'].startswith('2.7 GB free of 13.2 GB')
-    assert rows['From PAD on this card'] == 'reliable Wi-Fi start-up, newer adapter driver (5 GHz), remote buttons'
+    # PAD-1647: one line a feature (the pages bullet a list), remote access always among them
+    assert rows['From PAD on this card'] == ['Remote access', 'Reliable Wi-Fi start-up',
+                                             'Newer Wi-Fi adapter driver (5 GHz)', 'Remote buttons']
+    assert dict(C.parse_status('game x/game\n'))['From PAD on this card'] == ['Remote access']
+    # the Bluetooth headphones plugin is one of them, with the version on the card
+    assert 'spikebt/enabled' in C.STATUS and 'spikebt/pad-release' in C.STATUS and '/dump/spikebt/disabled' in C.STATUS
+    got = dict(C.parse_status('game x/game\npad modes yes\npad bluetooth v0.4.4\n'))['From PAD on this card']
+    assert got == ['Remote access', "PAD's mode runtime", 'Bluetooth headphones plugin v0.4.4']
+    got = dict(C.parse_status('pad bluetooth \npad bluetooth-off yes\n'))['From PAD on this card']
+    assert got[1].startswith('Bluetooth headphones plugin (switched itself off') and 'Check it on the machine' in got[1]
+    assert dict(C.parse_status('pad bluetooth ;rm\n'))['From PAD on this card'][1] == 'Bluetooth headphones plugin'
+    for name in ('tabs/network.js', 'shell.js'):                       # both pages bullet a list
+        js = (ROOT / 'pinball_decryptor/webui/static/js' / name).read_text(encoding='utf-8')
+        assert 'Array.isArray(r[1])' in js and 'care-list' in js
     assert dict(C.parse_status('game x/game\nwifi wpa_state=SCANNING\n'))['Wi-Fi'] == 'not connected (SCANNING)'
     assert dict(C.parse_status('wifi wpa_state=COMPLETED\nwifi freq=2412\nwifi ssid=H\n'))['Wi-Fi'].startswith('H, 2.4 GHz')
     assert 'psk' not in C.STATUS and 'wpa_supplicant.conf' not in C.STATUS + C.REPORT + C.LOG_LIST   # never the password

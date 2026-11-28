@@ -1,0 +1,26 @@
+VERDICT the machine starts as the card without the plugin, mounted read-only: PASS  (4484 files and folders, root ro)
+VERDICT before: its game_monitor starts the game directly: PASS  (STANDIN started as: /games/standin  | STANDIN LD_PRELOAD=)
+VERDICT Check it on the machine, before: PASS  (This machine's card has no Bluetooth headphones on it. Put it on the machine now with the button here: there is no card to write.)
+VERDICT the machine is told apart by its own answers: PASS  (platform stern-spike2, script /etc/init.d/game_monitor, 182.6 MB free)
+VERDICT Put it on the machine now: PASS  (result done, release v0.4.4, 18.1 s)
+VERDICT the restart was asked for, once: PASS
+VERDICT the machine's real game program is one the release knows: PASS  (This machine's game is one spike-pinball-bluetooth v0.4.4 knows: Godzilla Pro – v1.16.0.)
+VERDICT the launcher's switched-off mark is gone: PASS
+VERDICT the machine's card now equals one the card-write path made, file for file (bytes, mode, owner): PASS  (4498 entries compared; differ: none)
+VERDICT only the plugin folder, the wrapper and game_monitor changed: PASS
+VERDICT the author's own SHA256SUMS checks out on the machine: PASS  (9 files OK)
+VERDICT nothing left on its way: PASS
+VERDICT once the old game_monitor has ended the card is read-only again: PASS
+VERDICT after the restart game_monitor runs the launcher with the game: PASS  (+ /usr/local/spikebt/run-live.sh /games/standin -> STANDIN started as: /games/standin  | STANDIN LD_PRELOAD=)
+VERDICT Check it on the machine, after: PASS  (spike-pinball-bluetooth v0.4.4 is on the machine and switched on; its helper is not running, which is normal on a game version it does not know or with no Bluetooth adapter.)
+VERDICT Put it on again changes nothing and does not restart: PASS  (The machine already has spike-pinball-bluetooth v0.4.4; nothing was changed. A Spike 2 machine needs a USB Bluetooth adapter plugged in. This machine's game is one spike-pinball-bluetooth v0.4.4 knows: Godzilla Pro – v1.16.0.)
+VERDICT Take it off the machine puts the card back exactly as it was: PASS  (differ from the card before: none)
+VERDICT after that restart game_monitor starts the game directly again: PASS
+VERDICT a linked game_monitor is followed to its file: PASS  (/spk/packages/spike-1.16.0/etc/init.d/game_monitor)
+VERDICT on such a card the link stays and its file gets the block: PASS
+VERDICT and its game_monitor runs the launcher: PASS
+VERDICT with the plugin not on this PC it is refused and the machine untouched: PASS
+ALL 22 CHECKS PASSED
+proof.py exit: 0
+VERDICT the card's system partition is a clean filesystem afterwards: PASS  (/var/tmp/pad1647/p2.img: 4521/86016 files (0.9% non-contiguous), 159679/344064 blocks)
+VERDICT the app's card inspector reads the machine's card as carrying the plugin: PASS  (spike-pinball-bluetooth v0.4.4, started with the game)

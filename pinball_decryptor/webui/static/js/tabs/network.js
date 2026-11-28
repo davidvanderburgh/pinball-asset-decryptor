@@ -537,7 +537,8 @@ function MachineCare({ n }) {
     <div class="lbl">Status</div>
     <div class="row"><${Button} disabled=${off} onClick=${() => call("network.machine_status")}>Read the status<//></div>
     ${(n.care_status || []).length ? html`<table class="net-fields net-wifi-details">
-      <tbody>${n.care_status.map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th><td>${r[1]}</td></tr>`)}</tbody>
+      <tbody>${n.care_status.map((r) => html`<tr key=${r[0]}><th scope="row">${r[0]}</th><td>${Array.isArray(r[1])
+        ? html`<ul class="care-list">${r[1].map((t) => html`<li key=${t}>${t}</li>`)}</ul>` : r[1]}</td></tr>`)}</tbody>
     </table>` : null}
     <div class="lbl">Logs</div>
     <div class="row">

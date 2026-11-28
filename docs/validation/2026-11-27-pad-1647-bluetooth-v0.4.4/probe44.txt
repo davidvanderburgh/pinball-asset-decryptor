@@ -1,0 +1,6 @@
+﻿/mnt/c/tmp/PAD-1647/game.bin  sha256 a5725b671191  7912180 bytes
+  cold: exit 0 found=1 cached=0 elapsed_us=43062 profile=godzilla_pro-1.16  (60 addresses)
+  warm: found=1 cached=1 elapsed_us=50961 profile=godzilla_pro-1.16
+/mnt/c/tmp/PAD-1647/ovr/godzilla_le/game  sha256 915c814ceaa2  7974912 bytes
+  cold: exit 0 found=1 cached=0 elapsed_us=47363 profile=godzilla_le-1.16  (60 addresses)
+  warm: found=1 cached=1 elapsed_us=51869 profile=godzilla_le-1.16

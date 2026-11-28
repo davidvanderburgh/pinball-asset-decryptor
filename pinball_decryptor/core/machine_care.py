@@ -65,6 +65,8 @@ df -k /games /dump 2>/dev/null | awk 'NR>1 && NF>=6 {print "disk " $6 " " $4 " "
 [ -x /usr/local/bin/pad-wifi-band ] && echo "pad wifi-5ghz yes"
 [ -f /usr/local/bin/pad-buttons.so ] && echo "pad buttons yes"
 [ -f /usr/local/padmode/mode.so ] && echo "pad modes yes"
+[ -f /usr/local/spikebt/enabled ] && echo "pad bluetooth $(cat /usr/local/spikebt/pad-release 2>/dev/null)"
+[ -e /dump/spikebt/disabled ] && echo "pad bluetooth-off yes"
 '''
 
 #: PAD-1587: a JJP machine's own logs (its jjpe/gen1/scripts/dumplogs.sh collects the same for JJP's support)
@@ -146,11 +148,13 @@ def _duration(seconds):
 
 #: where each disk the status names is, in words
 _DISKS = {'/games': 'Room on the card, games', '/dump': 'Room on the card, logs',
+          '/var/volatile/multi': 'Room on the card, games',     # a multi-boot card: where its games are mounted
           '/': 'Room on the disk, system', '/jjpe/perm': 'Room on the disk, settings'}
 
 
 def parse_status(text):
-    """``[(what, value), ...]`` for the Network tab, from :data:`STATUS`'s (or :data:`JJP_STATUS`'s) answer."""
+    """``[(what, value), ...]`` for the Network tab, from :data:`STATUS`'s (or :data:`JJP_STATUS`'s) answer.
+    A value is a sentence, or a list of short lines the page shows as bullets (what PAD put on the card)."""
     got, wifi, disks, pad = {}, {}, [], []
     for line in (text or '').splitlines():
         a = line.split(None, 1)
@@ -200,19 +204,30 @@ def parse_status(text):
         rows.append(('Network', got['net']))
     for mount, free, total in disks:
         rows.append((_DISKS.get(mount, 'Room on ' + mount), '%s free of %s' % (_human(free), _human(total))))
-    names = []
+    # PAD-1647 (David: "we should bullet point the features we are adding there instead of a sentence structure",
+    # and "see at a glance that my bluetooth plugin is installed"): one line a feature, a list the pages bullet.
+    # Remote access is always one of them: the status was read over it.
+    names = ['Remote access']
+    bt_off = any(item.split()[0] == 'bluetooth-off' for item in pad)
     for item in pad:
-        if item.startswith('wifi-startup'):
-            names.append('reliable Wi-Fi start-up')
-        elif item.startswith('wifi-5ghz'):
-            names.append('newer adapter driver (5 GHz)')
-        elif item.startswith('buttons'):
-            names.append('remote buttons')
-        elif item.startswith('modes'):
+        key = item.split()[0]
+        if key == 'wifi-startup':
+            names.append('Reliable Wi-Fi start-up')
+        elif key == 'wifi-5ghz':
+            names.append('Newer Wi-Fi adapter driver (5 GHz)')
+        elif key == 'buttons':
+            names.append('Remote buttons')
+        elif key == 'modes':
             names.append("PAD's mode runtime")
-        elif item.startswith('send'):
-            names.append('files sent from PAD')
-    rows.append(('From PAD on this card', ', '.join(names) if names else 'remote access only'))
+        elif key == 'send':
+            names.append('Files sent from PAD')
+        elif key == 'bluetooth':
+            tag = item.split()[1] if len(item.split()) == 2 and re.match(r'^v[0-9.]{1,16}$', item.split()[1]) else ''
+            names.append('Bluetooth headphones plugin%s%s' % (
+                ' ' + tag if tag else '',
+                ' (switched itself off after a game that ended badly; Check it on the machine, on the Plugins '
+                'tab, switches it back on)' if bt_off else ''))
+    rows.append(('From PAD on this card', names))
     return rows
 
 

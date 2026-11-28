@@ -423,6 +423,8 @@ html.bp-1100 .mach-remote { grid-template-columns: minmax(0, 1fr); }
 .mach-status { border-collapse: collapse; width: 100%; font-size: 12.5px; }
 .mach-status th, .mach-status td { text-align: left; padding: 4px 8px 4px 0; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
 .mach-status th { width: 36%; color: var(--ink-3, var(--ink-2)); font-weight: 600; }
+/* PAD-1647: what PAD put on the card, one bullet a feature (My machines and the Network tab's status) */
+.care-list { margin: 0; padding-left: 16px; display: flex; flex-direction: column; gap: 2px; }
 .mach-remote-acts { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 14px; align-items: center; margin-top: 4px; }
 .mach-remote-acts .row { gap: 6px; }
 .mach-log { max-height: 220px; overflow: auto; font-size: 11.5px; line-height: 1.35; margin: 0; padding: 8px; background: var(--panel);

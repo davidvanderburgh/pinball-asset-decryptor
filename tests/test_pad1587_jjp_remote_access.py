@@ -309,7 +309,7 @@ def test_jjp_status_rows():
     assert rows['Wi-Fi'] == 'HomeNet, 5 GHz (5180 MHz), signal 78%'
     assert rows['Network'] == 'enp2s0 192.168.4.80/24'
     assert rows['Room on the disk, system'].endswith('free of 15.3 GB') and 'Room on the disk, settings' in rows
-    assert rows['From PAD on this card'] == 'files sent from PAD'
+    assert rows['From PAD on this card'] == ['Remote access', 'Files sent from PAD']
 
 
 class Care:

@@ -28,6 +28,7 @@ import os
 import re
 import shutil
 import tarfile
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
@@ -146,10 +147,26 @@ def _get(url, limit, opener=None, progress=None):
         return out.getvalue()
     except PluginError:
         raise
+    except urllib.error.HTTPError as exc:
+        if exc.code != 429:
+            raise PluginError(_no_download(url, exc)) from exc
+        # PAD-1647: gitlab.com allows a computer that is not signed in a number of requests an hour from its
+        # internet address (browsing its pages counts too), and says how long is left
+        wait = str((exc.headers or {}).get('Retry-After') or '').strip()
+        mins = (int(wait) + 59) // 60 if wait.isdigit() and int(wait) < 90000 else 0
+        raise PluginError('gitlab.com is asking this computer to wait before it downloads anything more%s. It '
+                          'allows a set number of requests an hour from one internet address, and looking at its '
+                          'pages in a browser counts. Nothing was changed; try again then, or use "Install from '
+                          'files".' % (' (about %d minute%s)' % (mins, '' if mins == 1 else 's') if mins else '')
+                          ) from exc
     except Exception as exc:                                           # noqa: BLE001
-        raise PluginError('Could not download %s: %s\nPlugins come from gitlab.com, which this computer has to '
-                          'be able to reach; or download the files on another computer and use "Install from '
-                          'files".' % (url, exc)) from exc
+        raise PluginError(_no_download(url, exc)) from exc
+
+
+def _no_download(url, exc):
+    return ('Could not download %s: %s\nPlugins come from gitlab.com, which this computer has to '
+            'be able to reach; or download the files on another computer and use "Install from '
+            'files".' % (url, exc))
 
 
 def releases(plugin, opener=None):

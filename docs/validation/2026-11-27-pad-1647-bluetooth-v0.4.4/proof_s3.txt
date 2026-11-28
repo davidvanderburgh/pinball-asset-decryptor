@@ -1,0 +1,20 @@
+VERDICT the machine starts as the card without the plugin, mounted read-only: PASS  (6426 files and folders, root ro)
+VERDICT Check it on the machine, before: PASS  (This machine's card has no Bluetooth headphones on it. Put it on the machine now with the button here: there is no card to write.)
+VERDICT the machine is told apart by its own answers: PASS  (platform stern-spike3, script /etc/init.d/game_monitor, 266.8 MB free)
+VERDICT Put it on the machine now: PASS
+VERDICT the restart was asked for, once: PASS
+VERDICT the machine's card now equals one the card-write path made, file for file (bytes, mode, owner): PASS  (6440 entries compared; differ: none)
+    added: /etc/init.d/.spikebt-originals, /etc/init.d/.spikebt-originals/S40bluetoothd, /usr/local/spikebt, /usr/local/spikebt/LICENSE, /usr/local/spikebt/NOTICE.md, /usr/local/spikebt/SHA256SUMS, /usr/local/spikebt/enabled, /usr/local/spikebt/install-bluez5-bond-retention.sh, /usr/local/spikebt/menu-elf.txt, /usr/local/spikebt/menu.so, /usr/local/spikebt/pad-release, /usr/local/spikebt/rollback.sh, /usr/local/spikebt/run-live.sh, /usr/local/spikebt/spikebt
+    changed: /etc/init.d/S40bluetoothd, /etc/init.d/game_monitor
+VERDICT only the plugin folder, game_monitor and the one line of S40bluetoothd changed; no driver, no wrapper: PASS
+VERDICT S40bluetoothd on the machine is what the author's own installer makes of it, and the copy kept is the script as it was (folder 700, root): PASS  (1989 bytes, marked line: 1)
+VERDICT the machine's own shell reads the changed S40bluetoothd without complaint: PASS
+VERDICT game_monitor runs the launcher with bluez5: PASS
+VERDICT the author's own SHA256SUMS checks out on the machine: PASS  (8 files OK)
+VERDICT the launcher's switched-off mark is gone: PASS
+VERDICT Check it on the machine, after: PASS  (spike-pinball-bluetooth v0.4.4 is on the machine and switched on; its helper is not running, which is normal on a game version it does not know or with no Bluetooth adapter.)
+VERDICT Put it on again changes nothing and does not restart: PASS  (The machine already has spike-pinball-bluetooth v0.4.4; nothing was changed. It uses the machine's own Bluetooth radio.)
+VERDICT Take it off the machine puts the card back exactly as it was: PASS  (differ from the card before: none)
+ALL 15 CHECKS PASSED
+proof_s3.py exit: 0
+VERDICT the system partition is a clean filesystem afterwards: PASS  (rootfs: 6418/35200 files (0.2% non-contiguous), 65800/140800 blocks)

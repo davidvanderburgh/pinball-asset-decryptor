@@ -6,8 +6,9 @@ releases at a version tag rather than carry his code.
 
 One card a plugin, in two halves:
 
-* **On this computer**: which release is installed, the versions its author has published (the one this version
-  of the app was tested with is marked), Install / Update, Install from files for a computer that cannot reach
+* **On this computer**: which release is installed, the versions its author has published, newest first and
+  offered first (PAD-1647; the ones this version of the app was tested with are marked), Install / Update,
+  Install from files for a computer that cannot reach
   gitlab.com, and Remove.  The store is ``core/card_plugins.py``: the settings folder, so an app update keeps it.
 * **On your cards**: the project's tick, which a build acts on (``core/bluetooth_card.py``), what the picked card
   carries now, and exactly what it changes.
@@ -25,15 +26,68 @@ INTRO = ('Optional add-ons made by other people. A plugin is downloaded from its
          'version you pick, and kept on this computer beside your settings, so updating this app leaves it '
          'installed. Tick one for a project and the cards you write from it carry it.')
 
+#: PAD-1647 (David: "i want to see some instructions / screenshots of how the bluetooth feature works. otherwise,
+#: I have to go to the repo page to understand it better"): how the plugin is used on the machine, in the tab.
+#: Sections of steps, each with the pictures that show them (static/img/plugins/, taken from the game in the
+#: emulator with the plugin's own demo headphones, which is why they are fictional).
+BLUETOOTH_GUIDE = dict(
+    title='How it works on the machine',
+    lead="Everything is done in the game's own menus on the machine. Nothing is paired from this computer.",
+    shots_note='Pictures: Godzilla with the plugin in this app\'s emulator. The headphones in them are made up.',
+    sections=[
+        dict(title='1. Get it onto the machine', steps=[
+            'Install it here (On this computer), then tick it for your project and write the card, or use Put it '
+            'on the machine now when remote access is set up.',
+            'Spike 2: plug a USB Bluetooth adapter into the machine. Its author tested the StarTech USBBT2EDR4 '
+            'and USBBT1EDR4. Spike 3 uses its own radio.',
+        ], shots=[]),
+        dict(title='2. Pair your headphones (coin door buttons)', steps=[
+            'Open the coin door and press Select to enter Service. The main menu has a new last row, Bluetooth.',
+            'Make the headphones ready to pair (their manual says how) and choose Search for headphones.',
+            'Pick them in the list: they pair and connect, and the game sound plays in them.',
+            'Headphones connected here stay connected while you play. After you leave the menu they disconnect '
+            'once they have been idle for two minutes.',
+        ], shots=[('bt-service-row.jpg', 'Service: Bluetooth is the last row of the main menu'),
+                  ('bt-service-menu.jpg', 'The Bluetooth menu in Service'),
+                  ('bt-search.jpg', 'Search for headphones')]),
+        dict(title='3. Use them as a player (no coin door)', steps=[
+            'At home, once: in Service, Bluetooth, turn on Unauthenticated headphones. It is off until you do.',
+            'Then, with no game running, hold the left flipper button: the game selection opens and Bluetooth '
+            'is its last choice (from the first choice, Left wraps round to it).',
+            'With Insider Connected: hold the left flipper, sign in with your code, and choose Bluetooth. Your '
+            'preferred headphones reconnect when you sign in and disconnect when you sign out.',
+            'Flippers move, Action selects (both flippers on a game with no Action button), hold it to go back. '
+            'Start leaves the menu and starts a game. The menu closes by itself after 60 seconds.',
+        ], shots=[('bt-player-entry.jpg', 'Hold the left flipper: Bluetooth is the last choice'),
+                  ('bt-player-menu.jpg', 'The Bluetooth menu a player sees')]),
+        dict(title='4. Volume and the cabinet speakers', steps=[
+            'Open a saved headphone to connect, disconnect, forget it, make it preferred or set its volume. '
+            'Each headset has its own volume.',
+            'Cabinet speakers: On plays through the speakers too, Off mutes them, Auto mutes them while '
+            'headphones are playing.',
+            'Cabinet volume in Service sets the game\'s own volume; a player can turn it down from there unless '
+            'Allow player cabinet volume adjust is No.',
+        ], shots=[('bt-device.jpg', 'A saved headphone: volume, Disconnect, Forget'),
+                  ('bt-volume.jpg', 'Its volume')]),
+        dict(title='Good to know', steps=[
+            'Up to four headsets at once, eight saved for each account. Headsets that ask for a PIN do not work.',
+            'Bluetooth adds a short delay to the sound. If the helper stops, the game goes back to its speakers.',
+            'Paired headphones and their settings are kept on the machine, so a new card keeps them.',
+            'If the Bluetooth row is missing after the game crashed, the plugin has switched itself off: Check '
+            'it on the machine (here, with remote access) switches it back on.',
+        ], shots=[]),
+    ])
+
 #: plugin key -> its card side: the module that puts it on a card, the project's choice, and the tick's words
 CARDS = {
     'bluetooth': dict(card=bluetooth_card, load=card_extras.load_bluetooth, save=card_extras.save_bluetooth,
                       tick='Put Bluetooth headphones on cards I write from this project',
+                      guide=BLUETOOTH_GUIDE,
                       needs={bluetooth_card.SPIKE2: 'A Spike 2 machine needs a USB Bluetooth adapter plugged '
-                             'in. It works on the exact game versions its author lists; on any other the game '
+                             'in. It works on the game versions its author lists; on any other the game '
                              'runs as Stern shipped it.',
                              bluetooth_card.SPIKE3: 'A Spike 3 machine uses its own Bluetooth radio. It works '
-                             'on the exact game versions its author lists; on any other the game runs as Stern '
+                             'on the game versions its author lists; on any other the game runs as Stern '
                              'shipped it.'}),
 }
 
@@ -74,9 +128,12 @@ class PluginsTab(TabService):
             # before the author's list is asked for (or when it cannot be): the release the app was tested with
             rows = [{'tag': plugin.tested, 'title': plugin.tested, 'date': '', 'tested': True}]
         tags = [r['tag'] for r in rows]
+        # PAD-1647 (David: "we should always promote the latest version"): the newest release its author has
+        # published is the one offered first, tested with this app yet or not (the list says which)
+        newest = max(tags, key=card_plugins.tag_key)
         pick = self._pick.get(plugin.key)
         if pick not in tags:
-            pick = plugin.tested if plugin.tested in tags else tags[0]
+            pick = newest
         can = card.offered(self.mfr)
         platform = card.platform_of(self.mfr) or card.SPIKE2
         if not can:
@@ -108,7 +165,9 @@ class PluginsTab(TabService):
             'key': plugin.key, 'name': plugin.name, 'what': plugin.what, 'author': plugin.author,
             'project_url': plugin.project, 'license': plugin.license, 'tested': plugin.tested,
             'installed': rec['tag'] if rec else '', 'installed_tested': bool(rec and rec['tested']),
-            'releases': rows, 'releases_state': state, 'pick': pick,
+            'releases': rows, 'releases_state': state, 'pick': pick, 'newest': newest,
+            'update': bool(rec and card_plugins.tag_key(newest) > card_plugins.tag_key(rec['tag'])),
+            'guide': side.get('guide') or {},
             'busy': self._busy.get(plugin.key, ''), 'note': text, 'kind': kind,
             'offered': can, 'supported': bool(info['supported']), 'reason': info['reason'],
             'enabled': on, 'has_project': has_project, 'hint': hint, 'error': error,
@@ -356,7 +415,8 @@ class PluginsTab(TabService):
         plugin = self._plugin(key)
         if plugin is None:
             return False
-        tag = tag or self._pick.get(key) or plugin.tested
+        tags = [r['tag'] for r in self._releases.get(key, ('', []))[1]]
+        tag = tag or self._pick.get(key) or (max(tags, key=card_plugins.tag_key) if tags else plugin.tested)
         last = {'at': 0}
 
         def work(say):

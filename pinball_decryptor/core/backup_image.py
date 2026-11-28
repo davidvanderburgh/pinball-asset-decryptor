@@ -111,7 +111,17 @@ def not_a_card(path):
       card image.  A ``.raw``/``.img``/``.bin`` without one is left to the
       run, which says so in its own words: a copy still being written can be
       all zeros at its start.
+    Stern's game code download (a ``.spk.zip``) says what it is and to use the
+    game's SD card image instead (PAD-1644).
     """
+    if path and not is_device_path(path):
+        from ..plugins.stern.spike2_spk import not_a_card_words
+        try:
+            why = not_a_card_words(path, look=True)
+        except Exception:                                # noqa: BLE001
+            why = ""
+        if why:
+            return why
     why = reason(path)
     if why or not path or is_device_path(path):
         return why

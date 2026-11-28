@@ -1700,3 +1700,23 @@ def test_the_one_blocks_example_is_target_rush(tmp_path, preview_on):
         starts = [s["hat"]["shot"] for s in prog["scripts"] if s["hat"].get("kind") == "shot"
                   and s["hat"].get("when") == "idle"]
         assert starts and starts[0]                                        # a start shot of the card's own
+
+
+def test_try_on_chip_names_a_game_code_package(tmp_path):
+    """PAD-1644: a project extracted from Stern's .spk.zip download named the package "the
+    project's own card" (green) and Try it then stopped on "no games partition"."""
+    pkg = tmp_path / "iron_maiden_le-1_18_0.spk.zip"
+    pkg.write_bytes(b"PK\x05\x06" + b"\0" * 18)
+    project = tmp_path / "project"
+    os.makedirs(str(project))
+    with open(str(project / ".extract_source.json"), "w", encoding="utf-8") as f:
+        json.dump({"input_path": str(pkg), "input_name": pkg.name}, f)
+    with web_app(tmp_path, mfr="stern") as w:
+        _project(w, project)
+        w.run(lambda: w.window.emulate_card_var.set(str(pkg)))
+        w.run(_svc(w)._show_emu)
+        w.drain()
+        emu = w.state("modes")["emu"]
+        assert emu["verdict"] == "game code, not an SD card image"
+        assert emu["verdict_kind"] == "err"
+        assert "download this game's SD card image" in emu["verdict_tip"]

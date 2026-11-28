@@ -1454,6 +1454,9 @@ class SternManufacturer(Manufacturer):
         (card_size.size_fixed), which builds each card at its own size."""
         if self._era != "spike2":
             return None
+        why = _spike2_spk.not_a_card_words(original_path)     # PAD-1644
+        if why:
+            return why
         from . import card_size as _cs
         from .pipeline import card_class_words
         want = _cs.requested()

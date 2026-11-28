@@ -35,6 +35,7 @@ from ...plugins.stern import mode_assets as MA
 from ...plugins.stern import mode_project as MP
 from ...plugins.stern import mode_tryit as MT
 from ...plugins.stern import spike3 as S3   # PAD-1269: tell a Spike 3 card apart
+from ...plugins.stern import spike2_spk as SPK2   # PAD-1644: a game code download
 from .. import compat
 from .. import modes_filmcut as FCD
 from ..modes_reading import TitleReadMixin
@@ -5407,6 +5408,9 @@ class ModesTab(JjpModesMixin, SpookyModesMixin, TitleReadMixin, TryItMixin, Game
                 made_for, run = None, None
             if not os.path.isfile(card):
                 out = ("not found", "err", "There is no file at %s." % card)
+            elif SPK2.is_package_name(card):
+                # PAD-1644: Stern's game code download extracts, but no mode runs on it
+                out = ("game code, not an SD card image", "err", SPK2.not_a_card_words(card))
             elif S3.is_spike3_card(card) and self._spike3_no_port(card, run):
                 # PAD-1269/1272: a Spike 3 card (a quick partition-table peek) takes modes
                 # once the app knows how to run them on its game build: until then, the
